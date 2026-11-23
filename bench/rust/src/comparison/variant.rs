@@ -3,7 +3,7 @@
 //! Operation adapters and restorable, verified batch kernels.
 
 #[cfg(feature = "operations")]
-mod operations;
+pub(super) mod operations;
 #[cfg(feature = "rayon")]
 mod parallel;
 
@@ -470,15 +470,16 @@ impl Variant {
                 return None;
             }
         } else if !cfg!(feature = "operations")
-            || !matches!(
-                self.name,
-                "tessera"
-                    | "tessera-full"
-                    | "std-stable"
-                    | "std-unstable"
-                    | "glidesort"
-                    | "radsort"
-            )
+            || !(self.adapter == "native"
+                || matches!(
+                    self.name,
+                    "tessera"
+                        | "tessera-full"
+                        | "std-stable"
+                        | "std-unstable"
+                        | "glidesort"
+                        | "radsort"
+                ))
         {
             return None;
         }

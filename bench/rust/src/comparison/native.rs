@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Native sort entry points, record layouts and runtime dispatch.
+//! Native operation entry points, record layouts and runtime dispatch.
 
+#[cfg(feature = "operations")]
+use super::variant::operations;
 use super::{
     record::{BenchmarkRecord, PreparedRecords, WideRecord},
     variant::{Kernel, Variant},
 };
 use crate::case::Row;
+#[cfg(feature = "operations")]
+use crate::plan::Operation;
 use serde_json::{Value, json};
 use std::{
     ffi::{CStr, c_char, c_void},
@@ -95,9 +99,17 @@ impl NativeImplementation {
 
 /// A native entry point that sorts one complete record buffer.
 type Sort = unsafe extern "C" fn(*mut c_void, usize);
+#[cfg(feature = "operations")]
+type Select = unsafe extern "C" fn(*mut c_void, usize, usize) -> std::ffi::c_int;
+#[cfg(feature = "operations")]
+type Argsort = unsafe extern "C" fn(*const c_void, usize, *mut usize) -> std::ffi::c_int;
 unsafe extern "C" {
     /// Looks up a native implementation and record representation.
     fn bench_kernel(implementation: u32, ty: u32) -> Option<Sort>;
+    #[cfg(feature = "operations")]
+    fn bench_select_kernel(implementation: u32, ty: u32) -> Option<Select>;
+    #[cfg(feature = "operations")]
+    fn bench_argsort_kernel(implementation: u32, ty: u32) -> Option<Argsort>;
     /// Reads a static implementation name, or NULL outside the registry.
     #[cfg(test)]
     fn bench_implementation_name(implementation: u32) -> *const c_char;
@@ -114,6 +126,46 @@ pub(super) fn prepare<T: NativeRecord>(
     input: std::rc::Rc<PreparedRecords<T>>,
 ) -> Option<Box<dyn Kernel>> {
     let implementation = NativeImplementation::from_name(v.name)?;
+    #[cfg(feature = "operations")]
+    match *input.operation() {
+        Operation::SelectNth { index } => {
+            // SAFETY: The registry bounds-checks both indices.
+            let select = unsafe { bench_select_kernel(implementation as u32, T::TYPE as u32) }?;
+            let description = match implementation {
+                NativeImplementation::Vqsort => "hwy::VQSelect with SortAscending",
+                NativeImplementation::X86simdsort => "x86simdsort::qselect",
+                _ => unreachable!("unregistered native selection route"),
+            };
+            assert!(
+                index < input.original().len(),
+                "selection rank out of bounds"
+            );
+            return Some(v.prepare_call(input, description, move |keys| {
+                // SAFETY: NativeRecord binds the key layout. Restored buffers have
+                // the original length and the rank was checked during preparation.
+                let status = unsafe { select(keys.as_mut_ptr().cast(), keys.len(), index) };
+                assert_eq!(status, 0, "{description} failed with a C++ exception");
+            }));
+        }
+        Operation::Argsort {} => {
+            // SAFETY: The registry bounds-checks both indices.
+            let argsort = unsafe { bench_argsort_kernel(implementation as u32, T::TYPE as u32) }?;
+            let description = "x86simdsort::argsort with equal-key index repair";
+            return Some(operations::indices(v, input, description, move |keys| {
+                let mut output = Vec::<usize>::with_capacity(keys.len());
+                // SAFETY: NativeRecord binds the immutable key layout. The separate
+                // Rust allocation has room for one size_t index per key.
+                let status =
+                    unsafe { argsort(keys.as_ptr().cast(), keys.len(), output.as_mut_ptr()) };
+                assert_eq!(status, 0, "{description} failed with a C++ exception");
+                // SAFETY: Success guarantees one initialized index per key.
+                unsafe { output.set_len(keys.len()) };
+                output
+            }));
+        }
+        Operation::PartitionBuckets { .. } => return None,
+        Operation::Sort {} => {}
+    }
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(implementation as u32, T::TYPE as u32) }?;
     Some(
@@ -194,6 +246,43 @@ mod tests {
             assert!(bench_kernel(0, u32::MAX).is_none());
             assert_eq!(bench_layout(u32::MAX, 0), 0);
             assert_eq!(bench_layout(0, 3), 0);
+        }
+        #[cfg(feature = "operations")]
+        // SAFETY: Registry lookups reject indices outside their tables.
+        unsafe {
+            assert!(bench_select_kernel(u32::MAX, 0).is_none());
+            assert!(bench_select_kernel(0, u32::MAX).is_none());
+            assert!(bench_argsort_kernel(u32::MAX, 0).is_none());
+            assert!(bench_argsort_kernel(0, u32::MAX).is_none());
+        }
+    }
+
+    #[cfg(feature = "operations")]
+    #[test]
+    fn x86simdsort_argsort_repairs_all_equal_keys() {
+        use crate::plan::{Execution, InputCase};
+
+        let variant = super::super::list_variants()
+            .into_iter()
+            .find(|variant| variant.name == "x86simdsort")
+            .unwrap();
+        let operation = Operation::Argsort {};
+        assert!(variant.route_stable(&operation));
+        for ty in ["u32", "u64"] {
+            let input = CaseInput::new(&InputCase {
+                ty: ty.into(),
+                distribution: "equal".into(),
+                len: 513,
+                operation: operation.clone(),
+            });
+            let mut kernel = variant.prepare(&input, Execution::Serial, 0).unwrap();
+            assert_eq!(
+                kernel.description(),
+                "x86simdsort::argsort with equal-key index repair"
+            );
+            kernel.restore(1);
+            kernel.run_batch();
+            kernel.check().unwrap();
         }
     }
 

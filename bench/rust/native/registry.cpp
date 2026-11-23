@@ -6,6 +6,10 @@
 #include <tuple>
 
 using Sort = void (*)(void *, size_t);
+// The record column determines the key type. Select takes a valid zero-based
+// rank. Argsort fills len caller-owned indices from len read-only keys.
+using Select = int (*)(void *, size_t, size_t) noexcept;
+using Argsort = int (*)(const void *, size_t, size_t *) noexcept;
 
 struct Layout {
   size_t size;
@@ -100,6 +104,33 @@ template <typename Implementation, typename Record> constexpr Sort kernel = null
 NATIVE_KERNELS(KERNEL)
 #undef KERNEL
 
+template <typename Implementation, typename Record> constexpr Select select_kernel = nullptr;
+template <typename Implementation, typename Record> constexpr Argsort argsort_kernel = nullptr;
+
+#define SELECT_KERNEL(IMPLEMENTATION, RECORD)                                  \
+  extern "C" int bench_##IMPLEMENTATION##_select_##RECORD(                     \
+      void *, size_t, size_t) noexcept;                                        \
+  template <>                                                                  \
+  constexpr Select select_kernel<implementations::IMPLEMENTATION,             \
+                                 records::RECORD> =                            \
+      bench_##IMPLEMENTATION##_select_##RECORD;
+SELECT_KERNEL(vqsort, u32)
+SELECT_KERNEL(vqsort, u64)
+SELECT_KERNEL(x86simdsort, u32)
+SELECT_KERNEL(x86simdsort, u64)
+#undef SELECT_KERNEL
+
+#define ARGSORT_KERNEL(IMPLEMENTATION, RECORD)                                 \
+  extern "C" int bench_##IMPLEMENTATION##_argsort_##RECORD(                    \
+      const void *, size_t, size_t *) noexcept;                                 \
+  template <>                                                                  \
+  constexpr Argsort argsort_kernel<implementations::IMPLEMENTATION,            \
+                                   records::RECORD> =                          \
+      bench_##IMPLEMENTATION##_argsort_##RECORD;
+ARGSORT_KERNEL(x86simdsort, u32)
+ARGSORT_KERNEL(x86simdsort, u64)
+#undef ARGSORT_KERNEL
+
 #define RECORD_TAG(NAME, TYPE, OFFSET) records::NAME{},
 static constexpr auto record_types = std::tuple{NATIVE_RECORDS(RECORD_TAG)};
 #undef RECORD_TAG
@@ -120,6 +151,8 @@ static constexpr auto layouts = std::apply(
 struct RegistryRow {
   const char *name;
   std::array<Sort, layouts.size()> kernels;
+  std::array<Select, layouts.size()> select;
+  std::array<Argsort, layouts.size()> argsort;
 };
 
 template <typename Implementation> constexpr RegistryRow registry_row(Implementation) {
@@ -127,6 +160,16 @@ template <typename Implementation> constexpr RegistryRow registry_row(Implementa
           std::apply(
               [](auto... record) {
                 return std::array{kernel<Implementation, decltype(record)>...};
+              },
+              record_types),
+          std::apply(
+              [](auto... record) {
+                return std::array{select_kernel<Implementation, decltype(record)>...};
+              },
+              record_types),
+          std::apply(
+              [](auto... record) {
+                return std::array{argsort_kernel<Implementation, decltype(record)>...};
               },
               record_types)};
 }
@@ -139,6 +182,18 @@ extern "C" Sort bench_kernel(unsigned implementation, unsigned type) noexcept {
   if (implementation >= registry.size() || type >= layouts.size())
     return nullptr;
   return registry[implementation].kernels[type];
+}
+
+extern "C" Select bench_select_kernel(unsigned implementation, unsigned type) noexcept {
+  if (implementation >= registry.size() || type >= layouts.size())
+    return nullptr;
+  return registry[implementation].select[type];
+}
+
+extern "C" Argsort bench_argsort_kernel(unsigned implementation, unsigned type) noexcept {
+  if (implementation >= registry.size() || type >= layouts.size())
+    return nullptr;
+  return registry[implementation].argsort[type];
 }
 
 extern "C" const char *bench_implementation_name(unsigned implementation) noexcept {

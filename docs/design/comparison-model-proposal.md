@@ -4,11 +4,11 @@ Status: identities, routes and their stability, per-operation publication, a sec
 
 ## Problem
 
-The [implementation comparison](../benchmarks/implementations.md) has a section per tracked operation, each against its own reference with rows named by route, parameter figures, a memory sweep and a composition baseline. Three gaps remain: parallel argsort has no section before Tessera has a parallel entry point, no figure summarizes Tessera across operations, and selection and argsort have no dedicated public opponents yet.
+The [implementation comparison](../benchmarks/implementations.md) has a section per tracked operation, each against its own reference with rows named by route, parameter figures, a memory sweep and a composition baseline. Three gaps remain: parallel argsort has no section before Tessera has a parallel entry point, no figure summarizes Tessera across operations, and the selection and argsort opponents cover only keys and libraries the benchmarks already build.
 
 ## Plan
 
 - **Parallel argsort baseline.** Once Tessera has a parallel argsort entry point, its section shows Tessera's serial argsort as the composition baseline, as the parallel sort figure shows serial Tessera.
 - **Summary.** A summary of Tessera's speed per operation stays deferred: each operation has its own reference, and the figure would have to prevent reading ratios across references as comparable. The home page keeps the sort ranking.
 
-The strongest public implementations for selection and argsort are still to be surveyed. Name them only after their adapters verify. The work follows the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing) and changes no measured algorithm, input or sampling.
+A survey of public implementations found no stable selection outside Tessera, so selection opponents are unstable partial selectors: Highway's `VQSelect` and x86-simd-sort's `qselect` now run on `u32` and `u64` keys, from sources the native build already pins, and x86-simd-sort's `argsort` runs with its ties put in index order. Their float orders differ from Tessera's at signed zeros and NaNs, so they skip `f64`. Further candidates each need a new dependency, which needs the operator's approval first: Polars' stable `arg_sort` and NumPy's stable `argsort` for argsort, and ParlayLib's `counting_sort_inplace`, the only public stable category partition with all offsets found. Name an implementation only after its adapter verifies. The work follows the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing) and changes no measured algorithm, input or sampling.

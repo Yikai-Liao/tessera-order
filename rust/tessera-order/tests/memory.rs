@@ -135,3 +135,21 @@ fn ordered_inputs_do_not_allocate() {
         }
     }
 }
+
+#[test]
+fn wide_serial_partition_avoids_per_bucket_free_cache_allocations() {
+    // 4,096 distinct 12-bit categories trigger a full 4,096-bucket serial block
+    // distribution; with one shared free stack, total heap allocations stay O(1)
+    // rather than scaling with the 4,096 nonempty buckets.
+    let len = 65_536usize;
+    let mut keys: Vec<u64> = (0..len as u64)
+        .map(|id| id.wrapping_mul(0x9e37_79b9_7f4a_7c15) & 0xfff)
+        .collect();
+    let (allocations, net) = measure(|| tessera_order::sort_by_cached_key(&mut keys, |&k| k));
+    assert!(keys.is_sorted());
+    assert_eq!(net, 0);
+    assert!(
+        allocations < 64,
+        "expected O(1) allocations for 4096-bucket serial distribution, got {allocations}"
+    );
+}

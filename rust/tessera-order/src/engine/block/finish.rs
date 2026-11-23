@@ -85,7 +85,8 @@ struct Bucket {
     pending_sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
-    /// The bucket index, which also selects the bucket's free-block cache.
+    /// The bucket index; in parallel completion it also selects the bucket's
+    /// free-block cache, while serial completion shares slot 0.
     cache: usize,
 }
 
@@ -494,24 +495,31 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     completion
 }
 
-/// Finishes serial bands with exclusive metadata and a mutable callback.
-/// The completion guard restores every unfinished band before a panic escapes.
-pub(super) fn complete_serial<'records, T>(
-    partition: &mut Partition<'records, '_, T>,
-    mut visit: Option<Visit<'_, 'records, T>>,
-) -> Vec<usize> {
+/// Builds the serial completion ledger with one shared free-block stack.
+fn build_serial_completion<T>(
+    partition: &mut Partition<'_, '_, T>,
+) -> Completion<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>> {
     assert!(partition.owns_recovery, "partition already completed");
     let input = partition.input;
     let len = partition.input_len;
     // SAFETY: the single guard owns this complete scatter and its scratch.
-    let mut completion = unsafe {
+    unsafe {
         build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
             input,
             len,
             core::slice::from_mut(partition),
             false,
         )
-    };
+    }
+}
+
+/// Finishes serial bands with exclusive metadata and a mutable callback.
+/// The completion guard restores every unfinished band before a panic escapes.
+pub(super) fn complete_serial<'records, T>(
+    partition: &mut Partition<'records, '_, T>,
+    mut visit: Option<Visit<'_, 'records, T>>,
+) -> Vec<usize> {
+    let mut completion = build_serial_completion(partition);
     for bucket in &mut completion.buckets {
         bucket.finish(&completion.storage, visit.as_deref_mut());
     }
@@ -1063,15 +1071,7 @@ mod serial_tests {
         let mut buffers = Buffers::new();
         let mut partition = Partition::new(&mut records, 1 << radix, block_size, &mut buffers);
         let _ = partition.step(|record: &(usize, usize)| record.0);
-        // SAFETY: one serial guard owns this complete scatter and its scratch.
-        let mut completion = unsafe {
-            build_completion::<_, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
-                partition.input,
-                partition.input_len,
-                core::slice::from_mut(&mut partition),
-                false,
-            )
-        };
+        let mut completion = build_serial_completion(&mut partition);
         assert_eq!(completion.storage.free.len(), 1);
         let initial_capacity = completion.storage.free[0].borrow().capacity();
         for bucket in &mut completion.buckets {

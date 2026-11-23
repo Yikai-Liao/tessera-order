@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { withBase } from "vitepress";
+import { getScrollOffset, withBase } from "vitepress";
 import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
 import { computed, onMounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
@@ -26,7 +26,15 @@ watch(
     if (props.view !== "all") return;
     for (const refresh of contentUpdatedCallbacks) refresh();
     const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    if (target) target.scrollIntoView();
+    // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
+    if (target)
+      window.scrollTo(
+        0,
+        scrollY +
+          target.getBoundingClientRect().top -
+          getScrollOffset() +
+          parseInt(getComputedStyle(target).paddingTop, 10),
+      );
   },
   { flush: "post" },
 );
@@ -167,9 +175,9 @@ function provenance(runs: Run[]) {
           </a>
         </div>
         <p class="lead">
-          <strong>How to read the figures.</strong> Each dot is one implementation, and further right
-          is faster. Speed is relative to the reference each figure names, so 2× takes half the time;
-          serial figures compare with the standard library's stable call. Tessera is the blue dot. Every figure lists its values in a table below it.
+          <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,
+          and further right is faster. Speed is relative to the reference the figure names, so 2× takes
+          half the time. Tessera is the blue dot. Every figure lists its values in a table below it.
         </p>
       </template>
       <section v-for="section in sections" :key="section.id" class="operation">
@@ -306,10 +314,6 @@ function provenance(runs: Run[]) {
 }
 .headline-stat .nowrap {
   white-space: nowrap;
-}
-.operation-title,
-.subject {
-  scroll-margin-top: calc(var(--vp-nav-height) + 24px);
 }
 .subject {
   margin: 48px 0 8px;

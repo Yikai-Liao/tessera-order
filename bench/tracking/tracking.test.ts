@@ -872,7 +872,9 @@ test("each operation gets its own section against its own reference", () => {
   // Both unstable selectors stay in the figure, ahead of Tessera's 4×.
   for (const name of ["select_nth_unstable", "qselect"])
     assert.match(selection.figures[0].table, new RegExp(`${name}\\).*\\| unstable \\| 8×`));
-  // The figure ranks every selector; the summary ranks only stable ones, so Glidesort alone is ahead.
+  // The figure ranks every selector: Glidesort and both unstable selectors are ahead of Tessera.
+  assert.match(selection.figures[0].title, /\b4th of 5\b/);
+  // The summary ranks only stable ones, so Glidesort alone is ahead.
   assert.equal(selection.headline?.rank, 2);
   assert.equal(selection.headline?.of, 3);
   assert.equal(selection.headline?.operation, "Stable selection");

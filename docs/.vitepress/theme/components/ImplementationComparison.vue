@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { withBase } from "vitepress";
-import { computed, onMounted, shallowRef, useId } from "vue";
+import { getScrollOffset, withBase } from "vitepress";
+import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
+import { computed, onMounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
 import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
+import { formatBytes, ordinal, times } from "../../../../bench/report/format.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
 
 // `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
@@ -15,6 +17,38 @@ const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: str
 
 const data = shallowRef<ComparisonData | null>(null);
 const error = shallowRef("");
+// The headings appear only after the fetch, so the page's outline and a link's fragment are
+// resolved again once they render. `contentUpdatedCallbacks` is a private VitePress 1.6 export
+// (declared in env.d.ts); after a VitePress upgrade, check that both outlines list these headings.
+watch(
+  data,
+  () => {
+    if (props.view !== "all") return;
+    for (const refresh of contentUpdatedCallbacks) refresh();
+    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
+    if (target)
+      window.scrollTo(
+        0,
+        scrollY +
+          target.getBoundingClientRect().top -
+          getScrollOffset() +
+          parseInt(getComputedStyle(target).paddingTop, 10),
+      );
+  },
+  { flush: "post" },
+);
+
+// Each card names the operation, Tessera's standing and the two numbers behind it.
+const cards = computed(() =>
+  (data.value?.operations ?? []).flatMap(({ id, headline }) => {
+    if (!headline) return [];
+    const { rank, of, noun } = headline;
+    const standing = rank === 1 ? "Fastest" : `Ranked ${ordinal(rank)}`;
+    return [{ id, headline, claim: `${standing} of ${of} stable ${noun}` }];
+  }),
+);
+
 onMounted(async () => {
   let response: Response;
   try {
@@ -117,9 +151,38 @@ function provenance(runs: Run[]) {
       No cross-implementation figure is published yet.
     </p>
     <template v-else>
+      <template v-if="view === 'all'">
+        <h2 v-if="cards.length" id="at-a-glance" class="operation-title" tabindex="-1">At a glance</h2>
+        <div v-if="cards.length" class="headlines">
+          <a v-for="card in cards" :key="card.id" class="headline" :href="`#${card.id}`">
+            <span class="headline-operation">{{ card.headline.operation }}</span>
+            <span class="headline-claim">{{ card.claim }}</span>
+            <span class="headline-stats">
+              <span class="headline-stat">
+                <strong>{{ times(card.headline.speed) }}</strong>
+                <span>speed vs the standard library</span>
+              </span>
+              <span v-if="card.headline.memoryBytes !== null" class="headline-stat">
+                <strong>{{ formatBytes(card.headline.memoryBytes) }}</strong>
+                <span>extra memory<template v-if="card.headline.referenceMemoryBytes !== null"
+                    >, vs
+                    <span class="nowrap">{{
+                      formatBytes(card.headline.referenceMemoryBytes)
+                    }}</span></template
+                  ></span>
+              </span>
+            </span>
+          </a>
+        </div>
+        <p class="lead">
+          <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,
+          and further right is faster. Speed is relative to the reference the figure names, so 2× takes
+          half the time. Tessera is the blue dot. Every figure lists its values in a table below it.
+        </p>
+      </template>
       <section v-for="section in sections" :key="section.id" class="operation">
         <template v-if="view === 'all'">
-          <h2 :id="section.id" class="operation-title">{{ section.label }}</h2>
+          <h2 :id="section.id" class="operation-title" tabindex="-1">{{ section.label }}</h2>
           <p class="provenance">
             {{ section.provenance.text }}
             <a v-if="section.provenance.tessera" :href="section.provenance.tessera!.link">{{
@@ -133,7 +196,7 @@ function provenance(runs: Run[]) {
         </template>
         <section v-for="figure in section.figures" :key="figure.anchor" class="figure">
           <!-- The full page sections each figure under the subject it compares. -->
-          <h3 v-if="view === 'all' && figure.subject" :id="figure.anchor" class="subject">
+          <h3 v-if="view === 'all' && figure.subject" :id="figure.anchor" class="subject" tabindex="-1">
             {{ figure.subject }}
           </h3>
           <p v-if="figure.summary" class="lead">{{ figure.summary }}</p>
@@ -188,6 +251,69 @@ function provenance(runs: Run[]) {
   font-size: 26px;
   line-height: 1.3;
   font-weight: 600;
+}
+.headlines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0 24px;
+}
+@media (max-width: 639px) {
+  .headlines {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.headline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 20px 22px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: border-color 0.2s;
+}
+.headline:hover {
+  border-color: var(--vp-c-brand-1);
+}
+.headline-operation {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.headline-claim {
+  color: var(--vp-c-brand-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.headline-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 12px 0 0;
+}
+.headline-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.headline-stat strong {
+  color: var(--vp-c-brand-1);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.headline-stat span {
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.headline-stat .nowrap {
+  white-space: nowrap;
 }
 .subject {
   margin: 48px 0 8px;

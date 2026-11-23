@@ -180,6 +180,21 @@ const figureSchema = z.object({
   /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
   table: z.string(),
 });
+const comparisonHeadlineSchema = z.object({
+  /** The operation's name without parameters, such as `Stable selection`. */
+  operation: z.string().min(1),
+  /** Tessera's speed relative to the standard library's stable call, in the ranking's case. */
+  speed: positive,
+  /** Tessera's rank among the ranking's stable implementations, and how many there are. */
+  rank: z.number().int().positive(),
+  of: z.number().int().positive(),
+  memoryBytes: z.number().int().nonnegative().nullable(),
+  /** The standard library stable call's extra memory. */
+  referenceMemoryBytes: z.number().int().nonnegative().nullable(),
+  /** The ranking's plural noun, such as `selections`. */
+  noun: z.string().min(1),
+});
+export type ComparisonHeadline = z.infer<typeof comparisonHeadlineSchema>;
 /**
  * Cross-implementation figures from each implementation's latest run, published as
  * `comparison.json`: one section per operation with figures, in catalog order.
@@ -197,6 +212,7 @@ export const comparisonSchema = z.object({
       label: z.string().min(1),
       /** The display label of the implementation every speed in the section divides by. */
       reference: z.string().min(1),
+      headline: comparisonHeadlineSchema.optional(),
       /** The serial run behind each implementation's row. */
       runs: z.array(
         z.object({

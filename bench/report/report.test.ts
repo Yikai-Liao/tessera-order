@@ -402,13 +402,6 @@ test("operation runs regenerate with exact IDs and output-aware memory", async (
       (d.manifest.cases[0] as { operation?: Operation }).operation = undefined;
     },
     (d: ReturnType<typeof operationFixture>) => {
-      // Selection pairs its reference, select_nth_unstable, rather than slice::sort.
-      const c = d.manifest.cases[0];
-      c.columns = c.columns.filter((id) => id !== "std-unstable/serial");
-      delete c.routes["std-unstable/serial"];
-      c.omitted.push({ column: "std-unstable/serial", reason: "unsupported" });
-    },
-    (d: ReturnType<typeof operationFixture>) => {
       d.manifest.cases[0].operation = { kind: "argsort" };
     },
     (d: ReturnType<typeof operationFixture>) => {
@@ -424,6 +417,22 @@ test("operation runs regenerate with exact IDs and output-aware memory", async (
     mutation(dataset);
     assert.throws(() => validateRun(dataset));
   }
+  // Selection's reference is the stable full sort; select_nth_unstable is an optional competitor.
+  const omit = (column: string) => {
+    const d = operationFixture({ kind: "select_nth", index: 99 });
+    const c = d.manifest.cases[0];
+    c.columns = c.columns.filter((id) => id !== column);
+    delete c.routes[column];
+    c.omitted.push({ column, reason: "unsupported" });
+    const slots = [...c.columns, "tessera-aa"];
+    d.samples = d.samples
+      .filter((s) => s.column !== column)
+      .map((s) => ({ ...s, slot: slots.indexOf(s.column) }));
+    d.memory = d.memory.filter((m) => m.column !== column);
+    return d;
+  };
+  validateRun(omit("std-unstable/serial"));
+  assert.throws(() => validateRun(omit("std-stable/serial")), /invalid case columns/);
 });
 
 test("every case retains each measured column's route", () => {

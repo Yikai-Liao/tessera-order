@@ -153,7 +153,7 @@ test("each operation names the reference its speeds divide by", () => {
   // A reference whose label names only its sort also names the call it makes.
   assert.equal(
     referenceLabel({ kind: "select_nth", index: 0 }, "serial"),
-    "slice::sort_unstable · select_nth_unstable",
+    "slice::sort · full sort",
   );
   assert.equal(referenceLabel(SORT, "serial"), "slice::sort");
   assert.equal(referenceColumn({ kind: "argsort" }, "t4"), undefined);

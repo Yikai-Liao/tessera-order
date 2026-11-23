@@ -18,7 +18,6 @@ import {
   referenceLabel,
   route,
   SORT,
-  stableReference,
 } from "../catalog.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
 import type { NameCell } from "../plot/layout.ts";
@@ -139,7 +138,6 @@ function terms(operation: Operation) {
   return {
     reference,
     referenceLabel: referenceLabel(operation, "serial")!,
-    stableReference: stableReference(operation),
     description: operationParts(operation).entry.description,
     one,
     many: operationNoun(operation, 2),
@@ -300,8 +298,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   const contenders = records ? stable : competitors;
   const rank = 1 + contenders.filter(faster).length;
   const input = `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)}`;
-  // The summary compares Tessera with the standard library's stable call for the same result.
-  const base = complete.find((e) => e.name === t.stableReference);
+  const base = complete.find((e) => e.name === t.reference);
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
     marks: [{ value: e.speeds[at], tone: e.tone }],

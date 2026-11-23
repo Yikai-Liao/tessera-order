@@ -795,11 +795,7 @@ test("each operation gets its own section against its own reference", () => {
     [
       ["sort", "Full sort", "slice::sort"],
       ["argsort", "Stable argsort", "slice::sort · sort_by on indices"],
-      [
-        "select_nth",
-        "Stable selection · rank 32,768",
-        "slice::sort_unstable · select_nth_unstable",
-      ],
+      ["select_nth", "Stable selection · rank 32,768", "slice::sort · full sort"],
     ],
   );
   const section = (id: string) => data.operations.find((entry) => entry.id === id)!;
@@ -829,8 +825,8 @@ test("each operation gets its own section against its own reference", () => {
   const ranking = section("select_nth").figures[0];
   assert.equal(ranking.title, "Fastest of 3 selections");
   const rows = (ranking.chart as RowChart).groups.flatMap((group) => group.rows);
-  // Speeds divide by the selection reference: 20 ns over Tessera's 10 ns.
-  assert.deepEqual(rows.find((row) => row.strong)!.cells[0], "2×");
+  // Speeds divide by the stable full sort: 40 ns over Tessera's 10 ns.
+  assert.deepEqual(rows.find((row) => row.strong)!.cells[0], "4×");
   // Stable implementations group before unstable ones.
   assert.deepEqual(
     rows.map((row) => row.name.sub),
@@ -871,9 +867,8 @@ test("each operation gets its own section against its own reference", () => {
   assert.equal(selection.figures[0].title, "Ranked 3rd of 4 selections");
   assert.equal(selection.headline?.rank, 1);
   assert.equal(selection.headline?.of, 2);
-  // The summary divides by the standard library's stable call, not the unstable reference.
   assert.equal(selection.headline?.operation, "Stable selection");
-  // Tessera at 0.5× and slice::sort's full sort at 0.125× of select_nth_unstable.
+  // The summary shares the section's reference: 40 ns over Tessera's 10 ns.
   assert.ok(Math.abs(selection.headline!.speed - 4) < 1e-9);
 });
 
@@ -903,19 +898,19 @@ test("parameter figures compare matching inputs against the operation's referenc
     [largeBuckets]: 15,
     [smallBuckets]: 10,
   });
-  const stable = tracked({ [middle]: 40, [smallBuckets]: 30, [largeBuckets]: 30 });
-  const unstable = tracked({
+  const reference = tracked({
     [middle]: 20,
     [first]: 20,
     [largerFirst]: 20,
     [largerMiddle]: 10,
     [unmatched]: 20,
+    [smallBuckets]: 30,
+    [largeBuckets]: 30,
   });
   const data = comparisonData(
     new Map([
       ["tessera", [tessera]],
-      ["std-stable", [stable]],
-      ["std-unstable", [unstable]],
+      ["std-stable", [reference]],
     ]),
   );
   const axis = (operation: string, parameter: string) => {
@@ -931,7 +926,7 @@ test("parameter figures compare matching inputs against the operation's referenc
   };
   const ranks = axis("select_nth", "index");
   assert.equal(ranks.subject, "Speed by rank");
-  assert.match(ranks.table, /Tessera speed vs slice::sort_unstable · select_nth_unstable/);
+  assert.match(ranks.table, /Tessera speed vs slice::sort · full sort/);
   assert.deepEqual(
     (ranks.chart as RowChart).groups.map((group) => [
       group.title,
@@ -968,7 +963,7 @@ test("parameter figures compare matching inputs against the operation's referenc
   const single = comparisonData(
     new Map([
       ["tessera", [tessera]],
-      ["std-unstable", [tracked({ [middle]: 20, [unmatched]: 20 })]],
+      ["std-stable", [tracked({ [middle]: 20, [unmatched]: 20 })]],
     ]),
   );
   assert.equal(single.operations[0].id, "select_nth");

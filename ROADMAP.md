@@ -27,8 +27,6 @@ Cached-key distribution on block-sized inputs still builds per-bucket ends and i
 
 Close the [short insertion leaf losses](docs/design/evidence.md#short-insertion-leaves): tiny random keys still trail the standard stable sort, and nearly sorted inputs just above the width-based limit lost to the previous engine under the current small-slice probe swap budget. Evaluate a single-guard hole-shift insertion loop and a small-slice probe-budget floor. Done when those cases match or beat the previous engine and the standard stable sort, without returning random 48-record inputs to insertion.
 
-Close direct SIMD scan gaps in `portable_simd.rs`: delegate `usize`/`isize` `SimdKey` scans to their fixed-width integer counterparts and combine vector comparison masks per block before bitmask extraction (comparing floats in signed integer lanes was [rejected](docs/design/evidence.md#rejected-or-on-hold)). Done when `usize`/`isize` match fixed-width scans, targeted ordered direct scans show measurable improvement (dropping any neutral sub-change), random and short controls stay neutral, and `Reverse<K>` and exact float bit order remain preserved.
-
 Resolve short-input placement sensitivity for [shared order confirmation](docs/design/evidence.md#shared-order-confirmation-for-serial-operations) before claiming a gain across input sizes.
 
 Next capabilities follow the [engine capability design](docs/design/operation-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:

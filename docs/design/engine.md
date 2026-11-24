@@ -146,7 +146,7 @@ Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `
 | Primitive direct keys, ascending confirmation | The same vector scan, dispatched once after checking the encoded predecessor |
 | `Reverse<K>` direct keys | The scan of `K`, with the pair sides exchanged |
 
-Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time.
+Slices shorter than 64 records, 128-bit keys and tuple keys scan one pair at a time; pointer-sized keys (`usize`, `isize`) delegate to their fixed-width integer counterpart.
 
 Order confirmation (`confirm_order`) lets its first three keys establish a direction or rule out both; if they tie, the last key selects the direction to check, and equal endpoints require every intervening key to match. Its scalar ascending continuation extracts four successive keys and combines their comparisons before deciding whether to continue, so independent comparisons overlap; an inversion may evaluate the rest of its group. The short tail checks one pair at a time, and the descending continuation also records whether any adjacent pair ties. Each direct key type supplies its lane count and an encoded-order pair mask; one scan owns block traversal, mask aggregation and the scalar tail. Integer comparison and float encoding use explicit `fearless_simd` operations rather than autovectorization. `Reverse<K>` keeps the lane count of `K` by swapping transparent shared views, also for nested `Reverse`.
 

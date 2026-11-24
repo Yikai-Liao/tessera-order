@@ -37,11 +37,11 @@ cargo +nightly miri test -p tessera-order --lib --features rayon block::
 
 Run `bun run docs:test` when simulation models, the `trace` hooks or the block partition change, and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
 
-Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance choices, include paired evidence with A/A ranges and investigate results outside the controls under the protocol below.
+Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance changes, follow the acceptance below.
 
 ## Performance changes
 
-Use the maintained benchmark CLI and its [protocol](docs/development/benchmarking.md#command-capabilities), which defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare implementations. Report measured coverage, environment, control ranges and a results link, and investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
+A pull request's performance acceptance is its hosted `Benchmarks (rust)` verdict, which pairs the head with an exact baseline ([reading feedback](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr)). Investigate every alert; a slowdown alert is fixed or listed as an accepted loss with its reason. Local measurements are optional for acceptance. Process-level screens and continuous alerts do not isolate source changes from code placement, so a conclusion recorded in [engine evidence](docs/design/evidence.md) or a tuned constant that credits the source change needs the [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls); report its coverage, environment, control ranges and results link with the conclusion.
 
 When a measured choice keeps a separate copy of engine code, for example to preserve serial inlining contexts, its comment names the evidence, tests constrain the invariants both copies share, and the roadmap states what evidence would allow merging them.
 

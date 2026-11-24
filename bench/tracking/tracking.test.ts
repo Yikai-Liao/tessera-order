@@ -1257,7 +1257,7 @@ test("publication requires sweeps and preserves the sort figure alongside other 
     Object.keys(fallback).filter((kind) => fallback[kind]),
     ["argsort"],
   );
-  assert.equal(fallback.argsort!.title, "Grows as n^0.00, to 999 B at 64K records");
+  assert.equal(fallback.argsort!.title, "Constant, 999 B at 64K records");
   assert.throws(() => growthSchema.parse({ ...provenance, sweeps: [sweeps[0], sweeps[0]] }));
   assert.throws(() =>
     growthSchema.parse({ ...provenance, sweeps: [{ ...sweeps[0], peaks: { tessera: [0] } }] }),
@@ -1268,6 +1268,20 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   assert.equal(figure.kind, "curves");
   assert.equal(figure.subject, "Extra memory by input length");
   assert.equal(figure.title, "Grows as √n, to 8 MB at 16M records");
+  // Each line's end label names its last step's growth; the corner key draws the slopes.
+  const curves = (figure.chart as CurveChart).curves;
+  assert.deepEqual(
+    curves.map((curve) => [curve.name, curve.growth]),
+    [
+      ["Tessera", "∝ √n"],
+      ["slice::sort", "∝ n"],
+      ["rdst", "∝ n"],
+    ],
+  );
+  assert.deepEqual(
+    (figure.chart as CurveChart).references.map((reference) => reference.label),
+    ["constant", "∝ √n", "∝ n"],
+  );
   assert.match(figure.chart.guide, /Tessera at aaaaaaa/);
   assert.match(JSON.stringify(figure.chart), /Below 1 kB at every length: crumsort \(0 B\)/);
   // A plotted implementation's catalog memory note explains its curve.

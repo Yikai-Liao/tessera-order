@@ -50,7 +50,7 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 |---|---|---|
 | How do implementations rank? | Named rows | One dot per implementation on a shared ratio axis |
 | Where is Tessera among competitors? | Grouped rows with a field of marks | Competitor dots, Tessera emphasized, value and rank columns |
-| How does extra memory grow with the input? | Curves on log–log axes | One line per sort over input length; Tessera heavy with its points, the others thin context lines; a dotted √n slope through Tessera's last point |
+| How does extra memory grow with the input? | Curves on log–log axes | One line per sort over input length; Tessera heavy with its points, the others thin context lines; each end label names the growth order of the line's last step, and a slope key in the empty corner draws those orders |
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |
 | What changed during a PR or on main? | Trend matrix | One time series per case and build, reference at the baseline or first run |
 | How do selected cases compare over time? | Case comparison | Up to four cases on one log-time or relative-change axis with intervals; independent commit-slot or UTC-time spacing; identity colours that are neither blue nor orange |

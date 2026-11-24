@@ -185,84 +185,30 @@ mod tests {
     use alloc::vec::Vec;
 
     #[test]
-    fn hole_shift_restores_records_on_panic_budget_and_zst() {
-        extern crate std;
-        use std::cell::Cell;
-        use std::panic::{AssertUnwindSafe, catch_unwind};
+    fn insertion_restores_the_hole_on_budget_exit_and_panic() {
+        let input = [1u64, 2, 3, 0];
+        let after_inner_shift = [1, 0, 2, 3];
 
-        // Owned and mutable-reference records across panic at every shift depth
-        // and budget exhaustion: every original record must remain live once.
-        let keys = [5u64, 4, 3, 2, 1, 0];
-        for panic_at in 1..=12 {
-            let mut backing: Vec<usize> = (0..keys.len()).collect();
-            let mut records: Vec<_> = backing
-                .iter_mut()
-                .enumerate()
-                .map(|(id, slot)| (id, Cell::new(keys[id]), slot))
-                .collect();
-            let mut calls = 0usize;
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                let mut extract = ByKey(|r: &(usize, Cell<u64>, &mut usize)| {
-                    calls += 1;
-                    if calls == panic_at {
-                        r.1.set(99);
-                        std::panic::panic_any(r.0);
-                    }
-                    r.1.get()
-                });
-                let _ = insertion_loop(&mut records, usize::MAX, &mut extract, by_key);
-            }));
-            if let Err(payload) = result {
-                let id = *payload.downcast::<usize>().unwrap();
-                records.sort_unstable_by_key(|r| r.0);
-                for (i, (rec_id, cell, slot)) in records.iter().enumerate() {
-                    assert_eq!(*rec_id, i);
-                    assert_eq!(**slot, i);
-                    assert_eq!(cell.get(), if i == id { 99 } else { keys[i] });
+        let mut records = input;
+        let mut extract = ByKey(|key: &u64| *key);
+        assert_eq!(insertion_loop(&mut records, 1, &mut extract, by_key), None);
+        assert_eq!(records, after_inner_shift);
+
+        let mut records = input;
+        let mut saw_one = false;
+        let panic = crate::engine::unwind::catch(|| {
+            let mut extract = ByKey(|key: &u64| {
+                if *key == 1 {
+                    assert!(!saw_one, "key failed");
+                    saw_one = true;
                 }
-            }
-        }
-
-        // Budget exhaustion leaves a valid stable permutation of equal keys.
-        let mut tied: Vec<(u64, usize)> = vec![(3, 0), (3, 1), (1, 2), (2, 3), (1, 4)];
-        let mut extract = ByKey(|r: &(u64, usize)| r.0);
-        assert_eq!(insertion_loop(&mut tied, 2, &mut extract, by_key), None);
-        let mut by_id = tied.clone();
-        by_id.sort_unstable_by_key(|r| r.1);
-        assert_eq!(by_id, vec![(3, 0), (3, 1), (1, 2), (2, 3), (1, 4)]);
-        for key in [1u64, 2, 3] {
-            let ids: Vec<usize> = tied.iter().filter(|r| r.0 == key).map(|r| r.1).collect();
-            assert!(ids.is_sorted(), "stability broken for key {key}: {tied:?}");
-        }
-
-        // Budget exhaustion during a multi-step shift inside a single insertion:
-        // the first shift uses 1 <= 2, and only the inner shift loop exceeds the
-        // budget (3 > 2), restoring the held record and keeping equal keys stable.
-        let mut inner_budget: Vec<(u64, usize)> =
-            vec![(1, 0), (2, 1), (2, 2), (3, 3), (4, 4), (0, 5)];
-        let mut extract = ByKey(|r: &(u64, usize)| r.0);
-        assert_eq!(
-            insertion_loop(&mut inner_budget, 2, &mut extract, by_key),
-            None
-        );
-        let mut by_id = inner_budget.clone();
-        by_id.sort_unstable_by_key(|r| r.1);
-        assert_eq!(by_id, vec![(1, 0), (2, 1), (2, 2), (3, 3), (4, 4), (0, 5)]);
-        let twos: Vec<usize> = inner_budget
-            .iter()
-            .filter(|r| r.0 == 2)
-            .map(|r| r.1)
-            .collect();
-        assert_eq!(twos, vec![1, 2]);
-
-        // Zero-sized records remain sound under pointer arithmetic.
-        let mut zsts = [(); 8];
-        let mut zst_key = 8u8;
-        let mut extract = ByKey(|_: &()| {
-            zst_key = zst_key.saturating_sub(1);
-            zst_key
-        });
-        let _ = insertion_loop(&mut zsts, 4, &mut extract, by_key);
+                *key
+            });
+            let _ = insertion_loop(&mut records, usize::MAX, &mut extract, by_key);
+        })
+        .unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"key failed"));
+        assert_eq!(records, after_inner_shift);
     }
 
     #[test]

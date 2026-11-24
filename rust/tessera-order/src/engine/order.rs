@@ -56,6 +56,25 @@ pub(crate) fn scan_varying_bits<T, E: Extract<T>>(
     (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
+/// Holds a moved-out record while insertion shifts predecessors right,
+/// restoring it to the vacated slot on normal completion, budget exit or unwind.
+struct Hole<T> {
+    value: core::mem::ManuallyDrop<T>,
+    dest: *mut T,
+}
+
+impl<T> Drop for Hole<T> {
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: `dest` is the single vacated slot in the active slice and
+        // `value` holds the moved-out record that restores ownership.
+        unsafe {
+            self.dest
+                .write(core::mem::ManuallyDrop::take(&mut self.value))
+        };
+    }
+}
+
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
@@ -75,25 +94,47 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
     let mut start = 0;
     while let Some(offset) = first_inversion(&records[start..], extractor) {
         let index = start + offset + 1;
-        let (prefix, tail) = records.split_at_mut(index);
-        let (mut current, prefix) = prefix.split_last_mut().unwrap();
-        // The scan already compared this pair, so swap without re-reading keys.
-        core::mem::swap(current, &mut tail[0]);
+        // The scanner is safe code; enforce the pair bound the moves below rely on.
+        assert!(
+            index < records.len(),
+            "inversion scanner returned an unpaired offset"
+        );
+        let base = records.as_mut_ptr();
+        // SAFETY: the assertion gives `0 < index < records.len()`.
+        // Lifting `index` and moving `index - 1` into `index` leaves `index - 1` as
+        // the sole vacated slot, which `Hole::drop` restores on any exit or unwind.
+        let mut hole = unsafe {
+            let dest = base.add(index - 1);
+            let value = core::mem::ManuallyDrop::new(base.add(index).read());
+            core::ptr::copy_nonoverlapping(dest, base.add(index), 1);
+            Hole { value, dest }
+        };
         swaps += 1;
         if swaps > budget {
             return None;
         }
-        for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= extractor.key(current) {
+        while hole.dest > base {
+            // SAFETY: `hole.dest > base` and stays within `records`, so `prev` is an
+            // initialized slot distinct from `hole.dest`; the borrow ends before writes.
+            let (prev, prev_key) = unsafe {
+                let prev = hole.dest.sub(1);
+                (prev, extractor.key(&*prev))
+            };
+            if prev_key <= extractor.key(&hole.value) {
                 break;
             }
-            core::mem::swap(before, current);
-            current = before;
+            // SAFETY: `prev` is initialized and `hole.dest` (`prev + 1`) is the sole
+            // vacated slot; updating `hole.dest` restores the drop invariant immediately.
+            unsafe {
+                core::ptr::copy_nonoverlapping(prev, hole.dest, 1);
+                hole.dest = prev;
+            }
             swaps += 1;
             if swaps > budget {
                 return None;
             }
         }
+        drop(hole);
         start = index;
     }
     Some(swaps)
@@ -147,6 +188,33 @@ mod tests {
     use super::*;
     use crate::engine::key::ByKey;
     use alloc::vec::Vec;
+
+    #[test]
+    fn insertion_restores_the_hole_on_budget_exit_and_panic() {
+        let input = [1u64, 2, 3, 0];
+        let after_inner_shift = [1, 0, 2, 3];
+
+        let mut records = input;
+        let mut extract = ByKey(|key: &u64| *key);
+        assert_eq!(insertion_loop(&mut records, 1, &mut extract, by_key), None);
+        assert_eq!(records, after_inner_shift);
+
+        let mut records = input;
+        let mut saw_one = false;
+        let panic = crate::engine::unwind::catch(|| {
+            let mut extract = ByKey(|key: &u64| {
+                if *key == 1 {
+                    assert!(!saw_one, "key failed");
+                    saw_one = true;
+                }
+                *key
+            });
+            let _ = insertion_loop(&mut records, usize::MAX, &mut extract, by_key);
+        })
+        .unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"key failed"));
+        assert_eq!(records, after_inner_shift);
+    }
 
     #[test]
     fn confirmation_checks_group_boundaries_and_preserves_key_order() {

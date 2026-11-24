@@ -156,15 +156,13 @@ unsafe impl<T: Send, Owner: Sync, Free: Sync> Sync for Storage<T, Owner, Free> {
 impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, Owner, Free> {
     /// Finds a free candidate in the local cache, reserve, or another bucket.
     fn take_free(&self, current: usize, local: &mut Vec<usize>) -> usize {
-        if !Free::BUCKET_LOCAL_CACHES {
-            return local
-                .pop()
-                .expect("serial completion exhausted its free reserve");
-        }
         if let Some(physical) = local.pop() {
             return physical;
         }
+        // Serial completion shares this path instead of returning early: an early
+        // `expect` changed the inlined transfer loop and slowed block-partitioned sorts.
         let buckets = self.free.len() - 1;
+        assert!(buckets > 0, "serial completion exhausted its free reserve");
         loop {
             if let Some(physical) = lock(&self.free[buckets]).pop() {
                 return physical;
@@ -355,11 +353,7 @@ impl Bucket {
         // waits for one of those blocks, at most g + 1 are final: with at least
         // two shards, the shared reserve still covers outstanding candidates.
         let mut offset = 0;
-        let free_slot = if Free::BUCKET_LOCAL_CACHES {
-            self.cache
-        } else {
-            0
-        };
+        let free_slot = self.cache.min(storage.free.len() - 1);
         for logical in self.pending_sources.clone() {
             let mut free = lock(&storage.free[free_slot]);
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
@@ -587,6 +581,40 @@ unsafe fn complete_with_fault<'records, T: Send>(
         completion.buckets.iter_mut().for_each(run);
     }
     core::mem::take(&mut completion.ends)
+}
+
+#[cfg(test)]
+mod serial_tests {
+    use super::*;
+    use core::cell::RefCell;
+
+    #[test]
+    fn serial_movement_preserves_free_stack_capacity() {
+        let mut records = [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)];
+        let mut buffers = Buffers::new();
+        let mut partition = Partition::new(&mut records, 2, 4, &mut buffers);
+        let _ = partition.step(|record: &(usize, usize)| record.0);
+        // SAFETY: the scattered partition covers its full input and outlives its ledger.
+        let mut completion = unsafe {
+            build_completion::<_, RefCell<usize>, RefCell<Vec<usize>>>(
+                partition.input,
+                partition.input_len,
+                core::slice::from_mut(&mut partition),
+            )
+        };
+        let free = &completion.storage.free[0];
+        let initial_capacity = free.borrow().capacity();
+        for bucket in &mut completion.buckets {
+            bucket.finish(
+                &completion.storage,
+                None::<fn(usize, Range<usize>, &mut [_])>,
+            );
+        }
+        assert_eq!(free.borrow().capacity(), initial_capacity);
+        drop(completion);
+        drop(partition);
+        assert_eq!(records, [(0, 1), (0, 3), (1, 0), (1, 2), (1, 4)]);
+    }
 }
 
 #[cfg(all(test, feature = "rayon"))]

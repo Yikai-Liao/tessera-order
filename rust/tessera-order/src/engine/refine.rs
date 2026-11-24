@@ -259,26 +259,46 @@ fn prepare_slice<const INSERTION_PROBE: bool, T, E: Extract<T>>(
     tile_len: usize,
 ) -> Option<u128> {
     let sampled = probe_order(records, extractor);
-    if finish_ordered(records, sampled, extractor) {
-        return None;
-    }
     if INSERTION_PROBE
         && sampled == Order::Unsorted
         && insertion_probe::<_, _>(records, extractor, tile_len)
     {
         return None;
     }
+    match resolve_varying(records, sampled, candidate, extractor) {
+        Ok(varying) => Some(varying),
+        Err(order) => {
+            finish_ordered(records, order, extractor);
+            None
+        }
+    }
+}
+
+/// Resolves a probed order and candidate-masked variation scan into either
+/// nonzero varying bits (`Ok`) or a confirmed `Ascending`/`Descending` order
+/// (`Err`). Owns the flat-sample confirmation rule shared by in-place
+/// preparation and read-only parallel argsort.
+#[inline(always)]
+fn resolve_varying<T, E: Extract<T>>(
+    records: &[T],
+    sampled: Order,
+    candidate: u128,
+    extractor: &mut E,
+) -> Result<u128, Order> {
+    if matches!(sampled, Order::Ascending | Order::Descending { .. }) {
+        return Err(sampled);
+    }
     let varying = scan_varying_bits(records, candidate, extractor);
     if varying == 0 {
-        return None;
+        return Err(Order::Ascending);
     }
     if sampled == Order::Flat {
         let order = confirm_order(records, extractor);
-        if finish_ordered(records, order, extractor) {
-            return None;
+        if matches!(order, Order::Ascending | Order::Descending { .. }) {
+            return Err(order);
         }
     }
-    Some(varying)
+    Ok(varying)
 }
 
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
@@ -337,20 +357,14 @@ enum Order {
 }
 
 /// Finishes a confirmed order without changing the order of equal-key records.
-/// Sampled flat and unordered inputs still need preparation or partitioning.
 #[inline]
-fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: &mut E) -> bool {
-    match order {
-        Order::Ascending => true,
-        Order::Descending { strict } => {
-            if strict {
-                reverse_strictly(records);
-            } else {
-                reverse_stably(records, extractor);
-            }
-            true
+fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: &mut E) {
+    if let Order::Descending { strict } = order {
+        if strict {
+            reverse_strictly(records);
+        } else {
+            reverse_stably(records, extractor);
         }
-        Order::Flat | Order::Unsorted => false,
     }
 }
 

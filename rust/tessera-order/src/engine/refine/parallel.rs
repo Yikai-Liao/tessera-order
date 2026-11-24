@@ -3,6 +3,8 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
+use crate::engine::key::{ByKey, RadixKey};
+use rayon::prelude::*;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
@@ -30,6 +32,102 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(records: &mut [
 }
 
 struct ParallelRoot;
+
+/// Packs key prefixes into spare index bits, sorts through the parallel root,
+/// then unmasks indices and refines remaining prefix ties in parallel.
+pub(crate) fn argsort<T: Sync, K: RadixKey>(
+    values: &[T],
+    key: impl Fn(&T) -> K + Sync,
+) -> Vec<usize> {
+    let tile_len = tile_capacity::<usize>(TILE_BYTES);
+    let len = values.len();
+    assert!(len <= isize::MAX as usize / size_of::<usize>());
+    let bytes = len.saturating_mul(size_of::<T>().max(size_of::<usize>()));
+    if len < 4 * tile_len || bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
+        return super::argsort(values, key);
+    }
+    let indexed = ByKey(|i: &usize| key(&values[*i]));
+    let mut extract = ByKey(&key);
+    let sampled = probe_order(values, &mut extract);
+    let varying = match resolve_varying(values, sampled, K::VARYING_MASK, &mut extract) {
+        Ok(varying) => varying,
+        Err(order) => {
+            let mut out: Vec<usize> = (0..len).into_par_iter().collect();
+            finish_ordered(&mut out, order, &mut indexed.clone());
+            return out;
+        }
+    };
+    let index_bits = bit_len((len - 1) as u128);
+    // `len <= isize::MAX / size_of::<usize>()` leaves at least two spare bits.
+    let spare_bits = usize::BITS as usize - index_bits;
+    let index_mask = usize::MAX >> spare_bits;
+    let high = bit_len(varying);
+    let prefix_bits = (high - varying.trailing_zeros() as usize).min(spare_bits);
+    let prefix_shift = high - prefix_bits;
+    let prefix_mask = (1usize << prefix_bits) - 1;
+    let remaining = varying & ((1u128 << prefix_shift) - 1);
+    let mut words: Vec<usize> = values
+        .par_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            (((key(r).encode().to_u128() >> prefix_shift) as usize & prefix_mask) << index_bits) | i
+        })
+        .collect();
+    Sorter {
+        scratch: &mut Workspace::new(),
+        extractor: &mut ByKey(move |word: &usize| *word >> index_bits),
+        tile_len,
+    }
+    .sort_root(&mut words, varying >> prefix_shift, Requirement::All);
+    if remaining == 0 {
+        words.par_iter_mut().for_each(|word| *word &= index_mask);
+        return words;
+    }
+    let chunk = len.div_ceil(rayon::current_num_threads()).max(1);
+    let (mut bands, mut huge) = (Vec::new(), Vec::new());
+    let mut rest = words.as_mut_slice();
+    while rest.len() > chunk {
+        let prefix = rest[chunk - 1] >> index_bits;
+        let end = chunk + rest[chunk..].partition_point(|w| *w >> index_bits == prefix);
+        let start = rest[..chunk].partition_point(|w| *w >> index_bits < prefix);
+        let (head, tail) = rest.split_at_mut(end);
+        let (before, tie) = head.split_at_mut(if end - start >= chunk { start } else { end });
+        bands.push(before);
+        if !tie.is_empty() {
+            huge.push(tie);
+        }
+        rest = tail;
+    }
+    bands.push(rest);
+    bands.into_par_iter().for_each(|band| {
+        let (mut scratch, mut extract) = (Workspace::new(), indexed.clone());
+        let mut sorter = Sorter {
+            scratch: &mut scratch,
+            extractor: &mut extract,
+            tile_len,
+        };
+        for ties in band.chunk_by_mut(|a, b| (*a >> index_bits) == (*b >> index_bits)) {
+            ties.iter_mut().for_each(|w| *w &= index_mask);
+            if ties.len() > 1 {
+                sorter.sort_child(ties, remaining, Requirement::All);
+            }
+        }
+    });
+    let (mut scratch, mut extract) = (Workspace::new(), indexed);
+    for ties in huge {
+        ties.par_iter_mut().for_each(|w| *w &= index_mask);
+        let sub = scan_varying_bits(ties, remaining, &mut extract);
+        if sub != 0 {
+            Sorter {
+                scratch: &mut scratch,
+                extractor: &mut extract,
+                tile_len,
+            }
+            .sort_root(ties, sub, Requirement::All);
+        }
+    }
+    words
+}
 
 impl<T: Send, E: Extract<T> + Clone + Send + Sync> RefineRoot<T, E> for ParallelRoot {
     fn refine(self, sorter: &mut Sorter<'_, T, E>, records: &mut [T], varying: u128) {

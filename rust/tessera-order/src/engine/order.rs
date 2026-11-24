@@ -94,8 +94,13 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
     let mut start = 0;
     while let Some(offset) = first_inversion(&records[start..], extractor) {
         let index = start + offset + 1;
+        // The scanner is safe code; enforce the pair bound the moves below rely on.
+        assert!(
+            index < records.len(),
+            "inversion scanner returned an unpaired offset"
+        );
         let base = records.as_mut_ptr();
-        // SAFETY: `offset < records[start..].len() - 1`, so `0 < index < records.len()`.
+        // SAFETY: the assertion gives `0 < index < records.len()`.
         // Lifting `index` and moving `index - 1` into `index` leaves `index - 1` as
         // the sole vacated slot, which `Hole::drop` restores on any exit or unwind.
         let mut hole = unsafe {

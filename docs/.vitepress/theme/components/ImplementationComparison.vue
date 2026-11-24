@@ -439,6 +439,14 @@ function provenance(runs: Run[]) {
   fill: var(--selection-ink);
   transition: fill 0.15s ease;
 }
+.figure :deep(.selection-description) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .selection-bar {
   position: fixed;
   left: 50%;

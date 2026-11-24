@@ -216,8 +216,8 @@ export function trackingCohort(field: Field): Cohort | null {
 export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
   const run = (name: string, t: number) =>
     runs.get(columnId({ implementation: name, execution: `t${t}` }));
-  const counts = [...runs.keys()]
-    .map(parseColumnId)
+  const columns = [...runs.keys()].map(parseColumnId);
+  const counts = columns
     .filter((column) => column.implementation === "tessera")
     .map((column) => executionThreads(column.execution))
     .filter((t): t is number => t !== undefined && run(PARALLEL_REFERENCE, t) !== undefined)
@@ -234,7 +234,10 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   );
   if (!found) return null;
   const [n, inputs] = found;
-  const serial = runs.get(columnId({ implementation: "tessera-full", execution: "serial" }));
+  const compositionColumn = columns.find(
+    (column) => column.execution === "serial" && isComposition(column.implementation),
+  );
+  const serial = compositionColumn && runs.get(columnId(compositionColumn));
   const composition = inputs.map((id) => {
     const ns = timed(serial, id, "serial")?.[0];
     return ns === undefined ? null : time(PARALLEL_REFERENCE, 1, id)! / ns;
@@ -249,8 +252,14 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
     threads: counts,
     referenceId: PARALLEL_REFERENCE,
     tessera: hashes,
-    ...(serial && composition.every((speed) => speed !== null)
-      ? { composition: { hash: serial.hash.slice(0, 7), speeds: composition } }
+    ...(compositionColumn && serial && composition.every((speed) => speed !== null)
+      ? {
+          composition: {
+            implementation: compositionColumn.implementation,
+            hash: serial.hash.slice(0, 7),
+            speeds: composition,
+          },
+        }
       : {}),
     inputs: inputs.map((id) => {
       const { ty, distribution: distributionId } = parseCaseId(id);

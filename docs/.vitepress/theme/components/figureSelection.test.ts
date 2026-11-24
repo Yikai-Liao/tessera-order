@@ -13,15 +13,21 @@ const implementations = implementationChoices.load();
 
 test("page-wide previews and pins update SVGs and clearing restores Tessera", async (t) => {
   const { document } = parseHTML(`<main>
-    <div data-comparison-figure="rows"><svg>
+    <div data-comparison-figure="rows"><svg role="img" aria-describedby="rows-description">
+      <desc id="rows-description">Tessera's Speed and Rank</desc>
       <text data-comparison-heading="Speed">SPEED</text>
       <text data-comparison-heading="Rank">RANK</text>
+      <text data-comparison-row-name="0">Random</text>
       <text data-comparison-row="0" data-comparison-cell="0">4×</text>
       <text data-comparison-row="0" data-comparison-cell="1">1st</text>
+      <text data-comparison-row-name="1">Sorted</text>
+      <text data-comparison-row="1" data-comparison-cell="0">8×</text>
+      <text data-comparison-row="1" data-comparison-cell="1">1st</text>
       <circle data-implementation="tessera"/><circle data-implementation="rdst"/>
       <circle data-implementation="glidesort"/>
     </svg></div>
-    <div data-comparison-figure="memory"><svg>
+    <div data-comparison-figure="memory"><svg role="img" aria-describedby="memory-description">
+      <desc id="memory-description">Memory use</desc>
       <path data-implementation="tessera"/><path data-implementation="rdst"/>
       <path data-implementation="ips4o"/>
     </svg></div>
@@ -35,9 +41,24 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
         {
           anchor: "rows",
           selection: {
-            tessera: { rows: [["4×", "1st"]] },
-            rdst: { rows: [["2×", "2nd"]] },
-            glidesort: { rows: [["1.5×", "3rd"]] },
+            tessera: {
+              rows: [
+                ["4×", "1st"],
+                ["8×", "1st"],
+              ],
+            },
+            rdst: {
+              rows: [
+                ["2×", "2nd"],
+                ["3×", "2nd"],
+              ],
+            },
+            glidesort: {
+              rows: [
+                ["1.5×", "3rd"],
+                ["–", "–"],
+              ],
+            },
           },
         },
       ],
@@ -45,13 +66,15 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
     ),
   )!;
   const text = () => Array.from(document.querySelectorAll("text"), (node) => node.textContent);
+  const rowsSvg = document.querySelector('[data-comparison-figure="rows"] svg')!;
+  const memoryFigure = document.querySelector('[data-comparison-figure="memory"]')!;
   const readTessera = () => {
-    assert.deepEqual(text(), ["SPEED", "RANK", "4×", "1st"]);
+    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Sorted", "8×", "1st"]);
     assert.equal(document.querySelectorAll(".selected, .dimmed, [data-selecting]").length, 0);
   };
   const readRdst = () => {
     // Headings keep their text; the figure that shows rdst's cells is marked for its colour.
-    assert.deepEqual(text(), ["SPEED", "RANK", "2×", "2nd"]);
+    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "2×", "2nd", "Sorted", "3×", "2nd"]);
     assert.deepEqual(
       Array.from(document.querySelectorAll("[data-selecting]"), (figure) =>
         figure.getAttribute("data-comparison-figure"),
@@ -88,7 +111,23 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   assert.equal(pinned.value, "rdst");
   preview(document.querySelector('circle[data-implementation="glidesort"]'));
   await nextTick();
-  assert.deepEqual(text(), ["SPEED", "RANK", "1.5×", "3rd"]);
+  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "1.5×", "3rd", "Sorted", "–", "–"]);
+  const [originalId, selectionId, ...extraIds] = rowsSvg
+    .getAttribute("aria-describedby")!
+    .split(" ");
+  assert.equal(originalId, "rows-description");
+  assert.deepEqual(extraIds, []);
+  const description = document.getElementById(selectionId);
+  assert.equal(description?.parentElement, rowsSvg.parentElement);
+  assert.equal(
+    description?.textContent,
+    "Speed and Rank show glidesort's values. Random: 1.5×, 3rd; Sorted: –, –.",
+  );
+  assert.equal(
+    memoryFigure.querySelector("svg")!.getAttribute("aria-describedby"),
+    "memory-description",
+  );
+  assert.equal(memoryFigure.querySelector(".selection-description"), null);
   assert.deepEqual(bar.value, { label: "glidesort", ink: ink.comparison, pinnedLabel: "rdst" });
   preview(document.querySelector('circle[data-implementation="tessera"]'));
   await nextTick();
@@ -100,7 +139,7 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   // An implementation the rows figure lacks leaves its cells at Tessera's values.
   preview(document.querySelector('path[data-implementation="ips4o"]'));
   await nextTick();
-  assert.deepEqual(text(), ["SPEED", "RANK", "4×", "1st"]);
+  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Sorted", "8×", "1st"]);
   assert.equal(document.querySelectorAll("[data-selecting]").length, 0);
   preview(null);
   await nextTick();
@@ -109,6 +148,8 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   clear();
   await nextTick();
   readTessera();
+  assert.equal(rowsSvg.getAttribute("aria-describedby"), "rows-description");
+  assert.equal(document.getElementById(selectionId), null);
   assert.equal(bar.value, null);
   assert.equal(pinned.value, "tessera");
 });

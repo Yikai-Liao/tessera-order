@@ -7,6 +7,34 @@ import type { ImplementationChoice } from "./implementationChoices.data.ts";
 
 const mark = "[data-implementation]";
 
+function describeSelection(
+  figure: HTMLElement,
+  label: string,
+  rows?: FigureSelection[string]["rows"],
+) {
+  const description = figure.querySelector<HTMLSpanElement>(".selection-description");
+  if (!rows && !description) return;
+
+  const svg = figure.querySelector('svg[role="img"]')!;
+  const [originalId] = svg.getAttribute("aria-describedby")!.split(" ");
+  if (!rows) {
+    svg.setAttribute("aria-describedby", originalId);
+    description?.remove();
+    return;
+  }
+
+  const text = rows.map(([speed, rank], index) => {
+    const name = figure.querySelector(`[data-comparison-row-name="${index}"]`)!.textContent;
+    return `${name}: ${speed}, ${rank}`;
+  });
+  const element = description ?? figure.ownerDocument.createElement("span");
+  element.className = "selection-description";
+  element.id = `${originalId}-selection`;
+  element.textContent = `Speed and Rank show ${label}'s values. ${text.join("; ")}.`;
+  if (!description) figure.append(element);
+  svg.setAttribute("aria-describedby", `${originalId} ${element.id}`);
+}
+
 export function useFigureSelection(
   root: () => HTMLElement | null,
   figures: () => { anchor: string; selection?: FigureSelection }[],
@@ -69,6 +97,7 @@ export function useFigureSelection(
 
   watchPostEffect(() => {
     const id = selected.value;
+    const label = implementations.find((entry) => entry.id === id)?.label ?? id;
     const selections = new Map(figures().map(({ anchor, selection }) => [anchor, selection]));
     for (const figure of Array.from(
       root()?.querySelectorAll<HTMLElement>("[data-comparison-figure]") ?? [],
@@ -88,6 +117,7 @@ export function useFigureSelection(
       if (showing) figure.style.setProperty("--selection-ink", inkOf(id));
       else figure.style.removeProperty("--selection-ink");
       const shown = values ?? selection?.tessera;
+      describeSelection(figure, label, showing ? values.rows : undefined);
       if (!shown) continue;
       for (const cell of Array.from(figure.querySelectorAll("[data-comparison-cell]"))) {
         const row = Number(cell.getAttribute("data-comparison-row"));

@@ -63,7 +63,10 @@ test("row SVG tags implementation dots, off-scale marks and selectable cells", (
     { value: 1.5, tone: "comparison", implementation: "std-unstable" },
     { value: 8, tone: "radix", implementation: "rdst" },
   );
-  chart.groups.push({ title: "Second group", rows: [{ ...row, cells: ["y"] }] });
+  chart.groups.push({
+    title: "Second group",
+    rows: [{ ...row, name: { ...row.name, input: "b", sub: "subtitle" }, cells: ["y"] }],
+  });
   const { document } = parseHTML(renderRows(chart));
   // The swarm includes circular paths. The legend's triangle is in a separate mark group.
   const triangles = Array.from(
@@ -85,6 +88,16 @@ test("row SVG tags implementation dots, off-scale marks and selectable cells", (
       2,
     );
   assert.equal(document.querySelector('[data-comparison-heading="Speed"]')?.textContent, "SPEED");
+  assert.deepEqual(
+    Array.from(document.querySelectorAll("[data-comparison-row-name]"), (name) => [
+      name.getAttribute("data-comparison-row-name"),
+      name.textContent,
+    ]),
+    [
+      ["0", "a"],
+      ["1", "b"],
+    ],
+  );
   assert.deepEqual(
     Array.from(document.querySelectorAll('[data-comparison-cell="0"]'), (cell) => [
       cell.getAttribute("data-comparison-row"),

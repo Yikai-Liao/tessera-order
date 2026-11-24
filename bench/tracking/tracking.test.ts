@@ -1144,13 +1144,13 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
   const figure = data.operations[0].figures.find((entry) => entry.name === "parallel")!;
   assert.equal(scaling.referenceId, referenceId);
-  const assertParallelTag = (svg: string, id: string) => {
+  const assertParallelTag = (svg: string, id: string, compositionId?: string) => {
     const { document } = parseHTML(svg);
     assert.deepEqual(
       Array.from(document.querySelectorAll('[aria-label="dot"] [data-implementation]'), (mark) =>
         mark.getAttribute("data-implementation"),
       ).filter((id) => id !== "tessera"),
-      [id, id],
+      [id, id, ...(compositionId ? [compositionId] : [])],
     );
   };
   assertParallelTag(renderRows(figure.chart as RowChart), referenceId);
@@ -1159,12 +1159,25 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
   assert.doesNotMatch(figure.table, /composition/);
   assert.doesNotMatch(renderRows(figure.chart as RowChart), /Tessera composition/);
-  const withComposition = comparisonData(
-    new Map([
-      ...runs,
-      ["tessera-full", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 10 })]],
-    ]),
-  ).operations[0].figures.find((entry) => entry.name === "parallel")!;
+  const compositionId = "tessera-full";
+  const compositionRuns = new Map([
+    ...runs,
+    [compositionId, [tracked({ "rust/sort/u64/random/1000000/s1/serial": 10 })]],
+  ]);
+  const withComposition = comparisonData(compositionRuns).operations[0].figures.find(
+    (entry) => entry.name === "parallel",
+  )!;
+  const compositionScaling = trackingScaling(latestRuns(compositionRuns)!.runs)!;
+  assert.equal(compositionScaling.composition?.implementation, compositionId);
+  assertParallelTag(renderRows(withComposition.chart as RowChart), referenceId, compositionId);
+  assertParallelTag(
+    renderParallel({
+      ...compositionScaling,
+      composition: { ...compositionScaling.composition!, implementation: "glidesort" },
+    })!.svg,
+    referenceId,
+    "glidesort",
+  );
   assert.equal(withComposition.title, figure.title);
   const composition = (withComposition.chart as RowChart).groups.at(-1)!;
   assert.equal(composition.title, "Composition");

@@ -1007,7 +1007,7 @@ export interface Scaling {
   tessera: string[];
   inputs: { label: string; tessera: number[]; rayon: number[] }[];
   /** Serial full-sort speeds over the same inputs, in input order. */
-  composition?: { hash: string; speeds: number[] };
+  composition?: { implementation: string; hash: string; speeds: number[] };
 }
 
 export function renderParallel({
@@ -1077,7 +1077,7 @@ export function renderParallel({
                       {
                         value: serialSpeed,
                         tone: "composition" as const,
-                        implementation: "tessera-full",
+                        implementation: composition.implementation,
                       },
                     ],
                     cells: [times(serialSpeed), ""],

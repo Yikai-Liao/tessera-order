@@ -59,10 +59,10 @@ export function label(text: string, x: number, y: number, options: LabelOptions 
 }
 
 /** Annotate a named row, including a compact tag when the case has a qualifier. */
-export function rowName(name: NameCell, cy: number): Plot.Markish[] {
+export function rowName(name: NameCell, cy: number, render?: Plot.RenderFunction): Plot.Markish[] {
   const { pad } = theme.layout;
   const labels: Plot.Markish[] = [
-    label(name.input, pad, cy + (name.sub ? -2 : 4), { strong: name.strong }),
+    label(name.input, pad, cy + (name.sub ? -2 : 4), { strong: name.strong, render }),
     ...(name.sub ? [label(name.sub, pad, cy + 13, { size: 11, tone: ink.muted })] : []),
   ];
   if (name.tag) {

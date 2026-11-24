@@ -252,8 +252,14 @@ export function renderRows(spec: RowChart) {
       }),
     );
     for (const { row, cy } of group.placed) {
-      const rowNumber = rowIndex++;
-      annotations.push(...rowName(row.name, cy));
+      const rowNumber = String(rowIndex++);
+      annotations.push(
+        ...rowName(
+          row.name,
+          cy,
+          markAttributes(() => ({ "data-comparison-row-name": rowNumber })).render,
+        ),
+      );
       row.cells.forEach((cell, index) => {
         annotations.push(
           label(cell, columns[index], cy + 4, {
@@ -268,7 +274,7 @@ export function renderRows(spec: RowChart) {
             anchor: "end",
             ...markAttributes(() => ({
               "data-comparison-cell": String(index),
-              "data-comparison-row": String(rowNumber),
+              "data-comparison-row": rowNumber,
             })),
           }),
         );

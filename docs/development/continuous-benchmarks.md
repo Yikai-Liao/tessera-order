@@ -12,7 +12,7 @@ bun run --silent tools status --pr 123 [--details]
 ```
 
 1. Match `target.head` to the requested commit. Feedback for another head is not current evidence. A head whose measured inputs equal an earlier head's carries that head's check, marked as reused ([reuse](ci.md#reuse-of-verified-lanes)).
-2. Read `Benchmarks (rust)` in `benchmark`. Missing or incomplete measurements cannot pass. Benchmark verdicts (`Measurement failed`, `no comparable baseline`, a slowdown alert) are independent of workflow success.
+2. Read `Benchmarks (rust)` in `benchmark`. Missing or incomplete measurements cannot pass. Benchmark verdicts (`Measurement failed`, `no comparable baseline`, a slowdown alert) are independent of workflow success. Fork and Dependabot pull requests publish no check, so `benchmark.state` reads `missing` even after a complete run. Their verdict, baseline and affected cases are in the summary of the CI `report` job for the exact head (`--details` only links the workflow), and a slowdown alert there also fails `ci-ok`. Listing the loss as accepted does not clear `ci-ok`; a maintainer decides whether to merge.
 3. Read `workflows[].state`. The `CI` run builds, measures, attempts Cloud archival and publishes the report. A failed upload fails CI; the report keeps its own verdict.
 4. Use `--details` for the exact baseline and affected cases. Negative changes mean less time. Stacked PRs compare with their parent branch, not with main.
 

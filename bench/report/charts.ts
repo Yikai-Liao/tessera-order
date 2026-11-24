@@ -822,7 +822,11 @@ export function renderGrowth(growth: Growth): Figure | null {
     (_, index) => MEMORY_FLOOR * 10 ** index,
   );
   const footnotes = [
-    ...new Set(plotted.map((e) => implementation(e.name).detail).filter((d): d is string => !!d)),
+    ...new Set(
+      plotted
+        .flatMap((e) => [implementation(e.name).detail, implementation(e.name).memory])
+        .filter((d): d is string => !!d),
+    ),
   ];
   const note = [
     ...(small.length

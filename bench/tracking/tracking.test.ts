@@ -1225,7 +1225,12 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   const sort = {
     ...input,
     // Tessera doubles when the input quadruples: √n.
-    peaks: { tessera: [2e6, 4e6, 8e6], "std-stable": [8e6, 32e6, 128e6], crumsort: [0, 0, 0] },
+    peaks: {
+      tessera: [2e6, 4e6, 8e6],
+      "std-stable": [8e6, 32e6, 128e6],
+      rdst: [34e3, 134e3, 530e3],
+      crumsort: [0, 0, 0],
+    },
   };
   const sweeps = [
     { ...sort, operation: SORT },
@@ -1263,6 +1268,8 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   assert.equal(figure.title, "Grows as √n, to 8 MB at 16M records");
   assert.match(figure.chart.guide, /Tessera at aaaaaaa/);
   assert.match(JSON.stringify(figure.chart), /Below 1 kB at every length: crumsort \(0 B\)/);
+  // A plotted implementation's catalog memory note explains its curve.
+  assert.match(JSON.stringify(figure.chart), /rdst copies the whole input up to 800K records/);
   assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
   assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
   assert.match(plotted.argsort!.table, /\| Tessera \| 8 MB \| 32 MB \| 128 MB \|/);

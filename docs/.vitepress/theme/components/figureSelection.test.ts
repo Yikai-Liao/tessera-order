@@ -17,10 +17,10 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
       <desc id="rows-description">Tessera's Speed and Rank</desc>
       <text data-comparison-heading="Speed">SPEED</text>
       <text data-comparison-heading="Rank">RANK</text>
-      <text data-comparison-row-name="0">Random</text>
+      <text data-comparison-row-name="0" data-comparison-row-group="48 u64 keys">Random</text>
       <text data-comparison-row="0" data-comparison-cell="0">4×</text>
       <text data-comparison-row="0" data-comparison-cell="1">1st</text>
-      <text data-comparison-row-name="1">Sorted</text>
+      <text data-comparison-row-name="1" data-comparison-row-group="48 records">Random</text>
       <text data-comparison-row="1" data-comparison-cell="0">8×</text>
       <text data-comparison-row="1" data-comparison-cell="1">1st</text>
       <circle data-implementation="tessera"/><circle data-implementation="rdst"/>
@@ -69,12 +69,12 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   const rowsSvg = document.querySelector('[data-comparison-figure="rows"] svg')!;
   const memoryFigure = document.querySelector('[data-comparison-figure="memory"]')!;
   const readTessera = () => {
-    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Sorted", "8×", "1st"]);
+    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Random", "8×", "1st"]);
     assert.equal(document.querySelectorAll(".selected, .dimmed, [data-selecting]").length, 0);
   };
   const readRdst = () => {
     // Headings keep their text; the figure that shows rdst's cells is marked for its colour.
-    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "2×", "2nd", "Sorted", "3×", "2nd"]);
+    assert.deepEqual(text(), ["SPEED", "RANK", "Random", "2×", "2nd", "Random", "3×", "2nd"]);
     assert.deepEqual(
       Array.from(document.querySelectorAll("[data-selecting]"), (figure) =>
         figure.getAttribute("data-comparison-figure"),
@@ -111,7 +111,7 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   assert.equal(pinned.value, "rdst");
   preview(document.querySelector('circle[data-implementation="glidesort"]'));
   await nextTick();
-  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "1.5×", "3rd", "Sorted", "–", "–"]);
+  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "1.5×", "3rd", "Random", "–", "–"]);
   const [originalId, selectionId, ...extraIds] = rowsSvg
     .getAttribute("aria-describedby")!
     .split(" ");
@@ -119,10 +119,12 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   assert.deepEqual(extraIds, []);
   const description = document.getElementById(selectionId);
   assert.equal(description?.parentElement, rowsSvg.parentElement);
-  assert.equal(
-    description?.textContent,
-    "Speed and Rank show glidesort's values. Random: 1.5×, 3rd; Sorted: –, –.",
-  );
+  // Each result stays with its group-qualified row, whatever the surrounding wording.
+  const described = description!.textContent!.split(";");
+  assert.match(described[0], /glidesort/);
+  assert.match(described[0], /48 u64 keys\W+Random\W+1\.5×\W+3rd/);
+  assert.doesNotMatch(described[0], /48 records/);
+  assert.match(described[1], /48 records\W+Random\W+–\W+–/);
   assert.equal(
     memoryFigure.querySelector("svg")!.getAttribute("aria-describedby"),
     "memory-description",
@@ -139,8 +141,10 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   // An implementation the rows figure lacks leaves its cells at Tessera's values.
   preview(document.querySelector('path[data-implementation="ips4o"]'));
   await nextTick();
-  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Sorted", "8×", "1st"]);
+  assert.deepEqual(text(), ["SPEED", "RANK", "Random", "4×", "1st", "Random", "8×", "1st"]);
   assert.equal(document.querySelectorAll("[data-selecting]").length, 0);
+  assert.equal(rowsSvg.getAttribute("aria-describedby"), "rows-description");
+  assert.equal(document.querySelector(".selection-description"), null);
   preview(null);
   await nextTick();
   readRdst();

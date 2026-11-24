@@ -91,11 +91,12 @@ test("row SVG tags implementation dots, off-scale marks and selectable cells", (
   assert.deepEqual(
     Array.from(document.querySelectorAll("[data-comparison-row-name]"), (name) => [
       name.getAttribute("data-comparison-row-name"),
+      name.getAttribute("data-comparison-row-group"),
       name.textContent,
     ]),
     [
-      ["0", "a"],
-      ["1", "b"],
+      ["0", null, "a"],
+      ["1", "Second group", "b"],
     ],
   );
   assert.deepEqual(

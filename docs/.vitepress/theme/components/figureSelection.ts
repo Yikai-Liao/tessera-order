@@ -24,8 +24,9 @@ function describeSelection(
   }
 
   const text = rows.map(([speed, rank], index) => {
-    const name = figure.querySelector(`[data-comparison-row-name="${index}"]`)!.textContent;
-    return `${name}: ${speed}, ${rank}`;
+    const name = figure.querySelector(`[data-comparison-row-name="${index}"]`)!;
+    const group = name.getAttribute("data-comparison-row-group");
+    return `${group ? `${group} · ` : ""}${name.textContent}: ${speed}, ${rank}`;
   });
   const element = description ?? figure.ownerDocument.createElement("span");
   element.className = "selection-description";

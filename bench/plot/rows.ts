@@ -257,7 +257,11 @@ export function renderRows(spec: RowChart) {
         ...rowName(
           row.name,
           cy,
-          markAttributes(() => ({ "data-comparison-row-name": rowNumber })).render,
+          // The group title qualifies rows whose names repeat across groups.
+          markAttributes(() => ({
+            "data-comparison-row-name": rowNumber,
+            ...(group.title ? { "data-comparison-row-group": group.title } : {}),
+          })).render,
         ),
       );
       row.cells.forEach((cell, index) => {

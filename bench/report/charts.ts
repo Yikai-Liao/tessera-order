@@ -19,7 +19,12 @@ import {
   route,
   SORT,
 } from "../catalog.ts";
-import { type CurveChart, renderCurves } from "../plot/curves.ts";
+import {
+  CURVE_LABEL_GAP,
+  CURVE_PLOT_HEIGHT,
+  type CurveChart,
+  renderCurves,
+} from "../plot/curves.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
   type RowChart as Chart,
@@ -831,27 +836,51 @@ export function renderGrowth(growth: Growth): Figure | null {
   const growthName = lastGrowth(own);
   // When every peak is below the floor, still mark the observations and keep their exact values.
   const visible = plotted.length ? plotted : sorts;
-  const top = (from: number, to: number) =>
-    Math.max(
-      MEMORY_FLOOR,
-      ...visible.flatMap((e) => e.points.filter(([n]) => n >= from && n <= to).map(([, y]) => y)),
-    );
-  // A slope key in the top-left corner, over the first lengths, draws the growth orders the end
-  // labels name. Its constant line runs a factor of 4 above every line below it, and its n line
-  // ends a factor of 2 below the axis top.
-  const keyEnd = lengths[Math.min(2, lengths.length - 1)];
-  const keySpan = keyEnd / lengths[0];
+  const firstLength = lengths[0];
+  const lastLength = lengths.at(-1)!;
+  // A slope key in the top-left corner draws the growth orders the end labels name. It spans
+  // 2/7 of the log-x axis, the first two lengths of the published eight-length plan, whatever
+  // lengths a figure has. Its constant line runs a factor of 4 above every segment drawn below
+  // it, and its n line ends a factor of 2 below the axis top.
+  const keyEnd = firstLength * (lastLength / firstLength) ** (2 / 7);
+  const keySpan = keyEnd / firstLength;
+  let cornerPeak = MEMORY_FLOOR;
+  for (const { points } of visible) {
+    for (const [index, [n, y]] of points.entries()) {
+      if (n <= keyEnd) {
+        cornerPeak = Math.max(cornerPeak, y);
+        continue;
+      }
+      const before = points[index - 1];
+      if (before && before[0] < keyEnd) {
+        // The renderer joins the floor-clamped samples with straight segments on log–log axes.
+        const start = Math.max(before[1], MEMORY_FLOOR);
+        const end = Math.max(y, MEMORY_FLOOR);
+        const order = exponent([before[0], start], [n, end]);
+        cornerPeak = Math.max(cornerPeak, start * (keyEnd / before[0]) ** order);
+      }
+      break;
+    }
+  }
   // Half a decade of headroom above the largest value keeps the top line inside the plot; the
   // axis rises further when the key needs the room.
-  const headroom = top(lengths[0], lengths.at(-1)!) * Math.sqrt(10);
-  const keyBase = Math.max(headroom / keySpan / 2, top(lengths[0], keyEnd) * 4);
-  const high = Math.max(headroom, keyBase * keySpan * 2);
-  const slopeKey = GROWTH_ORDERS.map(({ order, name }) => ({
-    label: growthTag(name),
-    points: [lengths[0], keyEnd].map(
-      (n) => [n, keyBase * (n / lengths[0]) ** order] as [number, number],
-    ),
-  }));
+  const peak = Math.max(MEMORY_FLOOR, ...visible.flatMap((e) => e.points.map(([, y]) => y)));
+  const headroom = peak * Math.sqrt(10);
+  const keyBase = Math.max(headroom / keySpan / 2, cornerPeak * 4);
+  const keyHigh = Math.max(headroom, keyBase * keySpan * 2);
+  const labelGap =
+    (CURVE_PLOT_HEIGHT * Math.log(Math.sqrt(keySpan))) / Math.log(keyHigh / MEMORY_FLOOR);
+  // Lengths too close together leave the guides' ends less than a label apart; omit the key.
+  const showKey = labelGap >= CURVE_LABEL_GAP;
+  const high = showKey ? keyHigh : headroom;
+  const slopeKey = showKey
+    ? GROWTH_ORDERS.map(({ order, name }) => ({
+        label: growthTag(name),
+        points: [firstLength, keyEnd].map(
+          (n) => [n, keyBase * (n / firstLength) ** order] as [number, number],
+        ),
+      }))
+    : [];
   const endpoint = `${formatBytes(last[1])} at ${countLabel(last[0])} records`;
   const title =
     growthName === "constant"
@@ -897,8 +926,8 @@ export function renderGrowth(growth: Growth): Figure | null {
     title,
     guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · ${measurement}${growth.source ? ` · ${growth.source}` : ""}`,
     x: {
-      low: lengths[0],
-      high: lengths.at(-1)!,
+      low: firstLength,
+      high: lastLength,
       ticks: lengths.map((n) => ({ value: n, label: countLabel(n) })),
       label: "records →",
     },

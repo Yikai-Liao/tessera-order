@@ -147,9 +147,13 @@ test("curves ending together share a label, and only a clipped curve adds the ed
   differing.curves[0].growth = "∝ n";
   differing.curves[1].growth = "constant";
   differing.curves[1].points = differing.curves[0].points;
-  const both = renderCurves(differing);
-  assert.equal(both.match(/>∝ n</g)?.length, 1);
-  assert.equal(both.match(/>constant</g)?.length, 1);
+  const { document: both } = parseHTML(renderCurves(differing));
+  const labels = [...both.querySelectorAll("svg text")].map((element) => element.textContent);
+  const namesAndTags = ["alpha", "∝ n", "beta", "constant"];
+  assert.deepEqual(
+    labels.filter((text) => namesAndTags.includes(text!)),
+    namesAndTags,
+  );
   assert.doesNotMatch(svg, /below the axis/);
   assert.match(renderCurves(chart(10)), /below the axis, value in table/);
   assert.doesNotMatch(svg, /Tessera composition/);

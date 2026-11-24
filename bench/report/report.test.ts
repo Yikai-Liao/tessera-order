@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parseHTML } from "linkedom/worker";
 import { caseGroup, caseId, columnId, type Operation, referenceColumn } from "../catalog.ts";
 import type { CurveChart } from "../plot/curves.ts";
 import { renderFigures, renderGrowth } from "./charts.ts";
@@ -470,6 +471,7 @@ test("the memory figure names each line's growth and keys the slopes in a clear 
         { name: "tessera", values: lengths.map((n) => 64 * Math.sqrt(n)) },
         { name: "std-stable", values: lengths.map((n) => 8 * n) },
         { name: "ips4o", values: lengths.map(() => constant) },
+        { name: "std-unstable", values: lengths.map((n) => (n === lengths.at(-1) ? 1000 : null)) },
       ],
     })!;
   const clear = figure(5e5);
@@ -477,19 +479,73 @@ test("the memory figure names each line's growth and keys the slopes in a clear 
   assert.equal(clear.title.startsWith("Grows as √n"), true);
   assert.deepEqual(
     chart.curves.map((curve) => curve.growth),
-    ["∝ √n", "∝ n", "constant"],
+    ["∝ √n", "∝ n", "constant", undefined],
   );
+  const { document } = parseHTML(clear.svg);
+  const image = document.querySelector('svg[role="img"]')!;
+  const description = document.getElementById(image.getAttribute("aria-describedby")!)!;
+  assert.equal(description.localName, "desc");
+  assert.match(description.textContent!, /slice::sort \(∝ n\):/);
+  assert.match(description.textContent!, /ips4o \(constant\):/);
+  assert.match(description.textContent!, /slice::sort_unstable: 1000/);
   assert.deepEqual(
     chart.references.map((reference) => reference.label),
     ["constant", "∝ √n", "∝ n"],
   );
   // Every key line lies inside the plot.
-  for (const reference of chart.references)
+  for (const [index, reference] of chart.references.entries()) {
     for (const [n, y] of reference.points)
       assert.ok(n >= chart.x.low && n <= chart.x.high && y >= chart.y.low && y <= chart.y.high);
+    const [[x1, y1], [x2, y2]] = reference.points;
+    const xRatio = x2 / x1;
+    const expected = [1, Math.sqrt(xRatio), xRatio][index];
+    assert.ok(Math.abs(y2 / y1 / expected - 1) < 1e-12, reference.label);
+  }
   // A line close below the key's corner raises the axis instead, keeping the key above it.
   const raised = figure(5e6).chart as CurveChart;
   assert.ok(raised.y.high > chart.y.high);
   const [constant] = raised.references;
   assert.ok(constant.points[0][1] >= 4 * 5e6);
+});
+
+test("the memory figure omits the slope key when adjacent lengths crowd its labels", () => {
+  const lengths = [65_536, 65_537];
+  const figure = renderGrowth({
+    operation: { kind: "sort" },
+    ty: "row_u32",
+    distribution: "random",
+    lengths,
+    peaks: [{ name: "tessera", values: [8192, 8192] }],
+  })!;
+  const chart = figure.chart as CurveChart;
+  assert.deepEqual(
+    chart.curves[0].points.map(([n]) => n),
+    lengths,
+  );
+  assert.deepEqual(chart.references, []);
+});
+
+test("the memory key clears segments spanning unmeasured lengths", () => {
+  const lengths = [1024, 4096, 16_384, 65_536];
+  for (const firstPeak of [8192, 65_536]) {
+    const lastPeak = 524_288;
+    const figure = renderGrowth({
+      operation: { kind: "sort" },
+      ty: "row_u32",
+      distribution: "random",
+      lengths,
+      peaks: [
+        { name: "tessera", values: lengths.map(() => 1000) },
+        { name: "std-stable", values: [firstPeak, null, null, lastPeak] },
+      ],
+    })!;
+    const chart = figure.chart as CurveChart;
+    const [constant] = chart.references;
+    assert.equal(constant?.label, "constant");
+    const [[, keyBase], [keyEnd]] = constant.points;
+    const progress = Math.log(keyEnd / lengths[0]) / Math.log(lengths[3] / lengths[0]);
+    const segmentPeak = firstPeak * (lastPeak / firstPeak) ** progress;
+    assert.ok(keyBase / segmentPeak >= 4 - 1e-12, `clearance for ${firstPeak} B starting peak`);
+    assert.match(figure.table, /\| slice::sort .*?\| [^|]+ \| – \| – \| [^|]+ \|/);
+  }
 });

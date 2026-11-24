@@ -42,7 +42,8 @@ export interface CurveChart {
 /** A legend key: a sort kind's line, a reference's dash pattern, or the off-axis triangle. */
 export type CurveSwatch = Exclude<Tone, "composition"> | "dashed" | "dotted" | "edge";
 
-const LABEL_GAP = 14;
+export const CURVE_LABEL_GAP = 14;
+export const CURVE_PLOT_HEIGHT = 300;
 
 /** Spread end labels vertically by at least the label height, keeping their order. */
 function dodge(targets: number[], low: number, high: number) {
@@ -50,7 +51,7 @@ function dodge(targets: number[], low: number, high: number) {
   const placed = new Array<number>(targets.length);
   let previous = -Infinity;
   for (const index of order) {
-    placed[index] = Math.max(targets[index], previous + LABEL_GAP);
+    placed[index] = Math.max(targets[index], previous + CURVE_LABEL_GAP);
     previous = placed[index];
   }
   // Shift the stack back inside the plot if it ran past the bottom.
@@ -86,7 +87,7 @@ export function renderCurves(spec: CurveChart) {
   const yTicksWidth = Math.max(...spec.y.ticks.map((tick) => textWidth(tick.label, 10))) + 12;
   const left = pad + yTicksWidth;
   const top = headerRule + 24;
-  const bottom = top + 300;
+  const bottom = top + CURVE_PLOT_HEIGHT;
   const scale = (axis: Axis, from: number, to: number) => (value: number) =>
     from +
     ((Math.log(value) - Math.log(axis.low)) / (Math.log(axis.high) - Math.log(axis.low))) *
@@ -319,7 +320,10 @@ export function renderCurves(spec: CurveChart) {
       title: spec.title,
       // The note explains what the axes cannot show, so the description carries it too.
       description: `${spec.guide}. ${spec.curves
-        .map((curve) => `${curve.name}: ${curve.points.map(([, y]) => y).join(", ")}`)
+        .map(
+          (curve) =>
+            `${curve.name}${curve.growth ? ` (${curve.growth})` : ""}: ${curve.points.map(([, y]) => y).join(", ")}`,
+        )
         .join("; ")}.${spec.note ? ` ${spec.note}` : ""}`,
     },
     [{ marks }],

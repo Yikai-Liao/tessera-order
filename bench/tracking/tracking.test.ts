@@ -1226,12 +1226,13 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   };
   const sort = {
     ...input,
+    lengths: [1 << 16, 1 << 18, ...input.lengths],
     // Tessera doubles when the input quadruples: √n.
     peaks: {
-      tessera: [2e6, 4e6, 8e6],
-      "std-stable": [8e6, 32e6, 128e6],
-      rdst: [34e3, 134e3, 530e3],
-      crumsort: [0, 0, 0],
+      tessera: [5e5, 1e6, 2e6, 4e6, 8e6],
+      "std-stable": [5e5, 2e6, 8e6, 32e6, 128e6],
+      rdst: [524_336, 2_097_200, 34_048, 134_080, 529_552],
+      crumsort: [0, 0, 0, 0, 0],
     },
   };
   const sweeps = [
@@ -1258,6 +1259,18 @@ test("publication requires sweeps and preserves the sort figure alongside other 
     ["argsort"],
   );
   assert.equal(fallback.argsort!.title, "Constant, 999 B at 64K records");
+  const fallbackChart = fallback.argsort!.chart as CurveChart;
+  assert.deepEqual(fallbackChart.curves[0].points, [
+    [4096, 999],
+    [65_536, 999],
+  ]);
+  const { low, high } = fallbackChart.x;
+  const cornerEnd = low * (high / low) ** (1 / 3);
+  assert.equal(fallbackChart.references.length, 3);
+  for (const { points } of fallbackChart.references) {
+    assert.equal(points[0][0], low);
+    assert.ok(points[1][0] > low && points[1][0] <= cornerEnd);
+  }
   assert.throws(() => growthSchema.parse({ ...provenance, sweeps: [sweeps[0], sweeps[0]] }));
   assert.throws(() =>
     growthSchema.parse({ ...provenance, sweeps: [{ ...sweeps[0], peaks: { tessera: [0] } }] }),
@@ -1298,8 +1311,8 @@ test("publication requires sweeps and preserves the sort figure alongside other 
     .map((id) => svgPage.getElementById(id)?.textContent ?? "")
     .join(" ");
   assert.ok(exposed.includes(rdstNote));
-  assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
-  assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
+  assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \| 0 B \| 0 B \|/);
+  assert.match(figure.table, /\| Tessera \| 500 kB \| 1 MB \| 2 MB \| 4 MB \| 8 MB \|/);
   assert.match(plotted.argsort!.table, /\| Tessera \| 8 MB \| 32 MB \| 128 MB \|/);
   assert.match(plotted.select_nth!.chart.guide, /rank 512/);
   assert.match(plotted.select_nth!.table, /\| Tessera \| 50 B \| 10 B \| 0 B \|/);

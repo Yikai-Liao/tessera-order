@@ -121,7 +121,9 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
   assert.equal(description?.parentElement, rowsSvg.parentElement);
   // Each result stays with its group-qualified row, whatever the surrounding wording.
   const described = description!.textContent!.split(";");
-  assert.match(described[0], /glidesort/);
+  // Names the exact implementation, not another catalog entry sharing its prefix.
+  const named = (id: string) => described[0].includes(implementation(id).label);
+  assert.ok(named("glidesort") && !named("glidesort-sqrt"));
   assert.match(described[0], /48 u64 keys\W+Random\W+1\.5×\W+3rd/);
   assert.doesNotMatch(described[0], /48 records/);
   assert.match(described[1], /48 records\W+Random\W+–\W+–/);

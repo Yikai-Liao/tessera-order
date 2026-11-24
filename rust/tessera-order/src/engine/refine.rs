@@ -202,32 +202,56 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_
     refine_with_tile_bytes(records, extractor, Requirement::All, tile_bytes);
 }
 
-/// Finishes ordered or small roots, otherwise returns their varying bits.
-/// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<T, E: Extract<T>>(
+/// Shared root-preparation policy: probes order, finishes confirmed order,
+/// tries budgeted insertion on unsorted roots, scans varying bits and resolves
+/// deferred flat samples. Serial and parallel roots supply the probe, full-slice
+/// confirmation, finishing and variation operations.
+#[inline(always)]
+fn prepare_with<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
+    probe: impl FnOnce(&mut [T], &mut E) -> Order,
+    confirm: impl FnOnce(&mut [T], &mut E) -> Order,
+    finish: impl Fn(&mut [T], Order, &mut E) -> bool,
+    scan: impl FnOnce(&mut [T], u128, &mut E) -> u128,
 ) -> Option<u128> {
-    let sampled = probe_order(records, extractor);
-    if finish_ordered(records, sampled, extractor) {
+    let sampled = probe(records, extractor);
+    if finish(records, sampled, extractor) {
         return None;
     }
     if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
         return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
-    let varying = scan_varying_bits(records, candidate, extractor);
+    let varying = scan(records, candidate, extractor);
     if varying == 0 {
         return None;
     }
     if sampled == Order::Flat {
-        let order = confirm_order(records, extractor);
-        if finish_ordered(records, order, extractor) {
+        let order = confirm(records, extractor);
+        if finish(records, order, extractor) {
             return None;
         }
     }
     Some(varying)
+}
+
+/// Finishes ordered or small roots, otherwise returns their varying bits.
+fn prepare<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    tile_len: usize,
+) -> Option<u128> {
+    prepare_with(
+        records,
+        extractor,
+        tile_len,
+        |r, e| probe_order(r, e),
+        |r, e| confirm_order(r, e),
+        finish_ordered,
+        |r, c, e| scan_varying_bits(r, c, e),
+    )
 }
 
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
@@ -313,12 +337,12 @@ const ORDER_SAMPLE_MIN_STRIDE: usize = 128;
 /// and could save at most part of one short scan.
 const ORDER_SAMPLE_MIN_LEN: usize = 8192;
 
-/// Confirms short inputs directly; larger inputs sample adjacent pairs before
-/// confirming candidate order with a full scan.
-#[inline(never)]
-fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
+/// Samples stride-spaced adjacent pairs on long inputs. Returns `None` when a
+/// full directional confirmation scan is needed.
+#[inline(always)]
+fn sample_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Option<Order> {
     if records.len() < ORDER_SAMPLE_MIN_LEN {
-        return confirm_order(records, extractor);
+        return None;
     }
     let stride = (records.len() / ORDER_SAMPLES).max(ORDER_SAMPLE_MIN_STRIDE);
     let mut ascending = true;
@@ -331,13 +355,17 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
         ascending &= before <= after;
         descending &= before >= after;
         if !ascending && !descending {
-            return Order::Unsorted;
+            return Some(Order::Unsorted);
         }
     }
-    if ascending && descending {
-        return Order::Flat;
-    }
-    confirm_order(records, extractor)
+    (ascending && descending).then_some(Order::Flat)
+}
+
+/// Confirms short inputs directly; larger inputs sample adjacent pairs before
+/// confirming candidate order with a full scan.
+#[inline(never)]
+fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
+    sample_order(records, extractor).unwrap_or_else(|| confirm_order(records, extractor))
 }
 
 /// Rejects a mixed prefix, then confirms one direction while preserving strictness.

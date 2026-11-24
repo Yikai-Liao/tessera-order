@@ -329,12 +329,13 @@ export function comparisonData(
               memory: run.memory !== undefined,
             };
           }),
-        figures: all.map(({ name, subject, summary, title, kind, chart, table }) => ({
+        figures: all.map(({ name, subject, summary, title, kind, chart, table, selection }) => ({
           name,
           subject,
           summary,
           title,
           ...(kind ? { kind } : {}),
+          ...(selection ? { selection } : {}),
           chart,
           table,
         })),

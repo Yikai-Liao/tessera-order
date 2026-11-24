@@ -54,6 +54,35 @@ test("a row chart that draws an off-scale triangle explains it in its legend", (
   assert.doesNotMatch(renderRows(rowChart()), /off-scale/);
 });
 
+test("row SVG tags implementation dots, off-scale marks and selectable cells", () => {
+  const chart = rowChart();
+  const row = chart.groups[0].rows[0];
+  row.swarm = true;
+  row.marks[0].implementation = "tessera";
+  row.marks.push(
+    { value: 1.5, tone: "comparison", implementation: "std-unstable" },
+    { value: 8, tone: "radix", implementation: "rdst" },
+  );
+  chart.groups.push({ title: "Second group", rows: [{ ...row, cells: ["y"] }] });
+  const { document } = parseHTML(renderRows(chart));
+  for (const id of ["tessera", "std-unstable", "rdst"])
+    assert.equal(
+      document.querySelectorAll(`:is(circle, path)[data-implementation="${id}"]`).length,
+      2,
+    );
+  assert.equal(document.querySelector('[data-comparison-heading="Speed"]')?.textContent, "SPEED");
+  assert.deepEqual(
+    Array.from(document.querySelectorAll('[data-comparison-cell="0"]'), (cell) => [
+      cell.getAttribute("data-comparison-row"),
+      cell.textContent,
+    ]),
+    [
+      ["0", "x"],
+      ["1", "y"],
+    ],
+  );
+});
+
 test("long reference labels are placed clear of the neighbouring speed ticks", () => {
   const chart = rowChart();
   chart.scale.ticks = [
@@ -98,6 +127,7 @@ test("curves ending together share a label, and only a clipped curve adds the ed
     curves: [
       {
         name: "alpha",
+        implementation: "rdst",
         tone: "radix",
         points: [
           [1, 5],
@@ -106,6 +136,7 @@ test("curves ending together share a label, and only a clipped curve adds the ed
       },
       {
         name: "beta",
+        implementation: "std-stable",
         tone: "comparison",
         points: [
           [1, 50],
@@ -114,6 +145,7 @@ test("curves ending together share a label, and only a clipped curve adds the ed
       },
       {
         name: "Tessera",
+        implementation: "tessera",
         tone: "primary",
         points: [
           [1, 20],
@@ -134,6 +166,15 @@ test("curves ending together share a label, and only a clipped curve adds the ed
     legend: [[["primary"], "Tessera"]],
   });
   const svg = renderCurves(chart(1));
+  const { document } = parseHTML(svg);
+  assert.deepEqual(
+    Array.from(document.querySelectorAll('[aria-label="line"] path[data-implementation]'), (path) =>
+      path.getAttribute("data-implementation"),
+    ),
+    ["std-stable", "rdst", "tessera"],
+  );
+  const clipped = parseHTML(renderCurves(chart(10))).document;
+  assert.ok(clipped.querySelector('[aria-label="dot"] path[data-implementation="rdst"]'));
   assert.ok(svg.includes(">alpha, <"));
   assert.ok(svg.includes(">beta<"));
   // A labelled guide is named at its end instead of in the legend.

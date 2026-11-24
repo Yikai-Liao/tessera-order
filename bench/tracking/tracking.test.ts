@@ -762,6 +762,60 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.match(types!.chart.guide, /on the random input$/);
 });
 
+test("published selection cells rank the same eligible field as Tessera", () => {
+  const tracked = (keys: number, records?: number) =>
+    runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      values: {
+        "rust/sort/u64/random/65536/s1/serial": [keys, keys, keys],
+        ...(records === undefined
+          ? {}
+          : { "rust/sort/row_u32/random/65536/s1/serial": [records, records, records] }),
+      },
+    });
+  const data = comparisonData(
+    new Map([
+      ["tessera", [tracked(10, 10)]],
+      ["std-stable", [tracked(40, 40)]],
+      ["std-unstable", [tracked(5, 5)]],
+      ["glidesort", [tracked(20, 20)]],
+      ["glidesort-sqrt", [tracked(20, 20)]],
+      ["tessera-full", [tracked(1, 1)]],
+      ["radsort", [tracked(8)]],
+    ]),
+  );
+  const figure = data.operations[0].figures.find(({ name }) => name === "types")!;
+  const chart = figure.chart as RowChart;
+  const legacyCells = chart.groups.flatMap(({ rows }) => rows.map(({ cells }) => cells));
+  const selection = figure.selection!;
+  assert.deepEqual(chart.columns, ["Speed", "Rank"]);
+  assert.equal(selection.glidesort.label, "glidesort");
+  assert.deepEqual(legacyCells, [
+    ["4×", "3rd"],
+    ["4×", "1st"],
+  ]);
+  assert.deepEqual(selection.tessera.rows, legacyCells);
+  assert.deepEqual(selection.glidesort.rows, [
+    ["2×", "4th"],
+    ["2×", "2nd"],
+  ]);
+  assert.deepEqual(selection["std-stable"].rows, [
+    ["1.00×", "6th"],
+    ["1.00×", "4th"],
+  ]);
+  assert.deepEqual(selection["std-unstable"].rows, [
+    ["8×", "1st"],
+    ["–", "–"],
+  ]);
+  assert.deepEqual(selection.radsort.rows, [
+    ["5×", "2nd"],
+    ["–", "–"],
+  ]);
+  // An implementation with no value in the figure has nothing to select.
+  assert.equal(selection["tessera-full"], undefined);
+});
+
 test("each operation gets its own section against its own reference", () => {
   const tracked = (values: Record<string, number>) =>
     runSchema.parse({

@@ -35,7 +35,7 @@ import {
   type Tone,
 } from "../plot/rows.ts";
 import { geomean, median } from "../statistics.ts";
-import type { ComparisonHeadline } from "../tracking/result.ts";
+import type { ComparisonHeadline, FigureSelection } from "../tracking/result.ts";
 import { formatBytes, ordinal, times } from "./format.ts";
 import {
   caseId,
@@ -70,6 +70,7 @@ export interface Figure {
   svg: string;
   table: string;
   headline?: ComparisonHeadline;
+  selection?: FigureSelection;
 }
 
 const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
@@ -306,7 +307,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   const base = complete.find((e) => e.name === t.reference);
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
-    marks: [{ value: e.speeds[at], tone: e.tone }],
+    marks: [{ value: e.speeds[at], tone: e.tone, implementation: e.name }],
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
@@ -370,6 +371,7 @@ interface Standing {
   speeds: { variant: string; speed: number }[];
   tessera: number;
   rank: number;
+  rankOf(speed: number): number;
 }
 // Where Tessera stands among every eligible implementation on one row, all measured
 // against the reference, which therefore sits at the origin and is not drawn.
@@ -382,11 +384,31 @@ function standing(field: Field, ids: string[], stableOnly: boolean): Standing | 
     .filter((v) => v.name !== "tessera" && !isComposition(v.name) && (!stableOnly || v.stable))
     .map((v) => ({ variant: v.name, speed: speedOf(v.name) }))
     .filter((v): v is { variant: string; speed: number } => v.speed !== null);
-  return {
-    speeds,
-    tessera,
-    rank: 1 + speeds.filter((v) => v.speed > tessera).length,
-  };
+  const rankOf = (speed: number) =>
+    1 + Number(tessera > speed) + speeds.filter((v) => v.speed > speed).length;
+  return { speeds, tessera, rank: rankOf(tessera), rankOf };
+}
+
+function standingCells(speed: number, rank: number): [string, string] {
+  return [times(speed), ordinal(rank)];
+}
+
+// Each implementation's cells on every row, so a page can show them in place of Tessera's.
+// Implementations without a row in the figure have nothing to show and are left out.
+function renderedField(chart: Chart, standings: Standing[]) {
+  const selection: FigureSelection = Object.fromEntries(
+    catalog.implementations.flatMap(({ id, label }) => {
+      const speeds = standings.map((s) =>
+        id === "tessera" ? s.tessera : s.speeds.find((v) => v.variant === id)?.speed,
+      );
+      if (speeds.every((speed) => speed === undefined)) return [];
+      const rows = speeds.map((speed, at) =>
+        speed === undefined ? ["–", "–"] : standingCells(speed, standings[at].rankOf(speed)),
+      ) as [string, string][];
+      return [[id, { label, tone: toneOf(id), rows }]];
+    }),
+  );
+  return { chart, svg: renderRows(chart), selection };
 }
 
 function fieldRow(t: Terms, name: NameCell, s: Standing): Row {
@@ -396,10 +418,10 @@ function fieldRow(t: Terms, name: NameCell, s: Standing): Row {
     marks: [
       ...s.speeds
         .filter((v) => v.variant !== t.reference)
-        .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
-      { value: s.tessera, tone: "primary" },
+        .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant), implementation: v.variant })),
+      { value: s.tessera, tone: "primary", implementation: "tessera" },
     ],
-    cells: [times(s.tessera), ordinal(s.rank)],
+    cells: standingCells(s.tessera, s.rank),
     strong: true,
     lead: s.rank === 1,
   };
@@ -516,18 +538,21 @@ export function parameterFigures(field: Field): Figure[] {
         subject: `Speed by ${label}`,
         summary: `Each group holds one input and changes only its ${label}. Each dot is one ${t.one} relative to ${t.referenceLabel}. Record inputs rank only stable ${t.many}.`,
         title,
-        ...rendered({
-          title,
-          guide: `${isRank ? "Rank position (zero-based index) · " : ""}speed vs ${t.referenceLabel}`,
-          columns: ["Speed", "Rank"],
-          groups,
-          scale: speedScale(
-            standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
-            t.referenceLabel,
-          ),
-          axis: SPEED_AXIS,
-          legend: kindLegend,
-        }),
+        ...renderedField(
+          {
+            title,
+            guide: `${isRank ? "Rank position (zero-based index) · " : ""}speed vs ${t.referenceLabel}`,
+            columns: ["Speed", "Rank"],
+            groups,
+            scale: speedScale(
+              standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+              t.referenceLabel,
+            ),
+            axis: SPEED_AXIS,
+            legend: kindLegend,
+          },
+          standings,
+        ),
         table: fieldTable(t, plotted),
       },
     ];
@@ -568,18 +593,21 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
     subject: `${elements(ty)} by input pattern`,
     summary: `Each row is one input pattern. Each dot is one ${stableOnly ? `stable ${t.one} (records keep equal keys in order)` : t.one}, placed by its speed relative to ${t.referenceLabel}; the columns give Tessera's speed and rank.`,
     title,
-    ...rendered({
-      title,
-      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}${t.one}, placed by its speed relative to ${t.referenceLabel}`,
-      columns: ["Speed", "Rank"],
-      groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
-        t.referenceLabel,
-      ),
-      axis: SPEED_AXIS,
-      legend: kindLegend,
-    }),
+    ...renderedField(
+      {
+        title,
+        guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}${t.one}, placed by its speed relative to ${t.referenceLabel}`,
+        columns: ["Speed", "Rank"],
+        groups,
+        scale: speedScale(
+          standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+          t.referenceLabel,
+        ),
+        axis: SPEED_AXIS,
+        legend: kindLegend,
+      },
+      standings,
+    ),
     table: fieldTable(t, plotted, nsPerKey),
   };
 }
@@ -630,18 +658,21 @@ function renderLengths(field: Field, cohort: Cohort): Figure | null {
     subject: "Speed by input length",
     summary: `Each row is one input length, on the ${input} input. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
-    ...rendered({
-      title,
-      guide: `${input} input · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
-      columns: ["Speed", "Rank"],
-      groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
-        t.referenceLabel,
-      ),
-      axis: SPEED_AXIS,
-      legend: kindLegend,
-    }),
+    ...renderedField(
+      {
+        title,
+        guide: `${input} input · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
+        columns: ["Speed", "Rank"],
+        groups,
+        scale: speedScale(
+          standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+          t.referenceLabel,
+        ),
+        axis: SPEED_AXIS,
+        legend: kindLegend,
+      },
+      standings,
+    ),
     table: fieldTable(t, plotted),
   };
 }
@@ -681,18 +712,21 @@ function renderShort(field: Field, cohort: Cohort): Figure | null {
     subject: "Short inputs",
     summary: `Each row is one input pattern, grouped by length and element type. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
-    ...rendered({
-      title,
-      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
-      columns: ["Speed", "Rank"],
-      groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
-        t.referenceLabel,
-      ),
-      axis: SPEED_AXIS,
-      legend: kindLegend,
-    }),
+    ...renderedField(
+      {
+        title,
+        guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
+        columns: ["Speed", "Rank"],
+        groups,
+        scale: speedScale(
+          standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+          t.referenceLabel,
+        ),
+        axis: SPEED_AXIS,
+        legend: kindLegend,
+      },
+      standings,
+    ),
     table: fieldTable(t, plotted, nsPerKey),
   };
 }
@@ -725,18 +759,21 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
     subject: "Element types",
     summary: `Each row is one key or record type. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
-    ...rendered({
-      title,
-      guide: `${formatLength(cohort.n)} elements · speed relative to ${t.referenceLabel}, ${cohort.typeDistributionsLabel}`,
-      columns: ["Speed", "Rank"],
-      groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
-        t.referenceLabel,
-      ),
-      axis: SPEED_AXIS,
-      legend: kindLegend,
-    }),
+    ...renderedField(
+      {
+        title,
+        guide: `${formatLength(cohort.n)} elements · speed relative to ${t.referenceLabel}, ${cohort.typeDistributionsLabel}`,
+        columns: ["Speed", "Rank"],
+        groups,
+        scale: speedScale(
+          standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+          t.referenceLabel,
+        ),
+        axis: SPEED_AXIS,
+        legend: kindLegend,
+      },
+      standings,
+    ),
     table: fieldTable(t, plotted),
   };
 }
@@ -941,6 +978,7 @@ export function renderGrowth(growth: Growth): Figure | null {
       const name = lastGrowth(e.points);
       return {
         name: displayName(e.name),
+        implementation: e.name,
         tone: toneOf(e.name),
         ...(name ? { growth: growthTag(name) } : {}),
         points: e.points,
@@ -1027,8 +1065,8 @@ export function renderParallel({
             (row): Row => ({
               name: { input: named(row.threads), sub: "", tag: "" },
               marks: [
-                { value: row.rayon, tone: "comparison" },
-                { value: row.tessera, tone: "primary" },
+                { value: row.rayon, tone: "comparison", implementation: "rayon-stable" },
+                { value: row.tessera, tone: "primary", implementation: "tessera" },
               ],
               cells: [times(row.tessera), times(row.rayon)],
             }),
@@ -1041,7 +1079,13 @@ export function renderParallel({
                 rows: [
                   {
                     name: { input: "Serial Tessera", sub: composition.hash, tag: "" },
-                    marks: [{ value: serialSpeed, tone: "composition" as const }],
+                    marks: [
+                      {
+                        value: serialSpeed,
+                        tone: "composition" as const,
+                        implementation: "tessera-full",
+                      },
+                    ],
                     cells: [times(serialSpeed), ""],
                   },
                 ],
@@ -1101,7 +1145,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
                 .filter(Boolean)
                 .join(" · "),
             },
-            marks: [{ value: summary.ratio, tone: toneOf(name) }],
+            marks: [{ value: summary.ratio, tone: toneOf(name), implementation: name }],
             span: [summary.low, summary.high],
             cells: [
               times(summary.ratio),

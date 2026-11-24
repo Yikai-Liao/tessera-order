@@ -38,6 +38,7 @@ export interface LabelOptions {
   strong?: boolean;
   anchor?: "start" | "middle" | "end";
   caps?: boolean;
+  render?: Plot.RenderFunction;
 }
 
 /** Place a baseline-aligned annotation using the figure's typography. */
@@ -53,6 +54,7 @@ export function label(text: string, x: number, y: number, options: LabelOptions 
     fontWeight: options.strong || options.caps ? 600 : 400,
     fill: options.tone ?? ink.text,
     ariaLabel: options.caps ? "group heading" : "annotation",
+    render: options.render,
   });
 }
 

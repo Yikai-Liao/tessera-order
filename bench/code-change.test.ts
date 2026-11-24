@@ -46,14 +46,20 @@ test("shared code statistics exclude comments and tests and support commits and 
   source = join(root, "rust/tessera-order/src");
   await write("engine.rs", engine.replace(" use_key();", " use_key();\n extra();"));
   await write("scan.rs", "fn scan() {}\n");
+  await write("engine/order.rs", "fn order() {}\n");
+  await mkdir(join(source, "engine/tile"), { recursive: true });
+  await write("engine/tile/plan.rs", "fn plan() {}\n");
+  await write("engine/trace.rs", "fn trace() {}\n");
   await rm(join(source, "block.rs"));
   git("add", ".");
   git("commit", "-qm", "current");
   const change = await codeChange(base, "HEAD", root);
-  assert.deepEqual([change.baseline, change.current, change.added, change.removed], [8, 9, 2, 1]);
+  assert.deepEqual([change.baseline, change.current, change.added, change.removed], [8, 11, 4, 1]);
   assert.ok(!change.files.some((file) => /checks|lib\.rs|parallel\.rs|trace\.rs/.test(file.path)));
   const table = codeTable(change, { baseline: "main", current: "PR" });
   assert.match(table, /`engine.rs`/);
+  assert.ok(change.files.some((file) => file.path === "engine/order.rs" && file.current === 1));
+  assert.ok(change.files.some((file) => file.path === "engine/tile/plan.rs" && file.current === 1));
   assert.doesNotMatch(table, /`key.rs`/);
   // Replacements remain visible even when the file's total does not change.
   const replaced = {
@@ -71,9 +77,9 @@ test("shared code statistics exclude comments and tests and support commits and 
   const working = JSON.parse(result.stdout);
   assert.deepEqual(
     [working.baseline, working.current, working.net, working.hash],
-    [9, 10, 1, null],
+    [11, 12, 1, null],
   );
-  assert.equal((await codeChange("HEAD", "HEAD", root)).current, 9);
+  assert.equal((await codeChange("HEAD", "HEAD", root)).current, 11);
   await writeFile(join(root, ".gitattributes"), "rust/tessera-order/src/engine.rs export-ignore\n");
   git("add", ".gitattributes");
   git("commit", "-qm", "archive excludes source");
@@ -88,7 +94,7 @@ test("shared code statistics exclude comments and tests and support commits and 
     "rust/tessera-order/src/engine/refine/checks.rs",
   );
   const moved = await codeChange("HEAD", undefined, root);
-  assert.equal(moved.current, 9);
+  assert.equal(moved.current, 11);
   assert.ok(moved.files.some((file) => file.path === "engine/refine.rs" && file.current === 5));
 
   // Follow the test-only declaration across the move without excluding older

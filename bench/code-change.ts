@@ -20,10 +20,11 @@ export interface CodeChange {
 // Commits before the crate rename keep the library in `rust/tessera-sort`; files are keyed
 // by their path under `src/`, so a comparison across the rename matches them.
 const SOURCES = ["rust/tessera-order/src/", "rust/tessera-sort/src/"];
-// Preserve the historical metric when core modules move under engine/ and the
-// old engine traversal becomes engine/refine. API and trace code stay excluded.
+// Every module under engine/ counts except figure instrumentation (trace) and the
+// module root. Pre-engine/ layouts kept the same modules at the top level, where
+// API files such as parallel.rs stay excluded.
 const ENGINE =
-  /^rust\/tessera-(?:order|sort)\/src\/((?:engine\/)?(?:block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$)|engine(?:\.rs$|\/(?:refine|plan|parallel|refinement_tests)(?:\.rs$|\/.*\.rs$)))/;
+  /^rust\/tessera-(?:order|sort)\/src\/((?:block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$)|engine\.rs$|engine\/(?!mod\.rs$|trace(?:\.rs$|\/)).*\.rs$)/;
 // These module roots declare children in scope but do not contribute lines.
 const MODULE_ROOT = /\/src\/(lib\.rs|engine\/mod\.rs)$/;
 

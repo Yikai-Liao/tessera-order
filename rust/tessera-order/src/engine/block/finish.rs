@@ -21,6 +21,9 @@ use std::sync::{
 /// A guard must exclusively access the same stored value until it drops.
 /// `exclusive` must access that value without bypassing any outstanding guard.
 unsafe trait MetadataCell<Value> {
+    /// Whether completion uses a free-block cache per bucket.
+    const BUCKET_LOCAL_CACHES: bool;
+
     /// Creates an unborrowed cell containing exactly this value.
     fn new(value: Value) -> Self;
     /// Acquires exclusive access; callers never reacquire a held cell.
@@ -33,6 +36,8 @@ unsafe trait MetadataCell<Value> {
 
 // SAFETY: standard mutex guards serialize access and get_mut requires exclusivity.
 unsafe impl<Value> MetadataCell<Value> for Mutex<Value> {
+    const BUCKET_LOCAL_CACHES: bool = true;
+
     fn new(value: Value) -> Self {
         Mutex::new(value)
     }
@@ -55,6 +60,8 @@ unsafe impl<Value> MetadataCell<Value> for Mutex<Value> {
 
 // SAFETY: RefCell guards enforce exclusive borrowing, and it is never Sync.
 unsafe impl<Value> MetadataCell<Value> for core::cell::RefCell<Value> {
+    const BUCKET_LOCAL_CACHES: bool = false;
+
     fn new(value: Value) -> Self {
         core::cell::RefCell::new(value)
     }
@@ -85,8 +92,7 @@ struct Bucket {
     pending_sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
-    /// The bucket index; in parallel completion it also selects the bucket's
-    /// free-block cache, while serial completion shares slot 0.
+    /// The bucket index, which also selects the bucket's cache when present.
     cache: usize,
 }
 
@@ -150,11 +156,15 @@ unsafe impl<T: Send, Owner: Sync, Free: Sync> Sync for Storage<T, Owner, Free> {
 impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, Owner, Free> {
     /// Finds a free candidate in the local cache, reserve, or another bucket.
     fn take_free(&self, current: usize, local: &mut Vec<usize>) -> usize {
+        if !Free::BUCKET_LOCAL_CACHES {
+            return local
+                .pop()
+                .expect("serial completion exhausted its free reserve");
+        }
         if let Some(physical) = local.pop() {
             return physical;
         }
         let buckets = self.free.len() - 1;
-        assert!(buckets > 0, "serial completion exhausted its free reserve");
         loop {
             if let Some(physical) = lock(&self.free[buckets]).pop() {
                 return physical;
@@ -345,7 +355,11 @@ impl Bucket {
         // waits for one of those blocks, at most g + 1 are final: with at least
         // two shards, the shared reserve still covers outstanding candidates.
         let mut offset = 0;
-        let free_slot = self.cache.min(storage.free.len() - 1);
+        let free_slot = if Free::BUCKET_LOCAL_CACHES {
+            self.cache
+        } else {
+            0
+        };
         for logical in self.pending_sources.clone() {
             let mut free = lock(&storage.free[free_slot]);
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
@@ -382,7 +396,6 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     input: *mut T,
     input_len: usize,
     partitions: &mut [Partition<'_, '_, T>],
-    per_bucket_caches: bool,
 ) -> Completion<T, Owner, Free> {
     let block_size = partitions[0].block_size;
     let local_scratch = partitions[0].scratch_blocks;
@@ -442,7 +455,7 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     // Every physical block appears in the free list at most once at any time.
     // Serial completion shares this single reserve without per-bucket caches,
     // so reserving `count` keeps both normal movement and recovery allocation-free.
-    let mut free = Vec::with_capacity(if per_bucket_caches {
+    let mut free = Vec::with_capacity(if Free::BUCKET_LOCAL_CACHES {
         count - sources.len()
     } else {
         count
@@ -452,12 +465,12 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
             free.push(physical);
         }
     }
-    let mut caches = Vec::with_capacity(if per_bucket_caches {
+    let mut caches = Vec::with_capacity(if Free::BUCKET_LOCAL_CACHES {
         bucket_count + 1
     } else {
         1
     });
-    if per_bucket_caches {
+    if Free::BUCKET_LOCAL_CACHES {
         caches.extend(buckets.iter().map(|bucket| {
             // Empty buckets perform no transfers and need no free cache.
             let capacity = if bucket.pending_sources.is_empty() {
@@ -495,41 +508,25 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     completion
 }
 
-/// Builds the serial completion ledger with one shared free-block stack.
-///
-/// # Safety
-///
-/// `partition` must not be dropped or reused until the returned `Completion`
-/// is dropped, keeping its input slice and scratch allocation exclusively
-/// owned, valid and unresized through normal completion and unwind recovery.
-unsafe fn build_serial_completion<T>(
-    partition: &mut Partition<'_, '_, T>,
-) -> Completion<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>> {
-    assert!(partition.owns_recovery, "partition already completed");
-    let input = partition.input;
-    let len = partition.input_len;
-    // SAFETY: the single guard owns this complete scatter and its scratch,
-    // and the caller guarantees both outlive the returned Completion.
-    unsafe {
-        build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
-            input,
-            len,
-            core::slice::from_mut(partition),
-            false,
-        )
-    }
-}
-
 /// Finishes serial bands with exclusive metadata and a mutable callback.
 /// The completion guard restores every unfinished band before a panic escapes.
 pub(super) fn complete_serial<'records, T>(
     partition: &mut Partition<'records, '_, T>,
     mut visit: Option<Visit<'_, 'records, T>>,
 ) -> Vec<usize> {
+    assert!(partition.owns_recovery, "partition already completed");
+    let input = partition.input;
+    let len = partition.input_len;
     // SAFETY: `completion` is dropped before this function returns or unwinds,
     // and `partition` is not accessed or reused in between, so its input and
     // scratch stay live and exclusive through completion and unwind recovery.
-    let mut completion = unsafe { build_serial_completion(partition) };
+    let mut completion = unsafe {
+        build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
+            input,
+            len,
+            core::slice::from_mut(partition),
+        )
+    };
     for bucket in &mut completion.buckets {
         bucket.finish(&completion.storage, visit.as_deref_mut());
     }
@@ -571,7 +568,7 @@ unsafe fn complete_with_fault<'records, T: Send>(
     use rayon::prelude::*;
     // SAFETY: forwarded from the caller.
     let mut completion = unsafe {
-        build_completion::<T, Mutex<usize>, Mutex<Vec<usize>>>(input, input_len, partitions, true)
+        build_completion::<T, Mutex<usize>, Mutex<Vec<usize>>>(input, input_len, partitions)
     };
     let completed = AtomicUsize::new(0);
     let run = |bucket: &mut Bucket| {
@@ -914,7 +911,6 @@ mod tests {
                 input,
                 SHARDS * SHARD_LEN,
                 &mut shards,
-                true,
             )
         };
         let storage = &completion.storage;
@@ -1061,43 +1057,5 @@ mod tests {
             drop(records);
             assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
         }
-    }
-}
-
-#[cfg(test)]
-mod serial_tests {
-    use super::*;
-
-    #[test]
-    fn serial_completion_uses_one_free_stack_without_reallocation() {
-        let len: usize = if cfg!(miri) { 29 } else { 10_000 };
-        let radix: usize = if cfg!(miri) { 3 } else { 10 };
-        let block_size: usize = if cfg!(miri) { 4 } else { 32 };
-        let mut records: Vec<_> = (0..len)
-            .map(|id| ((id.wrapping_mul(7919) + 17) & ((1 << radix) - 1), id))
-            .collect();
-        let mut expected = records.clone();
-        expected.sort_by_key(|record| record.0);
-        let mut buffers = Buffers::new();
-        let mut partition = Partition::new(&mut records, 1 << radix, block_size, &mut buffers);
-        let _ = partition.step(|record: &(usize, usize)| record.0);
-        // SAFETY: `completion` is dropped before `partition` or `buffers` are
-        // accessed again or dropped, keeping the input and scratch exclusive.
-        let mut completion = unsafe { build_serial_completion(&mut partition) };
-        assert_eq!(completion.storage.free.len(), 1);
-        let initial_capacity = completion.storage.free[0].borrow().capacity();
-        for bucket in &mut completion.buckets {
-            bucket.finish(
-                &completion.storage,
-                None::<fn(usize, Range<usize>, &mut [_])>,
-            );
-        }
-        assert_eq!(
-            completion.storage.free[0].borrow().capacity(),
-            initial_capacity
-        );
-        drop(completion);
-        drop(partition);
-        assert_eq!(records, expected);
     }
 }

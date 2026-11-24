@@ -282,9 +282,10 @@ export function renderCurves(spec: CurveChart) {
       height,
       id: spec.id,
       title: spec.title,
+      // The note explains what the axes cannot show, so the description carries it too.
       description: `${spec.guide}. ${spec.curves
         .map((curve) => `${curve.name}: ${curve.points.map(([, y]) => y).join(", ")}`)
-        .join("; ")}`,
+        .join("; ")}.${spec.note ? ` ${spec.note}` : ""}`,
     },
     [{ marks }],
   )}\n`;

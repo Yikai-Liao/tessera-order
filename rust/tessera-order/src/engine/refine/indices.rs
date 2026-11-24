@@ -2,9 +2,12 @@
 
 //! Stable permutations for index output and cached-key record movement.
 
-use super::{Requirement, Sorter, bit_len, prepare, spans::SourceOrder, tile_capacity};
+use super::{
+    Order, Requirement, Sorter, bit_len, insertion_probe, prepare_with, probe_insertion_budget,
+    reverse_stably, spans::SourceOrder, tile_capacity,
+};
 use crate::engine::{
-    key::{ByKey, RadixKey, Unsigned},
+    key::{ByKey, Direct, Extract, Unsigned},
     thresholds::TILE_BYTES,
     workspace::Workspace,
 };
@@ -12,17 +15,21 @@ use alloc::vec::Vec;
 
 const BANDS: usize = 1 << u8::BITS;
 
-pub(crate) fn argsort<T, K: RadixKey>(values: &[T], key: impl FnMut(&T) -> K) -> Vec<usize> {
+pub(crate) fn argsort<T, E: Extract<T>>(values: &[T], extractor: E) -> Vec<usize> {
     let mut indices = Vec::new();
-    if let Some(order) = order_indices(values, key, size_of::<usize>(), &mut indices) {
+    if let Some(order) = order_indices(values, extractor, size_of::<usize>(), None, &mut indices) {
         order.write_indices(&mut indices);
     }
     indices
 }
 
-pub(crate) fn order_by_cached_indices<T, V: Unsigned>(values: &mut [T], keys: Vec<V>) {
+pub(crate) fn order_by_cached_indices<T, V: Unsigned>(
+    values: &mut [T],
+    keys: Vec<V>,
+    varying: u128,
+) {
     let mut indices = Vec::new();
-    let spans = order_indices(&keys, |v| *v, size_of::<T>(), &mut indices);
+    let spans = order_indices(&keys, Direct, size_of::<T>(), Some(varying), &mut indices);
     drop(keys);
     if let Some(order) = spans {
         drop(indices);
@@ -32,33 +39,104 @@ pub(crate) fn order_by_cached_indices<T, V: Unsigned>(values: &mut [T], keys: Ve
     }
 }
 
-/// Fill `indices` with the stable permutation, or return source spans that
-/// the caller can expand in the same buffer or apply directly to its records.
-fn order_indices<T, K: RadixKey>(
+fn fill_ordered<T, E: Extract<T>>(
     values: &[T],
-    mut key: impl FnMut(&T) -> K,
+    order: Order,
+    extractor: &mut E,
+    indices: &mut Vec<usize>,
+) -> bool {
+    match order {
+        Order::Ascending => indices.extend(0..values.len()),
+        Order::Descending { strict: true } => indices.extend((0..values.len()).rev()),
+        Order::Descending { strict: false } => {
+            indices.extend(0..values.len());
+            reverse_stably(indices, &mut ByKey(|i: &usize| extractor.key(&values[*i])));
+        }
+        Order::Flat | Order::Unsorted => return false,
+    }
+    true
+}
+
+/// Probes budgeted insertion, reusing `indices` on tile-sized slices and
+/// deferring `0..len` materialization on long slices until the swap rate fits.
+fn probe_insertion<T, E: Extract<T>>(
+    values: &[T],
+    extractor: &mut E,
+    tile_len: usize,
+    indices: &mut Vec<usize>,
+) -> bool {
+    let len = values.len();
+    if len <= tile_len {
+        indices.extend(0..len);
+        let mut extract = ByKey(|i: &usize| extractor.key(&values[*i]));
+        return insertion_probe(indices, &mut extract, tile_len);
+    }
+    let Some(budget) = probe_insertion_budget(values, extractor, tile_len) else {
+        return false;
+    };
+    indices.extend(0..len);
+    ByKey(|i: &usize| extractor.key(&values[*i]))
+        .insertion_sort(indices, budget)
+        .is_some()
+}
+
+/// Fill `indices` with the stable permutation, or return source spans that
+/// the caller can expand or apply directly to its records.
+fn order_indices<T, E: Extract<T>>(
+    values: &[T],
+    mut extractor: E,
     record_bytes: usize,
+    known_varying: Option<u128>,
     indices: &mut Vec<usize>,
 ) -> Option<SourceOrder> {
     let len = values.len();
     indices.clear();
-    indices.extend(0..len);
+    // Reject unrepresentable index outputs (possible for zero-sized `T`) before
+    // extracting any keys, without eagerly allocating for valid lengths.
+    assert!(
+        len <= isize::MAX as usize / size_of::<usize>(),
+        "capacity overflow"
+    );
     if len < 2 {
+        indices.extend(0..len);
         return None;
     }
     let tile_len = tile_capacity::<usize>(TILE_BYTES);
-    let mut extract = ByKey(|i: &usize| key(&values[*i]));
-    let varying = prepare(indices, &mut extract, tile_len)?;
+    // Prepare on `values` directly: order probing, ascending/strictly-descending
+    // confirmation and varying-bit scans read source keys directly, while
+    // budgeted insertion and descending tie repair materialize `0..len` on
+    // demand (if whole-slice insertion exhausts its budget, `argsort` reuses
+    // that buffer and cached-key sparse fallback drops it before moving records).
+    let Some(varying) = prepare_with(
+        values,
+        &mut extractor,
+        known_varying,
+        indices,
+        |v, order, e, idx| fill_ordered(v, order, e, idx),
+        |v, e, idx| probe_insertion(v, e, tile_len, idx),
+    ) else {
+        if indices.is_empty() {
+            indices.extend(0..len);
+        }
+        return None;
+    };
     let mut scratch = Workspace::new();
     if len <= tile_len {
-        scratch.tile.sort(indices, varying, &mut extract);
+        if indices.is_empty() {
+            indices.extend(0..len);
+        }
+        scratch.tile.sort(
+            indices,
+            varying,
+            &mut ByKey(|i: &usize| extractor.key(&values[*i])),
+        );
         return None;
     }
     if let Some(order) = SourceOrder::for_node(
         values,
         varying,
         Requirement::All,
-        &mut ByKey(&mut key),
+        &mut extractor,
         record_bytes,
     ) {
         return Some(order);
@@ -80,19 +158,25 @@ fn order_indices<T, K: RadixKey>(
     let prefix_mask = lower >> prefix_shift;
     // Each band has the same high digit. Use the spare bits of its index
     // words for the next key prefix, preserving source order on ties.
-    let encoded = |r: &T| key(r).encode().to_u128();
-    let ends = scatter_indices(values, indices, encoded, digit_shift, |key, source| {
-        if prefix_mask == 0 {
-            source
-        } else {
-            ((key >> prefix_shift) as usize) << index_bits | source
-        }
-    });
+    indices.resize(len, 0);
+    let ends = scatter_indices(
+        values,
+        indices,
+        |r| extractor.key(r).to_u128(),
+        digit_shift,
+        |key, source| {
+            if prefix_mask == 0 {
+                source
+            } else {
+                ((key >> prefix_shift) as usize) << index_bits | source
+            }
+        },
+    );
     if lower == 0 {
         return None;
     }
     let remaining = lower & ((1u128 << prefix_shift) - 1);
-    let mut extract = ByKey(|i: &usize| key(&values[*i]));
+    let mut extract = ByKey(|i: &usize| extractor.key(&values[*i]));
     let mut start = 0;
     for end in ends {
         if end == start {
@@ -170,5 +254,40 @@ fn apply_cycles<T>(values: &mut [T], mut indices: Vec<usize>) {
             values.swap(position, source);
             position = source;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn oversized_zst_argsort_rejects_before_key_calls() {
+        let oversized_len = isize::MAX as usize / size_of::<usize>() + 1;
+        // SAFETY: `()` is zero-sized, so any valid non-null aligned pointer
+        // forms a valid slice of any `len <= isize::MAX` (0 total bytes).
+        let oversized: &[()] = unsafe {
+            core::slice::from_raw_parts(core::ptr::NonNull::dangling().as_ptr(), oversized_len)
+        };
+        let mut calls = 0usize;
+        let panicked = catch_unwind(AssertUnwindSafe(|| {
+            let _ = argsort(
+                oversized,
+                ByKey(|_: &()| {
+                    calls += 1;
+                    0u64
+                }),
+            );
+        }))
+        .is_err();
+        assert!(panicked);
+        assert_eq!(calls, 0);
+
+        let small = [(); 5];
+        assert_eq!(
+            argsort(&small, ByKey(|_: &()| 7u64)),
+            alloc::vec![0, 1, 2, 3, 4]
+        );
     }
 }

@@ -77,8 +77,8 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
-- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including contract-appropriate finishing for small inputs.
-- `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
+- `prepare_with` owns root preparation for serial, parallel and index entries (`prepare` wraps it for in-place sorts). `insertion_probe` owns tile-sized insertion eligibility and contract-appropriate finishing, while `probe_insertion_budget` owns the long-input prefix window and scaled swap budget shared with `refine/indices.rs`.
+- `finish_ordered` owns in-place ascending completion and strict or stable descending reversal for in-place roots, deferred flat confirmation and partition children; `refine/indices.rs::fill_ordered` owns the matching index-output handler, and both call `reverse_stably` for descending inputs with ties.
 - Root, node-child and tile-child variation share `order::scan_varying_bits`; key digit windows have one representation in `key::Digit`.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
 - A `Direct` extractor may finish a covering digit by counting, because every sealed encoding is a bijection on bit patterns. `ByKey` declines, because a user key does not identify its payload.

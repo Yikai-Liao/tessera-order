@@ -4,11 +4,11 @@ Argsort, selection and cached-key sorting each ask for less than a sorted slice.
 
 ## Argsort
 
-**Problem.** Argsort sorts indices, not records. Every key read becomes an indirect lookup into the source, a likely cache miss on a large input.
+**Problem.** Argsort sorts indices, not records. Once sorting works on an index vector, every key read becomes an indirect lookup into the source, a likely cache miss on a large input.
 
-**Idea: pack key bits into the index.** An index into a million records needs 20 bits; a 64-bit word has 44 more. Tessera fills them with key bits, so most of the sorting reads only the words themselves.
+**Idea: probe order and variation on the source directly, then pack key bits into the index.** An index into a million records needs 20 bits; a 64-bit word has 44 more. Tessera avoids indirect lookups during order probing, ascending or strictly descending confirmation, and varying-bit scans, and then fills the spare index bits with key bits so most of the remaining sorting reads only the words themselves.
 
-1. The input is first routed like a sort: ordered inputs, constant keys, inputs that fit a tile and [sparse source order](routing.md#sparse-source-order) finish there.
+1. The input is first routed through shared root preparation on the source slice (with direct-key SIMD scans for `argsort`): ascending, strictly descending, and constant inputs fill the output without indirect key lookups, while descending inputs with ties materialize indices and repair equal-key runs through indirect reads. When the initial order probe reports an unordered input, tiles materialize indices for budgeted insertion, while longer inputs first probe a tile of source keys and materialize indices only if the swap rate fits the budget (if the subsequent whole-slice insertion exceeds its budget, `argsort` reuses that index buffer to write sparse spans or run radix scatter); a flat order sample that only proves unordered during full confirmation skips insertion and proceeds to the fallback. Tile-sized and [sparse source order](routing.md#sparse-source-order) inputs also finish here.
 2. One counting pass on the top 8 varying key bits writes each source index into one of 256 bands, in input order.
 3. Within each dense band, every word holds the next key bits above the index. Sorting the words as plain integers orders them by those key bits and then by source position, which keeps the order stable.
 4. Only words whose packed bits tie, with key bits still unresolved, look up their source keys again.
@@ -38,6 +38,6 @@ With one dominant key, a rank inside the dominant key's band needs only that pos
 
 - **Already ascending:** done, with no further work.
 - **Keys vary within 12 bits**, as with a small category ID: one stable distribution moves each record once into its final bucket. It never calls the key function: it replays the cached keys in input order. A tile uses a single counting pass; a larger input uses one [block partition](block-partition.md) without recursive finishing.
-- **Otherwise:** argsort the cached keys, with the packing above, and release them. Then move the records along the permutation: run by run if the order was sparse, otherwise by following its cycles, in linear time.
+- **Otherwise:** argsort the cached keys with the packing above (reusing the varying-bit mask already collected), and release the cached keys. If the order was sparse, drop any index buffer allocated during a failed insertion attempt and move the records run by run; otherwise follow the permutation's cycles in linear time.
 
 The cache costs one key per record, the same O(n) as the standard library's cached-key sort.

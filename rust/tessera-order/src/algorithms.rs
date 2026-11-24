@@ -106,7 +106,7 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 /// assert_eq!(tessera_order::argsort(&values), [1, 3, 0, 2]);
 /// ```
 pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
-    argsort_by_key(values, |key| *key)
+    engine::argsort(values, Direct)
 }
 
 /// Returns the indices that would sort `values` by a key function.
@@ -127,7 +127,7 @@ pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
 /// assert_eq!(tessera_order::argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
 pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], key: F) -> Vec<usize> {
-    engine::argsort(values, key)
+    engine::argsort(values, ByKey(key))
 }
 
 /// Places the record that [`sort`] would place at `index`, and

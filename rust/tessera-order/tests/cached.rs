@@ -85,8 +85,26 @@ fn ordered_and_constant_keys_sort_with_one_call_per_record() {
     check(|_| 7u32, u32::cmp);
     check(|id| id as u64, u64::cmp);
     check(|id| (id / 3) as u8, u8::cmp);
-    // Ordered except for the last record.
+    // Strictly descending, tied descending runs, a large fixed middle tie
+    // group, and two large descending runs whose transition would be missed by
+    // strided order sampling.
+    check(|id| u64::MAX - id as u64, u64::cmp);
+    check(|id| u64::MAX - (id / 3) as u64, u64::cmp);
     let len = lengths().last().copied().unwrap_or_default();
+    check(
+        move |id| {
+            if id == 0 {
+                u64::MAX
+            } else if id + 1 == len {
+                0
+            } else {
+                1u64 << 63
+            }
+        },
+        u64::cmp,
+    );
+    check(move |id| if id < len / 2 { u64::MAX } else { 0 }, u64::cmp);
+    // Ordered except for the last record.
     check(
         move |id| if id + 1 == len { 0 } else { id as u32 + 1 },
         u32::cmp,

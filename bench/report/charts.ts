@@ -789,6 +789,28 @@ const countLabel = (n: number) =>
 const exponent = ([n1, y1]: [number, number], [n2, y2]: [number, number]) =>
   Math.log(y2 / y1) / Math.log(n2 / n1);
 
+// Growth orders the memory figure names, as exponents of n. A measured step within the
+// tolerance of one takes its name: a fixed preallocation or a capped buffer grows a little,
+// and a sweep's lengths are not exact powers of the bound.
+const GROWTH_ORDERS = [
+  { order: 0, name: "constant" },
+  { order: 0.5, name: "√n" },
+  { order: 1, name: "n" },
+];
+const GROWTH_TOLERANCE = 0.1;
+
+/** The growth order of a curve's last step, or null when the step has no positive ends. */
+function lastGrowth(points: [number, number][]) {
+  const [before, last] = points.slice(-2);
+  if (!before || !last || before[1] <= 0 || last[1] <= 0) return null;
+  const order = exponent(before, last);
+  return (
+    GROWTH_ORDERS.find((known) => Math.abs(order - known.order) <= GROWTH_TOLERANCE)?.name ??
+    `n^${order.toFixed(2)}`
+  );
+}
+const growthTag = (name: string) => (name === "constant" ? name : `∝ ${name}`);
+
 export function renderGrowth(growth: Growth): Figure | null {
   const t = terms(growth.operation);
   const { ty, lengths } = growth;
@@ -806,17 +828,37 @@ export function renderGrowth(growth: Growth): Figure | null {
   const plotted = sorts.filter((entry) => entry.points.some(([, y]) => y >= MEMORY_FLOOR));
   const small = sorts.filter((entry) => !plotted.includes(entry));
   const last = own.at(-1)!;
-  const before = own.at(-2)!;
-  const order = before[1] > 0 && last[1] > 0 ? exponent(before, last) : null;
-  const growthName =
-    order === null ? null : Math.abs(order - 0.5) <= 0.1 ? "√n" : `n^${order.toFixed(2)}`;
+  const growthName = lastGrowth(own);
   // When every peak is below the floor, still mark the observations and keep their exact values.
   const visible = plotted.length ? plotted : sorts;
-  // Half a decade of headroom above the largest value keeps the top line inside the plot.
-  const high =
-    Math.max(MEMORY_FLOOR, ...visible.flatMap((e) => e.points.map(([, y]) => y))) * Math.sqrt(10);
+  const top = (from: number, to: number) =>
+    Math.max(
+      MEMORY_FLOOR,
+      ...visible.flatMap((e) => e.points.filter(([n]) => n >= from && n <= to).map(([, y]) => y)),
+    );
+  // A slope key in the top-left corner, over the first lengths, draws the growth orders the end
+  // labels name. Its constant line runs a factor of 4 above every line below it, and its n line
+  // ends a factor of 2 below the axis top.
+  const keyEnd = lengths[Math.min(2, lengths.length - 1)];
+  const keySpan = keyEnd / lengths[0];
+  // Half a decade of headroom above the largest value keeps the top line inside the plot; the
+  // axis rises further when the key needs the room.
+  const headroom = top(lengths[0], lengths.at(-1)!) * Math.sqrt(10);
+  const keyBase = Math.max(headroom / keySpan / 2, top(lengths[0], keyEnd) * 4);
+  const high = Math.max(headroom, keyBase * keySpan * 2);
+  const slopeKey = GROWTH_ORDERS.map(({ order, name }) => ({
+    label: growthTag(name),
+    points: [lengths[0], keyEnd].map(
+      (n) => [n, keyBase * (n / lengths[0]) ** order] as [number, number],
+    ),
+  }));
   const endpoint = `${formatBytes(last[1])} at ${countLabel(last[0])} records`;
-  const title = growthName ? `Grows as ${growthName}, to ${endpoint}` : endpoint;
+  const title =
+    growthName === "constant"
+      ? `Constant, ${endpoint}`
+      : growthName
+        ? `Grows as ${growthName}, to ${endpoint}`
+        : endpoint;
   const decades = Array.from(
     { length: Math.floor(Math.log10(high / MEMORY_FLOOR)) + 1 },
     (_, index) => MEMORY_FLOOR * 10 ** index,
@@ -851,7 +893,6 @@ export function renderGrowth(growth: Growth): Figure | null {
     growth.operation.kind === "select_nth" || growth.operation.kind === "partition-buckets"
       ? `${operationDescription(growth.operation)} · peak heap allocation beyond the input`
       : `peak heap allocation during one ${t.one}, beyond the input`;
-  const showReference = last[1] >= MEMORY_FLOOR;
   const chart: CurveChart = {
     title,
     guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · ${measurement}${growth.source ? ` · ${growth.source}` : ""}`,
@@ -867,20 +908,17 @@ export function renderGrowth(growth: Growth): Figure | null {
       ticks: decades.map((value) => ({ value, label: formatBytes(value) })),
       label: "extra memory",
     },
-    curves: visible.map((e) => ({
-      name: displayName(e.name),
-      tone: toneOf(e.name),
-      points: e.points,
-    })),
-    references: showReference
-      ? [
-          {
-            dotted: true,
-            points: lengths.map((n) => [n, last[1] * Math.sqrt(n / last[0])] as [number, number]),
-          },
-        ]
-      : [],
-    legend: showReference ? [...kindLegend, [["dotted"], "√n slope through Tessera"]] : kindLegend,
+    curves: visible.map((e) => {
+      const name = lastGrowth(e.points);
+      return {
+        name: displayName(e.name),
+        tone: toneOf(e.name),
+        ...(name ? { growth: growthTag(name) } : {}),
+        points: e.points,
+      };
+    }),
+    references: slopeKey,
+    legend: kindLegend,
     ...(note ? { note } : {}),
   };
   return {
@@ -888,7 +926,7 @@ export function renderGrowth(growth: Growth): Figure | null {
     subject: "Extra memory by input length",
     summary:
       growth.operation.kind === "sort"
-        ? `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: ${t.many} that copy their input rise with the input itself, and the dotted line has the slope of √n.`
+        ? `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster. Each line's label names how its last step grows, and the key in the corner draws those slopes: ${t.many} that copy their input grow as n.`
         : "Peak heap allocation beyond the input, including any retained output. Both axes are logarithmic.",
     title,
     kind: "curves",

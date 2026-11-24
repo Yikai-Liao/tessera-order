@@ -32,6 +32,8 @@ bun run docs:build             # build into docs/.vitepress/dist; fails on dead 
 
 The figure engine needs cargo and the WebAssembly target: `rustup target add wasm32-unknown-unknown`. `wasm32` is a documentation build target only, not a supported library platform; the library's platforms are those its [CI lanes](ci.md) test. On `wasm32`, `usize` has 32 bits, so a figure that showed a value the engine derives from `usize` widths, such as the default block size, would show the 32-bit result.
 
+The implementation comparison page reads the published `comparison.json` from the `benchmark-data` branch. To preview a change to that data before it is published, generate the file with `writeComparison` from [`comparison.ts`](../../bench/tracking/comparison.ts) over a copy of the branch's journals, place it under `docs/public/`, and start the server with `VITE_COMPARISON_SOURCE=/<file> bun run docs:dev`. The override applies only to the development server; delete the file afterwards.
+
 Pull requests that touch the site, its pages or the library source run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 
 ## Writing pages

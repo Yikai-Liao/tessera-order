@@ -28,22 +28,22 @@ const PEEL: usize = 4;
 ///
 /// The scan owns traversal and mask aggregation. Each key owns only the
 /// backend's lane count and comparison in its encoded order. One lane denotes
-/// a scalar fallback, used by wide and pointer-sized keys.
+/// a scalar fallback, used by wide and tuple keys.
 pub trait SimdKey: Copy {
-    /// Number of pairs compared by [`Self::pair_mask`] under this backend,
+    /// Vector mask produced by [`Self::pair_gt`]; unused when [`Self::lanes`] is 1.
+    type Mask<S: Simd>: SimdMask<S>;
+
+    /// Number of pairs compared by [`Self::pair_gt`] under this backend,
     /// from one through 64, matching the backend's native vector width.
     fn lanes<S: Simd>() -> usize {
         1
     }
 
-    /// Bit i is set exactly when left[i]'s encoded key exceeds right[i]'s,
-    /// for the first [`Self::lanes`] pairs; all higher bits are zero.
-    /// Both slices contain at least that many records.
-    fn pair_mask<S: Simd>(_simd: S, left: &[Self], right: &[Self]) -> u64
-    where
-        Self: RadixKey,
-    {
-        u64::from(left[0].encode() > right[0].encode())
+    /// Lane `i` is true iff `left[i]`'s encoded key exceeds `right[i]`'s,
+    /// for the first [`Self::lanes`] pairs. Both slices have exact length
+    /// [`Self::lanes`]; only called when `lanes > 1`.
+    fn pair_gt<S: Simd>(simd: S, _left: &[Self], _right: &[Self]) -> Self::Mask<S> {
+        Self::Mask::<S>::splat(simd, false)
     }
 }
 
@@ -144,29 +144,57 @@ fn first_inversion_with<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<u
 /// One scan for every direct encoding, using explicit fearless SIMD pairs.
 #[inline(always)]
 fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
-    const BLOCK: usize = 32;
     let lanes = K::lanes::<S>();
     if lanes == 1 {
         return crate::engine::order::by_key(values, &mut Direct);
     }
-    let vectors = (BLOCK / lanes).max(1);
-    let block_len = vectors * lanes;
     let pairs = values.len().saturating_sub(1);
+    let block_len = 4 * lanes;
     let mut index = 0;
     while index + block_len <= pairs {
-        // A block holds 32 pairs or one wider native vector, at most 64 pairs.
-        // One mask check locates the first inversion without rereading keys.
+        // Combine four native comparison masks in SIMD registers so ordered
+        // blocks pay one bitmask extraction without recomputing on a hit.
+        // Write the four calls directly instead of `array::from_fn`, which
+        // crosses a non-target-feature boundary and drops AVX2 inlining.
         let block = &values[index..=index + block_len];
-        let mut bits = 0u64;
-        for vector in 0..vectors {
-            let at = vector * lanes;
-            bits |=
-                K::pair_mask(simd, &block[at..at + lanes], &block[at + 1..at + 1 + lanes]) << at;
+        let m0 = K::pair_gt(simd, &block[..lanes], &block[1..1 + lanes]);
+        let m1 = K::pair_gt(
+            simd,
+            &block[lanes..2 * lanes],
+            &block[lanes + 1..2 * lanes + 1],
+        );
+        let m2 = K::pair_gt(
+            simd,
+            &block[2 * lanes..3 * lanes],
+            &block[2 * lanes + 1..3 * lanes + 1],
+        );
+        let m3 = K::pair_gt(
+            simd,
+            &block[3 * lanes..4 * lanes],
+            &block[3 * lanes + 1..4 * lanes + 1],
+        );
+        if ((m0 | m1) | (m2 | m3)).to_bitmask() != 0 {
+            let masks = [m0, m1, m2, m3];
+            for (vector, &mask) in masks.iter().enumerate() {
+                let bits = mask.to_bitmask();
+                if bits != 0 {
+                    return Some(index + vector * lanes + bits.trailing_zeros() as usize);
+                }
+            }
         }
+        index += block_len;
+    }
+    while index + lanes <= pairs {
+        let bits = K::pair_gt(
+            simd,
+            &values[index..index + lanes],
+            &values[index + 1..index + 1 + lanes],
+        )
+        .to_bitmask();
         if bits != 0 {
             return Some(index + bits.trailing_zeros() as usize);
         }
-        index += block_len;
+        index += lanes;
     }
     while index < pairs {
         if values[index].encode() > values[index + 1].encode() {
@@ -180,33 +208,70 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
 macro_rules! integer_key {
     ($($ty:ty),* $(,)?) => {$(
         impl SimdKey for $ty {
+            type Mask<S: Simd> = <<Self as SimdIntElement>::Native<S> as SimdBase<S>>::Mask;
+
             #[inline(always)]
             fn lanes<S: Simd>() -> usize {
                 <Self as SimdIntElement>::Native::<S>::LEN
             }
 
             #[inline(always)]
-            fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
                 let left = <Self as SimdIntElement>::Native::<S>::from_slice(simd, left);
                 let right = <Self as SimdIntElement>::Native::<S>::from_slice(simd, right);
                 // Native signed comparison has the same order as sign-flip encoding.
-                left.simd_gt(right).to_bitmask()
+                left.simd_gt(right)
             }
         }
     )*};
 }
 integer_key!(u8, u16, u32, u64, i8, i16, i32, i64);
 
+macro_rules! pointer_key {
+    ($(($ptr:ty, $fixed:ty)),* $(,)?) => {$(
+        impl SimdKey for $ptr {
+            type Mask<S: Simd> = <$fixed as SimdKey>::Mask<S>;
+            #[inline(always)]
+            fn lanes<S: Simd>() -> usize {
+                <$fixed as SimdKey>::lanes::<S>()
+            }
+            #[inline(always)]
+            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
+                const { assert!(size_of::<$ptr>() == size_of::<$fixed>() && align_of::<$ptr>() == align_of::<$fixed>()) }
+                // SAFETY: pointer-sized integers have the same size, alignment,
+                // signed/two's-complement bit validity and shared-borrow
+                // lifetimes as the selected fixed-width integer.
+                let (left, right) = unsafe {
+                    (
+                        core::slice::from_raw_parts(left.as_ptr().cast::<$fixed>(), left.len()),
+                        core::slice::from_raw_parts(right.as_ptr().cast::<$fixed>(), right.len()),
+                    )
+                };
+                <$fixed as SimdKey>::pair_gt(simd, left, right)
+            }
+        }
+    )*};
+}
+#[cfg(target_pointer_width = "64")]
+pointer_key!((usize, u64), (isize, i64));
+#[cfg(target_pointer_width = "32")]
+pointer_key!((usize, u32), (isize, i32));
+#[cfg(target_pointer_width = "16")]
+pointer_key!((usize, u16), (isize, i16));
+
 macro_rules! float_key {
     ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl SimdKey for $f {
+            type Mask<S: Simd> =
+                <<<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits as SimdBase<S>>::Mask;
+
             #[inline(always)]
             fn lanes<S: Simd>() -> usize {
                 <Self as SimdFloatElement>::Native::<S>::LEN
             }
 
             #[inline(always)]
-            fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
                 let sign = (1 as $u) << (<$u>::BITS - 1);
                 let encode = |values: &[Self]| {
                     let bits = <Self as SimdFloatElement>::Native::<S>::from_slice(simd, values).to_bits();
@@ -216,7 +281,7 @@ macro_rules! float_key {
                     // zero or all ones, preserving total_cmp including NaN bits.
                     bits ^ ((zero - (bits >> (<$u>::BITS - 1))) | sign)
                 };
-                encode(left).simd_gt(encode(right)).to_bitmask()
+                encode(left).simd_gt(encode(right))
             }
         }
     )*};
@@ -224,13 +289,25 @@ macro_rules! float_key {
 float_key!((f32, u32), (f64, u64));
 
 macro_rules! scalar_key {
-    ($($ty:ty),* $(,)?) => {$(impl SimdKey for $ty {})*};
+    ($($ty:ty),* $(,)?) => {$(
+        impl SimdKey for $ty {
+            type Mask<S: Simd> = S::mask64s;
+        }
+    )*};
 }
-scalar_key!(u128, usize, i128, isize);
+scalar_key!(u128, i128);
+#[cfg(not(any(
+    target_pointer_width = "16",
+    target_pointer_width = "32",
+    target_pointer_width = "64"
+)))]
+scalar_key!(usize, isize);
 
 macro_rules! tuple_simd_key {
     (@step [$($head:ident),+]; $last:ident $(, $rest:ident)*) => {
-        impl<$($head: SimdKey,)+ $last: SimdKey> SimdKey for ($($head,)+ $last) {}
+        impl<$($head: SimdKey,)+ $last: SimdKey> SimdKey for ($($head,)+ $last) {
+            type Mask<S: Simd> = S::mask64s;
+        }
         tuple_simd_key!(@step [$($head,)+ $last]; $($rest),*);
     };
     (@step [$($head:ident),+];) => {};
@@ -238,13 +315,15 @@ macro_rules! tuple_simd_key {
 tuple_simd_key!(@step [A]; B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 
 impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
+    type Mask<S: Simd> = K::Mask<S>;
+
     #[inline(always)]
     fn lanes<S: Simd>() -> usize {
         K::lanes::<S>()
     }
 
     #[inline(always)]
-    fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+    fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
         // SAFETY: Reverse<K> is repr(transparent) over K, so both shared views
         // have the same layout, alignment, validity and lifetimes as the inputs.
         let (left, right) = unsafe {
@@ -254,7 +333,7 @@ impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
             )
         };
         // Complementing both encoded keys reverses >, including equal keys.
-        K::pair_mask(simd, right, left)
+        K::pair_gt(simd, right, left)
     }
 }
 
@@ -309,7 +388,7 @@ mod tests {
             // One long slice reaches even a 64-pair vector plus its scalar tail.
             &[0, 1, 97]
         } else {
-            &[0, 1, 2, 31, 63, 64, 65, 97, 129]
+            &[0, 1, 2, 31, 63, 64, 65, 97, 129, 265]
         };
         macro_rules! check {
             ($($ty:ty),*) => {$(
@@ -347,11 +426,47 @@ mod tests {
     }
 
     #[test]
+    fn pointer_sized_lanes_match_fixed_width() {
+        #[cfg(target_pointer_width = "64")]
+        type FixedU = u64;
+        #[cfg(target_pointer_width = "64")]
+        type FixedI = i64;
+        #[cfg(target_pointer_width = "32")]
+        type FixedU = u32;
+        #[cfg(target_pointer_width = "32")]
+        type FixedI = i32;
+        #[cfg(target_pointer_width = "16")]
+        type FixedU = u16;
+        #[cfg(target_pointer_width = "16")]
+        type FixedI = i16;
+
+        #[cfg(any(
+            target_pointer_width = "16",
+            target_pointer_width = "32",
+            target_pointer_width = "64"
+        ))]
+        {
+            fn lanes<S: Simd, K: SimdKey>(_: S) -> usize {
+                K::lanes::<S>()
+            }
+            for level in [Level::baseline(), Level::new()] {
+                dispatch!(level, simd => {
+                    let (u, i) = (lanes::<_, FixedU>(simd), lanes::<_, FixedI>(simd));
+                    assert_eq!(lanes::<_, usize>(simd), u);
+                    assert_eq!(lanes::<_, isize>(simd), i);
+                    assert_eq!(lanes::<_, core::cmp::Reverse<usize>>(simd), u);
+                    assert_eq!(lanes::<_, core::cmp::Reverse<isize>>(simd), i);
+                });
+            }
+        }
+    }
+
+    #[test]
     fn float_scans() {
         let lengths: &[usize] = if cfg!(miri) {
             &[0, 1, 97]
         } else {
-            &[0, 1, 2, 31, 63, 64, 65, 97, 129]
+            &[0, 1, 2, 31, 63, 64, 65, 97, 129, 265]
         };
         macro_rules! check {
             ($f:ty, $u:ty) => {{
@@ -400,7 +515,15 @@ mod tests {
     #[test]
     fn earliest_of_multiple_inversions() {
         for level in [Level::baseline(), Level::new()] {
-            for (first, later) in [(4, 12), (7, 33), (31, 65), (35, 67), (67, 95)] {
+            for (first, later) in [
+                (4, 12),
+                (5, 8),
+                (7, 12),
+                (7, 33),
+                (31, 65),
+                (35, 67),
+                (67, 95),
+            ] {
                 let mut keys: Vec<u64> = (0..129).collect();
                 keys.swap(first, first + 1);
                 keys.swap(later, later + 1);

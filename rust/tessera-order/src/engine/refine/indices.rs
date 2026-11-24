@@ -2,9 +2,11 @@
 
 //! Stable permutations for index output and cached-key record movement.
 
-use super::{Requirement, Sorter, bit_len, prepare, spans::SourceOrder, tile_capacity};
+use super::{
+    Requirement, Sorter, bit_len, prepare, prepare_with, spans::SourceOrder, tile_capacity,
+};
 use crate::engine::{
-    key::{ByKey, RadixKey, Unsigned},
+    key::{BitWidth, ByKey, RadixKey, Unsigned},
     thresholds::TILE_BYTES,
     workspace::Workspace,
 };
@@ -14,15 +16,19 @@ const BANDS: usize = 1 << u8::BITS;
 
 pub(crate) fn argsort<T, K: RadixKey>(values: &[T], key: impl FnMut(&T) -> K) -> Vec<usize> {
     let mut indices = Vec::new();
-    if let Some(order) = order_indices(values, key, size_of::<usize>(), &mut indices) {
+    if let Some(order) = order_indices(values, key, size_of::<usize>(), None, &mut indices) {
         order.write_indices(&mut indices);
     }
     indices
 }
 
-pub(crate) fn order_by_cached_indices<T, V: Unsigned>(values: &mut [T], keys: Vec<V>) {
+pub(crate) fn order_by_cached_indices<T, V: Unsigned>(
+    values: &mut [T],
+    keys: Vec<V>,
+    varying: u128,
+) {
     let mut indices = Vec::new();
-    let spans = order_indices(&keys, |v| *v, size_of::<T>(), &mut indices);
+    let spans = order_indices(&keys, |v| *v, size_of::<T>(), Some(varying), &mut indices);
     drop(keys);
     if let Some(order) = spans {
         drop(indices);
@@ -38,6 +44,7 @@ fn order_indices<T, K: RadixKey>(
     values: &[T],
     mut key: impl FnMut(&T) -> K,
     record_bytes: usize,
+    known_varying: Option<u128>,
     indices: &mut Vec<usize>,
 ) -> Option<SourceOrder> {
     let len = values.len();
@@ -48,7 +55,12 @@ fn order_indices<T, K: RadixKey>(
     }
     let tile_len = tile_capacity::<usize>(TILE_BYTES);
     let mut extract = ByKey(|i: &usize| key(&values[*i]));
-    let varying = prepare(indices, &mut extract, tile_len)?;
+    let varying = match known_varying {
+        Some(varying) => prepare_with(indices, &mut extract, tile_len, |_, _| {
+            varying & K::Width::MASK
+        }),
+        None => prepare(indices, &mut extract, tile_len),
+    }?;
     let mut scratch = Workspace::new();
     if len <= tile_len {
         scratch.tile.sort(indices, varying, &mut extract);

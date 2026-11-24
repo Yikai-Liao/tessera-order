@@ -38,6 +38,6 @@ With one dominant key, a rank inside the dominant key's band needs only that pos
 
 - **Already ascending:** done, with no further work.
 - **Keys vary within 12 bits**, as with a small category ID: one stable distribution moves each record once into its final bucket. It never calls the key function: it replays the cached keys in input order. A tile uses a single counting pass; a larger input uses one [block partition](block-partition.md) without recursive finishing.
-- **Otherwise:** argsort the cached keys, with the packing above, and release them. Then move the records along the permutation: run by run if the order was sparse, otherwise by following its cycles, in linear time.
+- **Otherwise:** argsort the cached keys, with the packing above and the varying bits already learned, and release them. Then move the records along the permutation: run by run if the order was sparse, otherwise by following its cycles, in linear time.
 
 The cache costs one key per record, the same O(n) as the standard library's cached-key sort.

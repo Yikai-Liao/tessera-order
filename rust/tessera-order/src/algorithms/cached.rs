@@ -94,6 +94,6 @@ pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], m
             digit
         });
     } else {
-        engine::order_by_cached_indices(values, keys);
+        engine::order_by_cached_indices(values, keys, varying);
     }
 }

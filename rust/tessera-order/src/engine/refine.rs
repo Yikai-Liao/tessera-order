@@ -209,6 +209,17 @@ fn prepare<T, E: Extract<T>>(
     extractor: &mut E,
     tile_len: usize,
 ) -> Option<u128> {
+    prepare_with(records, extractor, tile_len, |records, extractor| {
+        scan_varying_bits(records, E::KEY_MASK, extractor)
+    })
+}
+
+fn prepare_with<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    tile_len: usize,
+    varying: impl FnOnce(&mut [T], &mut E) -> u128,
+) -> Option<u128> {
     let sampled = probe_order(records, extractor);
     if finish_ordered(records, sampled, extractor) {
         return None;
@@ -216,7 +227,7 @@ fn prepare<T, E: Extract<T>>(
     if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
         return None;
     }
-    let varying = scan_varying_bits(records, E::KEY_MASK, extractor);
+    let varying = varying(records, extractor);
     if varying == 0 {
         return None;
     }

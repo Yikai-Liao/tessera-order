@@ -477,7 +477,8 @@ test("the memory figure names each line's growth and keys the slopes in a clear 
   const clear = figure(5e5);
   const chart = clear.chart as CurveChart;
   assert.equal(clear.title.startsWith("Grows as √n"), true);
-  assert.match(clear.summary, /the key in the corner draws those slopes/);
+  // The caption may word the pointer freely, but must mention the key only when it is drawn.
+  assert.match(clear.summary, /\bkey\b/i);
   assert.deepEqual(
     chart.curves.map((curve) => curve.growth),
     ["∝ √n", "∝ n", "constant", undefined],
@@ -524,7 +525,7 @@ test("the memory figure omits the slope key when adjacent lengths crowd its labe
     lengths,
   );
   assert.deepEqual(chart.references, []);
-  assert.doesNotMatch(figure.summary, /\bkey\b/);
+  assert.doesNotMatch(figure.summary, /\bkey\b/i);
 });
 
 test("the memory key clears segments spanning unmeasured lengths", () => {

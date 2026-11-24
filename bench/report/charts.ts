@@ -32,11 +32,11 @@ import {
   type PlotRow as Row,
   renderRows,
   type Swatch,
-  type Tone,
 } from "../plot/rows.ts";
 import { geomean, median } from "../statistics.ts";
 import type { ComparisonHeadline, FigureSelection } from "../tracking/result.ts";
 import { formatBytes, ordinal, times } from "./format.ts";
+import { toneOf } from "./implementation-tone.ts";
 import {
   caseId,
   type Dataset,
@@ -194,14 +194,6 @@ function markdownTable(headers: string[], rows: string[][]) {
   return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n${rows.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`;
 }
 
-const toneOf = (variant: string): Tone =>
-  variant === "tessera"
-    ? "primary"
-    : isComposition(variant)
-      ? "composition"
-      : implementation(variant).family === "radix"
-        ? "radix"
-        : "comparison";
 // A symmetric speed axis in doublings around the reference, wide enough for
 // the data. Left of the centre the labels are fractions, so a tick and a
 // value cell read the same way.
@@ -397,7 +389,7 @@ function standingCells(speed: number, rank: number): [string, string] {
 // Implementations without a row in the figure have nothing to show and are left out.
 function renderedField(chart: Chart, standings: Standing[]) {
   const selection: FigureSelection = Object.fromEntries(
-    catalog.implementations.flatMap(({ id, label }) => {
+    catalog.implementations.flatMap(({ id }) => {
       const speeds = standings.map((s) =>
         id === "tessera" ? s.tessera : s.speeds.find((v) => v.variant === id)?.speed,
       );
@@ -405,7 +397,7 @@ function renderedField(chart: Chart, standings: Standing[]) {
       const rows = speeds.map((speed, at) =>
         speed === undefined ? ["–", "–"] : standingCells(speed, standings[at].rankOf(speed)),
       ) as [string, string][];
-      return [[id, { label, tone: toneOf(id), rows }]];
+      return [[id, { rows }]];
     }),
   );
   return { chart, svg: renderRows(chart), selection };
@@ -1010,6 +1002,7 @@ export function renderGrowth(growth: Growth): Figure | null {
 export interface Scaling {
   n: number;
   threads: number[];
+  referenceId: string;
   /** Short commits of the Tessera runs, which may predate its latest serial run. */
   tessera: string[];
   inputs: { label: string; tessera: number[]; rayon: number[] }[];
@@ -1020,6 +1013,7 @@ export interface Scaling {
 export function renderParallel({
   n,
   threads,
+  referenceId,
   tessera,
   composition,
   inputs,
@@ -1065,7 +1059,7 @@ export function renderParallel({
             (row): Row => ({
               name: { input: named(row.threads), sub: "", tag: "" },
               marks: [
-                { value: row.rayon, tone: "comparison", implementation: "rayon-stable" },
+                { value: row.rayon, tone: "comparison", implementation: referenceId },
                 { value: row.tessera, tone: "primary", implementation: "tessera" },
               ],
               cells: [times(row.tessera), times(row.rayon)],

@@ -14,11 +14,13 @@ import {
   implementation,
   type Operation,
   parseCriterionId,
+  referenceColumn,
   SORT,
 } from "../catalog.ts";
 import { loadPlan, planOperations } from "../plan.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
 import { type RowChart, renderRows } from "../plot/rows.ts";
+import { renderParallel } from "../report/charts.ts";
 import { columnPlan, trackingMemory } from "./build.ts";
 import {
   comparisonData,
@@ -790,7 +792,6 @@ test("published selection cells rank the same eligible field as Tessera", () => 
   const legacyCells = chart.groups.flatMap(({ rows }) => rows.map(({ cells }) => cells));
   const selection = figure.selection!;
   assert.deepEqual(chart.columns, ["Speed", "Rank"]);
-  assert.equal(selection.glidesort.label, "glidesort");
   assert.deepEqual(legacyCells, [
     ["4×", "3rd"],
     ["4×", "1st"],
@@ -1115,10 +1116,11 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
     });
   const parallel = (threads: number, ns: number) =>
     tracked({ [`rust/sort/u64/random/1000000/s1/t${threads}`]: ns }, `t${threads}`);
+  const referenceId = referenceColumn(SORT, "t1")!.implementation;
   const runs = new Map([
     ["tessera", [serial([10, 1, 100]), parallel(1, 50), parallel(2, 25)]],
     ["std-stable", [serial([20, 1, 400])]],
-    ["rayon-stable", [parallel(1, 200), parallel(2, 100)]],
+    [referenceId, [parallel(1, 200), parallel(2, 100)]],
   ]);
   const data = comparisonData(runs);
   // Equal pattern counts take the longest length.
@@ -1141,6 +1143,18 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);
   assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
   const figure = data.operations[0].figures.find((entry) => entry.name === "parallel")!;
+  assert.equal(scaling.referenceId, referenceId);
+  const assertParallelTag = (svg: string, id: string) => {
+    const { document } = parseHTML(svg);
+    assert.deepEqual(
+      Array.from(document.querySelectorAll('[aria-label="dot"] [data-implementation]'), (mark) =>
+        mark.getAttribute("data-implementation"),
+      ).filter((id) => id !== "tessera"),
+      [id, id],
+    );
+  };
+  assertParallelTag(renderRows(figure.chart as RowChart), referenceId);
+  assertParallelTag(renderParallel({ ...scaling, referenceId: "std-stable" })!.svg, "std-stable");
   // The table names every input in the aggregate.
   assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
   assert.doesNotMatch(figure.table, /composition/);
@@ -1164,7 +1178,7 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   const names = data.operations[0].figures.map((figure) => figure.name);
   assert.ok(names.includes("parallel"));
   // Without Rayon on one thread there is no baseline.
-  latest.delete("rayon-stable/t1");
+  latest.delete(columnId({ implementation: referenceId, execution: "t1" }));
   assert.equal(trackingScaling(latest), null);
 });
 

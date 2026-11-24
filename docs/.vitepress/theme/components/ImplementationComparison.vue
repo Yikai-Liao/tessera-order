@@ -8,6 +8,7 @@ import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
 import { formatBytes, ordinal, times } from "../../../../bench/report/format.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
 import { useFigureSelection } from "./figureSelection.ts";
+import { data as implementationChoices } from "./implementationChoices.data.ts";
 
 // `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
 const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
@@ -117,9 +118,10 @@ const sections = computed(() => {
   }));
 });
 const root = shallowRef<HTMLElement | null>(null);
-const { pinnedEntry, preview, pin, clear } = useFigureSelection(
+const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
   () => root.value,
   () => sections.value.flatMap((section) => section.figures),
+  implementationChoices,
 );
 function clearOnEscape(event: KeyboardEvent) {
   if (event.key === "Escape") clear();
@@ -194,6 +196,15 @@ function provenance(runs: Run[]) {
           half the time. Tessera is the blue dot. Every figure lists its values in a table below it.
         </p>
       </template>
+      <div v-if="view === 'all' && choices.length" class="highlight-control">
+        <label :for="`${id}-highlight`">Highlight</label>
+        <select :id="`${id}-highlight`" v-model="pinned">
+          <option v-for="choice in choices" :key="choice.id" :value="choice.id">
+            {{ choice.label }}
+          </option>
+        </select>
+        <span>Hover or click a mark to highlight its implementation in every figure; the Speed and Rank columns then show its values. Esc returns to Tessera.</span>
+      </div>
       <section v-for="section in sections" :key="section.id" class="operation">
         <template v-if="view === 'all'">
           <h2 :id="section.id" class="operation-title" tabindex="-1">{{ section.label }}</h2>
@@ -257,11 +268,11 @@ function provenance(runs: Run[]) {
       </section>
     </template>
     <Transition name="selection-bar">
-      <div v-if="pinnedEntry" class="selection-bar" role="status">
-        <span class="selection-swatch" :style="{ background: pinnedEntry.ink }" />
+      <div v-if="bar" class="selection-bar" role="status">
+        <span class="selection-swatch" :style="{ background: bar.ink }" />
         <span class="selection-text">
-          <strong>{{ pinnedEntry.label }}</strong>
-          <span class="selection-detail">highlighted; speed and rank columns show its values</span>
+          <strong>{{ bar.label }}</strong>
+          <span v-if="bar.pinnedLabel" class="selection-detail">· pinned: {{ bar.pinnedLabel }}</span>
         </span>
         <button type="button" class="selection-clear" @click="clear">
           Back to Tessera <kbd>Esc</kbd>
@@ -360,6 +371,43 @@ function provenance(runs: Run[]) {
   margin: 0 0 16px;
   color: var(--vp-c-text-2);
   line-height: 1.6;
+}
+.highlight-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 16px 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+.highlight-control label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.highlight-control select {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  padding: 4px 28px 4px 10px;
+  background: var(--vp-c-bg)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  appearance: none;
+  cursor: pointer;
+}
+.highlight-control select:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 1px;
+}
+.highlight-control span {
+  flex: 1 1 18em;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .figure :deep(svg) {
   display: block;
@@ -460,7 +508,6 @@ function provenance(runs: Run[]) {
   transform: translate(-50%, 8px);
 }
 @media (max-width: 640px) {
-  .selection-detail,
   .selection-clear kbd {
     display: none;
   }

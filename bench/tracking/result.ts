@@ -167,13 +167,10 @@ export function parseRuns(text: string): TrackingRun[] {
     : [];
 }
 
+// Each implementation's Speed/Rank cells by row; the catalog owns its label and colour.
 const figureSelectionSchema = z.record(
   z.string(),
-  z.object({
-    label: z.string().min(1),
-    tone: z.enum(["primary", "radix", "comparison", "composition"]),
-    rows: z.array(z.tuple([z.string(), z.string()])),
-  }),
+  z.object({ rows: z.array(z.tuple([z.string(), z.string()])) }),
 );
 export type FigureSelection = z.infer<typeof figureSelectionSchema>;
 

@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { computed, ref, watchPostEffect } from "vue";
+import { computed, ref, shallowRef, watchPostEffect } from "vue";
 import { ink } from "../../../../bench/plot/annotations.ts";
 import type { FigureSelection } from "../../../../bench/tracking/result.ts";
+import type { ImplementationChoice } from "./implementationChoices.data.ts";
 
 const mark = "[data-implementation]";
 
 export function useFigureSelection(
   root: () => HTMLElement | null,
   figures: () => { anchor: string; selection?: FigureSelection }[],
+  implementations: readonly ImplementationChoice[],
 ) {
-  const pinned = ref<string | null>(null);
+  const pinnedId = ref("tessera");
   const previewed = ref<string | null>(null);
-  const selected = computed(() => previewed.value ?? pinned.value ?? "tessera");
+  const selected = computed(() => previewed.value ?? pinnedId.value);
+  const pinned = computed({
+    get: () => pinnedId.value,
+    set(id) {
+      pinnedId.value = id;
+      previewed.value = null;
+    },
+  });
 
   function preview(target: EventTarget | null) {
     previewed.value =
@@ -20,23 +29,42 @@ export function useFigureSelection(
   }
 
   function clear() {
-    pinned.value = null;
-    previewed.value = null;
+    pinned.value = "tessera";
   }
 
   function pin(event: MouseEvent) {
     preview(event.target);
-    pinned.value = previewed.value;
+    pinned.value = previewed.value ?? "tessera";
   }
 
-  // The pinned implementation's label and colour, from any figure that shows it.
-  const pinnedEntry = computed(() => {
-    const id = pinned.value;
-    if (id === null || id === "tessera") return null;
-    const entry = figures()
-      .map(({ selection }) => selection?.[id])
-      .find((value) => value !== undefined);
-    return entry ? { id, label: entry.label, ink: ink[entry.tone] } : null;
+  // The displayed implementation's label and colour, with the pin named during a preview.
+  const bar = computed(() => {
+    if (pinned.value === "tessera") return null;
+    const id = selected.value;
+    const entry = implementations.find((entry) => entry.id === id);
+    const pin = implementations.find((entry) => entry.id === pinned.value);
+    return {
+      label: entry?.label ?? id,
+      ink: inkOf(id),
+      pinnedLabel: id === pinned.value ? null : (pin?.label ?? pinned.value),
+    };
+  });
+
+  const inkOf = (id: string) =>
+    ink[implementations.find((entry) => entry.id === id)?.tone ?? "comparison"];
+
+  const choices = shallowRef<ImplementationChoice[]>([]);
+  watchPostEffect(() => {
+    // Read tags after Vue renders the figures, including figures without Speed/Rank cells.
+    figures();
+    const ids = new Set(
+      Array.from(root()?.querySelectorAll(mark) ?? [], (element) =>
+        element.getAttribute("data-implementation"),
+      ),
+    );
+    choices.value = ids.size
+      ? implementations.filter(({ id }) => id === "tessera" || ids.has(id))
+      : [];
   });
 
   watchPostEffect(() => {
@@ -57,7 +85,7 @@ export function useFigureSelection(
       const values = selection?.[id];
       const showing = id !== "tessera" && values !== undefined;
       figure.toggleAttribute("data-selecting", showing);
-      if (showing) figure.style.setProperty("--selection-ink", ink[values.tone]);
+      if (showing) figure.style.setProperty("--selection-ink", inkOf(id));
       else figure.style.removeProperty("--selection-ink");
       const shown = values ?? selection?.tessera;
       if (!shown) continue;
@@ -69,5 +97,5 @@ export function useFigureSelection(
     }
   });
 
-  return { selected, pinnedEntry, preview, pin, clear };
+  return { pinned, bar, choices, preview, pin, clear };
 }

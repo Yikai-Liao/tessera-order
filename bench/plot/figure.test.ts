@@ -65,6 +65,20 @@ test("row SVG tags implementation dots, off-scale marks and selectable cells", (
   );
   chart.groups.push({ title: "Second group", rows: [{ ...row, cells: ["y"] }] });
   const { document } = parseHTML(renderRows(chart));
+  // The swarm includes circular paths. The legend's triangle is in a separate mark group.
+  const triangles = Array.from(
+    document.querySelectorAll('[aria-label="dot"]:has(path[d*="A"]) path'),
+  ).filter(
+    (path) =>
+      path
+        .getAttribute("d")
+        ?.match(/[MLAZ]/g)
+        ?.join("") === "MLLZ",
+  );
+  assert.deepEqual(
+    triangles.map((path) => path.getAttribute("data-implementation")),
+    ["rdst", "rdst"],
+  );
   for (const id of ["tessera", "std-unstable", "rdst"])
     assert.equal(
       document.querySelectorAll(`:is(circle, path)[data-implementation="${id}"]`).length,

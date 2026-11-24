@@ -247,6 +247,7 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   return {
     n,
     threads: counts,
+    referenceId: PARALLEL_REFERENCE,
     tessera: hashes,
     ...(serial && composition.every((speed) => speed !== null)
       ? { composition: { hash: serial.hash.slice(0, 7), speeds: composition } }

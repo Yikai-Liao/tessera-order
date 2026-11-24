@@ -44,4 +44,4 @@ The result, `varying`, is used everywhere later:
 - For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64`, which halves the work per key.
 - After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states.
 
-The scan reads a 1,025-record prefix first. If every bit already varies there, as with random wide keys, it stops early.
+The scan considers only the key's *effective* bits, not every bit of the integer that stores it. A `(u16, u8)` tuple key is stored in a `u32`, but only its low 24 bits belong to fields; the top eight are padding and are always 0. The scan reads a 1,025-record prefix first. If every effective bit already varies there, as with random wide keys, it stops early: a random `(u16, u8)` key can stop once all 24 field bits have varied, even though the padding never changes. If some effective bit has not varied yet, the scan keeps reading.

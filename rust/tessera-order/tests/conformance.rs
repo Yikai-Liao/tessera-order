@@ -322,6 +322,14 @@ fn tuple_keys_preserve_lexicographic_order_stability_and_bits() {
     sort(&mut exact_nested);
     assert_eq!(exact_nested, [(0u8, (0u16, 1u8)), (1u8, (0u16, 0u8))]);
 
+    // Only bit 0 varies, so the tile counts these keys and decodes them. Decoding the
+    // inner field with its 32-bit storage width would turn every leading 1 into 0.
+    let mut counted: Vec<_> = (0..128u8).map(|i| (1u8, (0u16, i & 1))).collect();
+    let mut expected = counted.clone();
+    expected.sort();
+    sort(&mut counted);
+    assert_eq!(counted, expected);
+
     let mut wide = [(u64::MAX, 0u64), (0, u64::MAX)];
     sort(&mut wide);
     assert_eq!(wide, [(0, u64::MAX), (u64::MAX, 0)]);

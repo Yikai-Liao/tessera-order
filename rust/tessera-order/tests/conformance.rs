@@ -255,6 +255,131 @@ fn unusual_record_layouts() {
 }
 
 #[test]
+fn tuple_keys_preserve_lexicographic_order_stability_and_bits() {
+    let len = if cfg!(miri) { 64 } else { 2048 };
+    let mut state = 1337;
+
+    // Mixed signed, unsigned, reversed and float fields across non-power-of-2
+    // total widths (i16 + u8 = 24 bits inside u32, plus nested Reverse<(u16, u8)>).
+    let mut rows: Vec<_> = (0..len)
+        .map(|id| {
+            let a = (next(&mut state) % 5) as i16 - 2;
+            let b = (next(&mut state) % 7) as u8;
+            let c = (next(&mut state) % 9) as u16;
+            let d = (next(&mut state) % 4) as u8;
+            (a, b, c, d, id)
+        })
+        .collect();
+    let mut expected = rows.clone();
+    expected.sort_by_key(|r| (r.0, Reverse((r.2, r.3)), r.1));
+    sort_by_key(&mut rows, |r| (r.0, Reverse((r.2, r.3)), r.1));
+    assert_eq!(rows, expected);
+
+    // Direct tuple sort including floats with signed zeros and distinct NaN payloads,
+    // verifying both ordering and bit-exact counted/terminal decoding.
+    let special_f32: [u32; 7] = [
+        0x0000_0000,
+        0x8000_0000,
+        0x3f80_0000,
+        0xbf80_0000,
+        0x7fc0_0001,
+        0x7fc0_0002,
+        0xffc0_0003,
+    ];
+    let mut float_tuples: Vec<(u8, f32, Reverse<i8>)> = (0..len)
+        .map(|i| {
+            let tag = (next(&mut state) % 3) as u8;
+            let f = if i < special_f32.len() * 4 {
+                f32::from_bits(special_f32[i % special_f32.len()])
+            } else {
+                f32::from_bits(next(&mut state) as u32)
+            };
+            let tail = (next(&mut state) % 5) as i8 - 2;
+            (tag, f, Reverse(tail))
+        })
+        .collect();
+    let mut expected_floats = float_tuples.clone();
+    expected_floats.sort_by(|x, y| {
+        x.0.cmp(&y.0)
+            .then_with(|| x.1.total_cmp(&y.1))
+            .then_with(|| y.2.0.cmp(&x.2.0))
+    });
+    sort(&mut float_tuples);
+    assert_eq!(
+        float_tuples
+            .iter()
+            .map(|&(a, b, c)| (a, b.to_bits(), c))
+            .collect::<Vec<_>>(),
+        expected_floats
+            .iter()
+            .map(|&(a, b, c)| (a, b.to_bits(), c))
+            .collect::<Vec<_>>()
+    );
+
+    // Exact-width nested tuple: 8 + 24 = 32 bits in u32. Shifting by storage width
+    // (32 instead of 24) would discard the leading u8 and misorder these pairs.
+    let mut exact_nested = [(1u8, (0u16, 0u8)), (0u8, (0u16, 1u8))];
+    sort(&mut exact_nested);
+    assert_eq!(exact_nested, [(0u8, (0u16, 1u8)), (1u8, (0u16, 0u8))]);
+
+    let mut wide = [(u64::MAX, 0u64), (0, u64::MAX)];
+    sort(&mut wide);
+    assert_eq!(wide, [(0, u64::MAX), (u64::MAX, 0)]);
+
+    type Sixteen = (
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+        u8,
+    );
+    let mut sixteen: Vec<Sixteen> = (0..len.min(128))
+        .map(|_| {
+            let a = next(&mut state).to_le_bytes();
+            let b = next(&mut state).to_le_bytes();
+            (
+                a[0] % 3,
+                a[1] % 3,
+                a[2],
+                a[3],
+                a[4],
+                a[5],
+                a[6],
+                a[7],
+                b[0],
+                b[1],
+                b[2],
+                b[3],
+                b[4],
+                b[5],
+                b[6],
+                b[7],
+            )
+        })
+        .collect();
+    let to_arr = |t: &Sixteen| {
+        [
+            t.0, t.1, t.2, t.3, t.4, t.5, t.6, t.7, t.8, t.9, t.10, t.11, t.12, t.13, t.14, t.15,
+        ]
+    };
+    let mut expected_16: Vec<[u8; 16]> = sixteen.iter().map(to_arr).collect();
+    expected_16.sort();
+    sort(&mut sixteen);
+    assert_eq!(sixteen.iter().map(to_arr).collect::<Vec<_>>(), expected_16);
+}
+
+#[test]
 #[allow(deprecated)]
 fn deprecated_stable_names_forward_to_the_new_names() {
     let input: Vec<(u8, u32)> = (0..200).map(|i| ((i * 7 % 13) as u8, i)).collect();

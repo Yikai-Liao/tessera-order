@@ -14,28 +14,100 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// A key type that Tessera can sort by.
 ///
 /// Implemented for every primitive integer from `u8`/`i8` to `u128`/`i128`
-/// (including `usize` and `isize`), for `f32` and `f64`, and for
-/// [`Reverse<K>`](Reverse) of any of these. The trait is sealed: other types
-/// cannot implement it, so an unsupported key is a compile error.
+/// (including `usize` and `isize`), for `f32` and `f64`, for
+/// [`Reverse<K>`](Reverse) of any supported key, and for tuples of 2 to 16
+/// supported keys whose encoded widths sum to at most 128 bits. The trait is
+/// sealed: other types, 1-tuples, and tuples wider than 128 bits cannot
+/// implement it, so an unsupported key is a compile error.
 ///
-/// Each key is encoded as an unsigned integer of the same width whose integer
-/// order is the key order:
+/// Each key is encoded as an unsigned integer whose integer order is the key
+/// order:
 ///
 /// | Key | Encoding |
 /// |---|---|
 /// | Unsigned integers | Unchanged |
 /// | Signed integers | Sign bit flipped |
 /// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
-/// | `Reverse<K>` | All bits of the encoding of `K` inverted |
+/// | `Reverse<K>` | All effective bits of the encoding of `K` inverted |
+/// | Tuples (2 to 16 fields, up to 128 encoded bits) | Fields concatenated in order into the narrowest covering unsigned integer, first field in the highest bits |
+///
+/// One-field tuples and tuples whose fields exceed 128 encoded bits fail to compile:
+///
+/// ```compile_fail
+/// let mut keys = [(0u8,)];
+/// tessera_order::sort(&mut keys);
+/// ```
+///
+/// ```compile_fail
+/// let mut keys = [(0u64, 0u64, 0u8)];
+/// tessera_order::sort(&mut keys);
+/// ```
+///
+/// ```compile_fail
+/// let mut keys = [(0u128, 0u8)];
+/// tessera_order::sort(&mut keys);
+/// ```
 pub trait RadixKey: crate::engine::portable_simd::SimdKey + Copy + Send + Sync {
     #[doc(hidden)]
     type Encoded: Unsigned;
+    #[doc(hidden)]
+    type Width: BitWidth;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
     /// Inverts [`Self::encode`] bit for bit, including NaN payloads.
     #[doc(hidden)]
     fn decode(encoded: Self::Encoded) -> Self;
 }
+
+/// Sealed type-level encoded bit width (multiples of 8 up to 128) for packing
+/// tuple keys into the narrowest covering unsigned integer.
+#[doc(hidden)]
+pub trait BitWidth {
+    const BITS: usize;
+    const MASK: u128 = u128::MAX >> (128 - Self::BITS);
+    type Encoded: Unsigned;
+}
+
+/// Sealed width addition defined only when `Self::BITS + Rhs::BITS <= 128`.
+#[doc(hidden)]
+pub trait SumWidth<Rhs: BitWidth>: BitWidth {
+    type Sum: BitWidth;
+}
+
+/// Type-level key width in bits, instantiated for multiples of 8 up to 128.
+#[doc(hidden)]
+pub struct Width<const BITS: usize>;
+
+macro_rules! bit_widths {
+    ($($enc:ty: $($bits:literal),+);* $(;)?) => {$($(
+        impl BitWidth for Width<$bits> {
+            const BITS: usize = $bits;
+            type Encoded = $enc;
+        }
+    )+)*};
+}
+bit_widths!(
+    u8: 8;
+    u16: 16;
+    u32: 24, 32;
+    u64: 40, 48, 56, 64;
+    u128: 72, 80, 88, 96, 104, 112, 120, 128;
+);
+
+// Generates SumWidth<Width<B>> for Width<A> whenever A + B <= 128.
+macro_rules! sum_widths {
+    (@row $lhs:literal; [$sum:literal $(, $srest:literal)*]; [$rhs:literal $(, $rrest:literal)*]) => {
+        impl SumWidth<Width<$rhs>> for Width<$lhs> { type Sum = Width<$sum>; }
+        sum_widths!(@row $lhs; [$($srest),*]; [$($rrest),*]);
+    };
+    (@row $lhs:literal; []; [$($rrest:literal),*]) => {};
+    ($lhs:literal; $first_sum:literal $(, $rest:literal)*) => {
+        sum_widths!(@row $lhs; [$first_sum $(, $rest)*]; [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120]);
+        sum_widths!($first_sum; $($rest),*);
+    };
+    ($last:literal;) => {};
+}
+sum_widths!(8; 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128);
 
 /// Unsigned integer operations the engine needs on encoded keys.
 #[doc(hidden)]
@@ -53,6 +125,7 @@ pub trait Unsigned:
 {
     const BITS: usize;
     fn from_usize(value: usize) -> Self;
+    fn from_u128(value: u128) -> Self;
     fn to_usize(self) -> usize;
     fn to_u128(self) -> u128;
 }
@@ -62,11 +135,13 @@ macro_rules! unsigned {
         impl Unsigned for $ty {
             const BITS: usize = <$ty>::BITS as usize;
             #[inline] fn from_usize(value: usize) -> Self { value as Self }
+            #[inline] fn from_u128(value: u128) -> Self { value as Self }
             #[inline] fn to_usize(self) -> usize { self as usize }
             #[inline] fn to_u128(self) -> u128 { self as u128 }
         }
         impl RadixKey for $ty {
             type Encoded = Self;
+            type Width = Width<{ <$ty>::BITS as usize }>;
             #[inline] fn encode(self) -> Self { self }
             #[inline] fn decode(encoded: Self) -> Self { encoded }
         }
@@ -78,6 +153,7 @@ macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
         impl RadixKey for $s {
             type Encoded = $u;
+            type Width = Width<{ <$u>::BITS as usize }>;
             #[inline] fn encode(self) -> $u {
                 (self as $u) ^ (1 << (<$u>::BITS - 1))
             }
@@ -100,6 +176,7 @@ macro_rules! float {
     ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl RadixKey for $f {
             type Encoded = $u;
+            type Width = Width<{ <$u>::BITS as usize }>;
             #[inline] fn encode(self) -> $u {
                 let bits = self.to_bits();
                 let sign = 1 << (<$u>::BITS - 1);
@@ -118,15 +195,69 @@ float!((f32, u32), (f64, u64));
 
 impl<K: RadixKey> RadixKey for Reverse<K> {
     type Encoded = K::Encoded;
+    type Width = K::Width;
     #[inline]
     fn encode(self) -> Self::Encoded {
-        !self.0.encode()
+        !self.0.encode() & K::Encoded::from_u128(K::Width::MASK)
     }
     #[inline]
     fn decode(encoded: Self::Encoded) -> Self {
-        Reverse(K::decode(!encoded))
+        Reverse(K::decode(!encoded & K::Encoded::from_u128(K::Width::MASK)))
     }
 }
+
+impl<A: RadixKey, B: RadixKey> RadixKey for (A, B)
+where
+    A::Width: SumWidth<B::Width>,
+{
+    type Width = <A::Width as SumWidth<B::Width>>::Sum;
+    type Encoded = <Self::Width as BitWidth>::Encoded;
+
+    #[inline]
+    fn encode(self) -> Self::Encoded {
+        Self::Encoded::from_u128(
+            (self.0.encode().to_u128() << B::Width::BITS) | self.1.encode().to_u128(),
+        )
+    }
+
+    #[inline]
+    fn decode(encoded: Self::Encoded) -> Self {
+        let raw = encoded.to_u128();
+        let lo = B::decode(B::Encoded::from_u128(raw & B::Width::MASK));
+        let hi = A::decode(A::Encoded::from_u128(raw >> B::Width::BITS));
+        (hi, lo)
+    }
+}
+
+macro_rules! tuple_keys {
+    (@step [$($head:ident),+]; $last:ident $(, $rest:ident)*) => {
+        impl<$($head: RadixKey,)+ $last: RadixKey> RadixKey for ($($head,)+ $last)
+        where
+            ($($head,)+): RadixKey,
+            <($($head,)+) as RadixKey>::Width: SumWidth<$last::Width>,
+        {
+            type Width = <<($($head,)+) as RadixKey>::Width as SumWidth<$last::Width>>::Sum;
+            type Encoded = <Self::Width as BitWidth>::Encoded;
+
+            #[inline]
+            fn encode(self) -> Self::Encoded {
+                #[allow(non_snake_case)]
+                let ($($head,)+ $last) = self;
+                (($($head,)+), $last).encode()
+            }
+
+            #[inline]
+            fn decode(encoded: Self::Encoded) -> Self {
+                #[allow(non_snake_case)]
+                let (($($head,)+), $last) = <(($($head,)+), $last) as RadixKey>::decode(encoded);
+                ($($head,)+ $last)
+            }
+        }
+        tuple_keys!(@step [$($head,)+ $last]; $($rest),*);
+    };
+    (@step [$($head:ident),+];) => {};
+}
+tuple_keys!(@step [A, B]; C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 
 /// Widest key window that [`try_count_window`] counts and fills, in bits.
 const SMALL_WINDOW_BITS: usize = 8;
@@ -157,6 +288,11 @@ pub(crate) unsafe trait Extract<T> {
 
     /// The encoded key type.
     type Value: Unsigned;
+
+    /// Mask of bits that may vary in keys produced by this extractor.
+    /// Padded tuple keys exclude their guaranteed-zero high bits so the root
+    /// variation scan still stops early once every effective bit has varied.
+    const KEY_MASK: u128 = u128::MAX >> (128 - Self::Value::BITS);
 
     /// Returns the encoded key of `record`.
     fn key(&mut self, record: &T) -> Self::Value;
@@ -199,6 +335,7 @@ pub(crate) unsafe trait Extract<T> {
 unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     const DIRECT: Option<DirectKeys<T>> = E::DIRECT;
     type Value = E::Value;
+    const KEY_MASK: u128 = E::KEY_MASK;
 
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
@@ -324,6 +461,7 @@ pub(crate) struct ByKey<F>(pub F);
 // SAFETY: user callbacks retain cached classifications, even if they panic or change keys.
 unsafe impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
     type Value = K::Encoded;
+    const KEY_MASK: u128 = K::Width::MASK;
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
         (self.0)(record).encode()
@@ -344,6 +482,7 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
         count_parallel: count_keys_parallel::<K>,
     });
     type Value = K::Encoded;
+    const KEY_MASK: u128 = K::Width::MASK;
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {

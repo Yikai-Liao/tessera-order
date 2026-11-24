@@ -28,7 +28,7 @@ Argsort never moves the source records. If its key function unwinds, the partial
 
 ## Key encoding
 
-Each supported key maps to an unsigned integer of the same width. Records are ordered by that integer.
+Each supported key maps to an unsigned integer that covers its encoded bits. Records are ordered by that integer.
 
 | Key type | Encoding |
 |---|---|
@@ -36,7 +36,8 @@ Each supported key maps to an unsigned integer of the same width. Records are or
 | Signed integers | The sign bit is flipped |
 | `f32`, `f64` | If the sign bit is set, all bits are inverted; otherwise only the sign bit is flipped. This matches Rust's `total_cmp`. |
 | 128-bit integers | Compared as a high 64-bit half, then a low 64-bit half. Signed 128-bit keys flip the sign bit of the high half. |
-| `Reverse<K>` | All bits of the encoding of `K` are inverted |
+| `Reverse<K>` | All effective bits of the encoding of `K` are inverted |
+| Tuples of 2 to 16 fields (up to 128 encoded bits) | Fields are concatenated in order into the narrowest covering unsigned integer, with the first field in the highest bits and any unused high bits zeroed |
 
 ### Consequences for floats
 

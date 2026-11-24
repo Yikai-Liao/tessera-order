@@ -209,25 +209,67 @@ fn prepare<T, E: Extract<T>>(
     extractor: &mut E,
     tile_len: usize,
 ) -> Option<u128> {
-    let sampled = probe_order(records, extractor);
-    if finish_ordered(records, sampled, extractor) {
+    prepare_with(
+        records,
+        extractor,
+        None,
+        &mut (),
+        |r, order, e, _| finish_ordered(r, order, e),
+        |r, e, _| insertion_probe::<_, _>(r, e, tile_len),
+    )
+}
+
+/// Shared root-preparation policy: probes order, tries budgeted insertion on
+/// unordered inputs, scans or reuses varying bits, and resolves flat samples.
+fn prepare_with<R: AsRef<[T]>, T, E: Extract<T>, S>(
+    mut records: R,
+    extractor: &mut E,
+    known_varying: Option<u128>,
+    state: &mut S,
+    mut finish: impl FnMut(&mut R, Order, &mut E, &mut S) -> bool,
+    mut probe: impl FnMut(&mut R, &mut E, &mut S) -> bool,
+) -> Option<u128> {
+    let sampled = probe_order(records.as_ref(), extractor);
+    if finish(&mut records, sampled, extractor, state)
+        || (sampled == Order::Unsorted && probe(&mut records, extractor, state))
+    {
         return None;
     }
-    if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
-        return None;
-    }
-    let candidate = u128::MAX >> (128 - E::Value::BITS);
-    let varying = scan_varying_bits(records, candidate, extractor);
+    let varying = known_varying.unwrap_or_else(|| {
+        let candidate = u128::MAX >> (128 - E::Value::BITS);
+        scan_varying_bits(records.as_ref(), candidate, extractor)
+    });
     if varying == 0 {
         return None;
     }
     if sampled == Order::Flat {
-        let order = confirm_order(records, extractor);
-        if finish_ordered(records, order, extractor) {
+        let order = confirm_order(records.as_ref(), extractor);
+        if finish(&mut records, order, extractor, state) {
             return None;
         }
     }
     Some(varying)
+}
+
+/// Probes one tile of keys on a long input and scales its nonzero swap count
+/// to the whole slice's insertion budget.
+fn probe_insertion_budget<T, E: Extract<T>>(
+    records: &[T],
+    extractor: &mut E,
+    tile_len: usize,
+) -> Option<usize> {
+    let probe_len = tile_len.max(2).min(records.len());
+    let mut keys: Vec<_> = records[..probe_len]
+        .iter()
+        .map(|record| extractor.key(record))
+        .collect();
+    // Bound failed probes without changing the unlimited insertion leaf.
+    let swaps = Direct
+        .insertion_sort(&mut keys, probe_len / 4)
+        .filter(|&s| s > 0)?;
+    // The successful probe bounds swaps by probe_len, so the quotient fits
+    // usize even when the intermediate product does not.
+    Some((swaps as u128 * records.len() as u128 / probe_len as u128) as usize)
 }
 
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
@@ -252,25 +294,15 @@ fn insertion_probe<T, E: Extract<T>>(
         extractor.finish_insertion(records);
         return true;
     }
-    let probe_len = tile_len.max(2).min(records.len());
-    // Bound failed probes without changing the unlimited insertion leaf.
-    let probe_budget = probe_len / 4;
-    if probe_len == records.len() {
-        return extractor.insertion_sort(records, probe_budget).is_some();
+    if records.len() <= tile_len.max(2) {
+        return extractor
+            .insertion_sort(records, records.len() / 4)
+            .is_some();
     }
-    let mut keys: Vec<_> = records[..probe_len]
-        .iter()
-        .map(|record| extractor.key(record))
-        .collect();
-    match Direct.insertion_sort(&mut keys, probe_budget) {
-        Some(0) | None => false,
-        Some(swaps) => {
-            // The successful probe bounds swaps by probe_len, so the quotient
-            // fits usize even when the intermediate product does not.
-            let budget = (swaps as u128 * records.len() as u128 / probe_len as u128) as usize;
-            extractor.insertion_sort(records, budget).is_some()
-        }
-    }
+    let Some(budget) = probe_insertion_budget(records, extractor, tile_len) else {
+        return false;
+    };
+    extractor.insertion_sort(records, budget).is_some()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

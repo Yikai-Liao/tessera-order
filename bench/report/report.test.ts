@@ -477,6 +477,7 @@ test("the memory figure names each line's growth and keys the slopes in a clear 
   const clear = figure(5e5);
   const chart = clear.chart as CurveChart;
   assert.equal(clear.title.startsWith("Grows as √n"), true);
+  assert.match(clear.summary, /the key in the corner draws those slopes/);
   assert.deepEqual(
     chart.curves.map((curve) => curve.growth),
     ["∝ √n", "∝ n", "constant", undefined],
@@ -523,11 +524,12 @@ test("the memory figure omits the slope key when adjacent lengths crowd its labe
     lengths,
   );
   assert.deepEqual(chart.references, []);
+  assert.doesNotMatch(figure.summary, /\bkey\b/);
 });
 
 test("the memory key clears segments spanning unmeasured lengths", () => {
   const lengths = [1024, 4096, 16_384, 65_536];
-  for (const firstPeak of [8192, 65_536]) {
+  for (const firstPeak of [0, 8192, 65_536]) {
     const lastPeak = 524_288;
     const figure = renderGrowth({
       operation: { kind: "sort" },
@@ -540,12 +542,18 @@ test("the memory key clears segments spanning unmeasured lengths", () => {
       ],
     })!;
     const chart = figure.chart as CurveChart;
+    assert.deepEqual(chart.curves[1].points, [
+      [lengths[0], firstPeak],
+      [lengths[3], lastPeak],
+    ]);
     const [constant] = chart.references;
     assert.equal(constant?.label, "constant");
     const [[, keyBase], [keyEnd]] = constant.points;
     const progress = Math.log(keyEnd / lengths[0]) / Math.log(lengths[3] / lengths[0]);
-    const segmentPeak = firstPeak * (lastPeak / firstPeak) ** progress;
+    const start = Math.max(firstPeak, chart.y.low);
+    const segmentPeak = start * (lastPeak / start) ** progress;
     assert.ok(keyBase / segmentPeak >= 4 - 1e-12, `clearance for ${firstPeak} B starting peak`);
     assert.match(figure.table, /\| slice::sort .*?\| [^|]+ \| – \| – \| [^|]+ \|/);
+    if (firstPeak === 0) assert.match(figure.table, /\| slice::sort .*?\| 0 B \| – \| – \|/);
   }
 });

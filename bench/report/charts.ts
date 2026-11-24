@@ -955,7 +955,7 @@ export function renderGrowth(growth: Growth): Figure | null {
     subject: "Extra memory by input length",
     summary:
       growth.operation.kind === "sort"
-        ? `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster. Each line's label names how its last step grows, and the key in the corner draws those slopes: ${t.many} that copy their input grow as n.`
+        ? `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster. Each line's label names how its last step grows${showKey ? ", and the key in the corner draws those slopes" : ""}: ${t.many} that copy their input grow as n.`
         : "Peak heap allocation beyond the input, including any retained output. Both axes are logarithmic.",
     title,
     kind: "curves",

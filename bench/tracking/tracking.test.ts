@@ -1288,10 +1288,16 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   const rdstNote = implementation("rdst").memory;
   assert.ok(rdstNote);
   assert.ok((figure.chart as CurveChart).note?.includes(rdstNote));
-  // The SVG is one image to assistive technology, so its description carries the note.
-  const svgDescription =
-    /<desc[^>]*>([^<]*)<\/desc>/.exec(renderCurves(figure.chart as CurveChart))?.[1] ?? "";
-  assert.ok(svgDescription.includes(rdstNote));
+  // The SVG is one image to assistive technology, so the description it points to carries
+  // the note.
+  const { document: svgPage } = parseHTML(renderCurves(figure.chart as CurveChart));
+  const image = svgPage.querySelector('svg[role="img"]')!;
+  const describedBy = image.getAttribute("aria-describedby") ?? "";
+  const exposed = describedBy
+    .split(/\s+/)
+    .map((id) => svgPage.getElementById(id)?.textContent ?? "")
+    .join(" ");
+  assert.ok(exposed.includes(rdstNote));
   assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
   assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
   assert.match(plotted.argsort!.table, /\| Tessera \| 8 MB \| 32 MB \| 128 MB \|/);

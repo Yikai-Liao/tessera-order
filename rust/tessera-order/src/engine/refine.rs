@@ -216,8 +216,7 @@ fn prepare<T, E: Extract<T>>(
     if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
         return None;
     }
-    let candidate = u128::MAX >> (128 - E::Value::BITS);
-    let varying = scan_varying_bits(records, candidate, extractor);
+    let varying = scan_varying_bits(records, E::KEY_MASK, extractor);
     if varying == 0 {
         return None;
     }
@@ -931,5 +930,24 @@ mod tests {
             drops.borrow_mut().sort_unstable();
             assert_eq!(*drops.borrow(), (0..len).collect::<Vec<_>>());
         }
+    }
+
+    #[test]
+    fn padded_tuple_key_mask_propagates() {
+        // 72-bit tuple stored in u128: the top 56 bits are guaranteed zero.
+        // Both Direct and ByKey must carry the 72-bit effective mask so root
+        // preparation stops early once all 72 bits vary, while full-width keys
+        // keep every bit.
+        type Key = (u64, u8);
+        type Extractor = ByKey<fn(&u8) -> Key>;
+        let mask = (1u128 << 72) - 1;
+        assert_eq!(<Direct as Extract<Key>>::KEY_MASK, mask);
+        assert_eq!(<Extractor as Extract<u8>>::KEY_MASK, mask);
+        assert_eq!(<&mut Extractor as Extract<u8>>::KEY_MASK, mask);
+        assert_eq!(<Direct as Extract<u64>>::KEY_MASK, u64::MAX as u128);
+        assert_eq!(
+            <Direct as Extract<core::cmp::Reverse<(u16, u8)>>>::KEY_MASK,
+            (1u128 << 24) - 1
+        );
     }
 }

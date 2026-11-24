@@ -228,6 +228,15 @@ macro_rules! scalar_key {
 }
 scalar_key!(u128, usize, i128, isize);
 
+macro_rules! tuple_simd_key {
+    (@step [$($head:ident),+]; $last:ident $(, $rest:ident)*) => {
+        impl<$($head: SimdKey,)+ $last: SimdKey> SimdKey for ($($head,)+ $last) {}
+        tuple_simd_key!(@step [$($head,)+ $last]; $($rest),*);
+    };
+    (@step [$($head:ident),+];) => {};
+}
+tuple_simd_key!(@step [A]; B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+
 impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
     #[inline(always)]
     fn lanes<S: Simd>() -> usize {

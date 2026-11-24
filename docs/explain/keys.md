@@ -1,6 +1,6 @@
 # 2. Keys as unsigned integers
 
-A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into an unsigned integer of the same width, and the engine only ever sees the encoded key. The order they produce is part of the [ordering semantics](../../conformance/semantics.md#key-encoding).
+A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into the narrowest unsigned integer that covers its encoded bits, and the engine only ever sees the encoded key. The order they produce is part of the [ordering semantics](../../conformance/semantics.md#key-encoding).
 
 ## Encodings
 
@@ -9,7 +9,8 @@ A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** 
 | `u8` … `u128` | unchanged | Unsigned bit patterns already sort by value. |
 | `i8` … `i128` | flip the sign bit | Two's complement puts negative numbers above positive ones when read as unsigned. Flipping the sign bit moves them below and keeps the order within each sign. |
 | `f32`, `f64` | negative: invert all bits; otherwise flip the sign bit | A positive IEEE 754 float sorts like an unsigned integer. A negative one sorts backwards, so inverting all of its bits reverses that order and puts it below every positive value. This is `total_cmp` order. |
-| `Reverse<K>` | invert all bits of `K`'s encoding | Inverting all bits reverses unsigned order exactly. Equal keys stay equal, so stability is kept. |
+| `Reverse<K>` | invert all effective bits of `K`'s encoding | Inverting all effective bits reverses unsigned order exactly while leaving unused high bits zero. Equal keys stay equal, so stability is kept. |
+| Tuples (2 to 16 fields, up to 128 encoded bits) | concatenate fields in order into the narrowest covering unsigned integer | Placing the first field in the highest bits makes unsigned integer order match lexicographical tuple order. Each field keeps its own encoding, including floats and `Reverse`. |
 
 Try it: type keys, switch the type, and read the encoded integers. Sorting by them gives the order Tessera produces.
 
@@ -43,4 +44,4 @@ The result, `varying`, is used everywhere later:
 - For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64`, which halves the work per key.
 - After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states.
 
-The scan reads a 1,025-record prefix first. If every bit already varies there, as with random wide keys, it stops early.
+The scan considers only the key's *effective* bits, not every bit of the integer that stores it. A `(u16, u8)` tuple key is stored in a `u32`, but only its low 24 bits belong to fields; the top eight are padding and are always 0. The scan reads the first key and then batches of 64, 128, 256 and so on, doubling each time, and checks after every batch whether all effective bits have varied. If they have, it stops: a random `(u16, u8)` key often stops after the first 65 records, even though the padding never changes. While some effective bit has not varied and input remains, the scan keeps reading.

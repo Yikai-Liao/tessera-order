@@ -3,8 +3,9 @@
 //! Stable radix ordering with O(√n) auxiliary memory: one engine behind
 //! sorting and the standard ordering operations.
 //!
-//! Tessera sorts slices by a primitive key: an integer up to 128 bits, an
-//! `f32` or `f64`, or [`Reverse`](core::cmp::Reverse) of one of these. It runs
+//! Tessera sorts slices by a fixed-width key: an integer up to 128 bits, an
+//! `f32` or `f64`, [`Reverse`](core::cmp::Reverse) of a supported key, or a
+//! tuple of 2 to 16 supported keys whose encoded widths sum to at most 128 bits. It runs
 //! in linear time for a fixed key width, keeps records with equal keys in
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.

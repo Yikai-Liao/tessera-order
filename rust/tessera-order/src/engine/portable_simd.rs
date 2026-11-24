@@ -55,6 +55,13 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
         crate::engine::order::finish_insertion(keys, &mut Direct, crate::engine::order::by_key);
         return;
     }
+    finish_insertion_simd(keys);
+}
+
+// Keep `dispatch!` (and its non-target-feature fallback arm) out of short-input
+// callers such as `refine_with_tile_bytes`.
+#[inline(never)]
+fn finish_insertion_simd<K: RadixKey>(keys: &mut [K]) {
     dispatch!(Level::new(), simd => crate::engine::order::finish_insertion(keys, &mut Direct, |values, _| first_inversion_with(simd, values)));
 }
 
@@ -71,6 +78,11 @@ pub(crate) fn insertion_sort<K: RadixKey>(keys: &mut [K], budget: usize) -> Opti
             crate::engine::order::by_key,
         );
     }
+    insertion_sort_simd(keys, budget)
+}
+
+#[inline(never)]
+fn insertion_sort_simd<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
     dispatch!(Level::new(), simd => crate::engine::order::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
 }
 

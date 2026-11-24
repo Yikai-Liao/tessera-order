@@ -51,6 +51,8 @@ A 128-bit key whose variation fits in its low or high 64 bits is sorted as a 64-
 
 Scratch is allocated only after these checks, so sorted, reversed and constant inputs never allocate.
 
+Large parallel roots follow the same phase order: sample pairs first, confirm directional candidates across Rayon shards (reversing strictly descending inputs in parallel), try budgeted insertion only on unsorted roots, then scan varying bits across Rayon shards after a short serial prefix check for early full-width exit, and confirm flat samples in parallel only when variation is nonzero. Ordered and constant parallel roots therefore skip both budgeted insertion and partition scratch allocation.
+
 ## Sparse source order
 
 **Problem.** Some inputs are in order except for a few records, or consist mostly of one key with a few others. Their sorted output is nearly the input itself, yet a radix partition moves every record once per digit.

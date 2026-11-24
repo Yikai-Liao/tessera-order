@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-#[cfg(not(miri))]
 use tessera_order::par_sort;
 use tessera_order::par_sort_by_key;
 
@@ -400,4 +399,149 @@ fn panic_keeps_borrowed_records() {
         *record += 1;
     }
     assert_eq!(values, (1..=1024).collect::<Vec<_>>());
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "parallel root cutoff requires >1 MiB input; Miri covers serial confirmation and Rayon block recovery"
+)]
+fn ordered_constant_and_reversed_roots_match_serial() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    // Lengths above MIN_PARALLEL_BYTES, including odd and non-multiple-of-4 sizes.
+    for len in [131_073usize, 262_144] {
+        // Strictly descending: exercises parallel confirm + parallel reverse.
+        let mut desc: Vec<u64> = (0..len as u64).rev().collect();
+        pool.install(|| par_sort(&mut desc));
+        assert!(desc.iter().copied().eq(0..len as u64));
+
+        // Globally nonincreasing with strictly decreasing shards and a single
+        // tie right across the first shard boundary: only the cross-shard check
+        // sees the tie, so strict reversal would swap the tied pair's order.
+        let shard_len = len.div_ceil(4);
+        let mut tied: Vec<(u64, usize)> = (0..len)
+            .map(|id| {
+                let adjusted = if id >= shard_len { id - 1 } else { id };
+                ((len - adjusted) as u64, id)
+            })
+            .collect();
+        assert_eq!(tied[shard_len - 1].0, tied[shard_len].0);
+        let mut expected = tied.clone();
+        expected.sort_by_key(|row| row.0);
+        pool.install(|| par_sort_by_key(&mut tied, |row| row.0));
+        assert_eq!(tied, expected);
+
+        // Full-width flat-sampled roots: ordered (0 at index 0) and unsorted
+        // (0 at index 1) both produce a flat order sample and full-width prefix
+        // variation; deferred confirmation must confirm the ordered one and
+        // reject the unsorted one.
+        let mut full_width = vec![u64::MAX; len];
+        full_width[0] = 0;
+        pool.install(|| par_sort(&mut full_width));
+        assert_eq!(full_width[0], 0);
+        assert!(full_width[1..].iter().all(|&v| v == u64::MAX));
+
+        let mut full_width_unsorted = vec![u64::MAX; len];
+        full_width_unsorted[1] = 0;
+        pool.install(|| par_sort(&mut full_width_unsorted));
+        assert_eq!(full_width_unsorted[0], 0);
+        assert!(full_width_unsorted[1..].iter().all(|&v| v == u64::MAX));
+
+        // Two-run constant suffix: 256 zeros followed by u64::MAX. Each suffix
+        // shard's first key already proves full-width variation against key 0.
+        let mut two_run = vec![u64::MAX; len];
+        two_run[..256].fill(0);
+        pool.install(|| par_sort(&mut two_run));
+        assert!(two_run[..256].iter().all(|&v| v == 0));
+        assert!(two_run[256..].iter().all(|&v| v == u64::MAX));
+
+        // Constant input.
+        let mut constant = vec![42u64; len];
+        pool.install(|| par_sort(&mut constant));
+        assert!(constant.iter().all(|&v| v == 42));
+    }
+
+    // Verify multiple Rayon workers execute parallel order confirmation
+    // (ascending input) and parallel varying-bit scanning (constant input
+    // reaches only the variation scan after flat sampling).
+    let len = 131_073usize;
+    for constant in [false, true] {
+        let workers = Mutex::new(HashSet::new());
+        let mut rows: Vec<_> = (0..len)
+            .map(|id| (if constant { 7u64 } else { id as u64 }, Cell::new(id)))
+            .collect();
+        pool.install(|| {
+            par_sort_by_key(&mut rows, |row| {
+                if row.1.get().is_multiple_of(8192) {
+                    let mut seen = workers.lock().unwrap();
+                    seen.insert(rayon::current_thread_index().unwrap());
+                    let alone = seen.len() == 1;
+                    drop(seen);
+                    if alone {
+                        // Let pending shards run on oversubscribed hosts.
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+                row.0
+            });
+        });
+        assert!(
+            workers.lock().unwrap().len() > 1,
+            "parallel root preparation stayed on one worker (constant={constant})"
+        );
+    }
+
+    // Trigger a panic on a nonsampled record (neither a multiple of 128 nor
+    // immediately before one) inside a confirmation shard running on a worker
+    // other than the thread that ran serial order sampling.
+    let mut rows: Vec<_> = (0..len).map(|id| (id as u64, Cell::new(id))).collect();
+    let panicked_id = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let panic_worker = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let sample_worker = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let panic = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            let origin = rayon::current_thread_index().unwrap();
+            sample_worker.store(origin, Ordering::Relaxed);
+            par_sort_by_key(&mut rows, |row| {
+                let id = row.1.get();
+                let worker = rayon::current_thread_index().unwrap();
+                if id == 17 {
+                    // Hold shard 0 briefly so another worker runs a peer shard.
+                    for _ in 0..200 {
+                        if panicked_id.load(Ordering::Acquire) != usize::MAX {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                } else if worker != origin
+                    && id % 128 != 0
+                    && (id + 1) % 128 != 0
+                    && panicked_id
+                        .compare_exchange(usize::MAX, id, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                {
+                    panic_worker.store(worker, Ordering::Relaxed);
+                    row.1.set(usize::MAX);
+                    panic!("panic during parallel root confirmation");
+                }
+                row.0
+            });
+        });
+    }));
+    assert!(panic.is_err());
+    let target = panicked_id.load(Ordering::Acquire);
+    assert_ne!(target, usize::MAX);
+    assert_ne!(
+        panic_worker.load(Ordering::Relaxed),
+        sample_worker.load(Ordering::Relaxed)
+    );
+    assert_eq!(rows[target].1.get(), usize::MAX);
+    assert!(
+        rows.iter()
+            .enumerate()
+            .all(|(i, row)| row.0 == i as u64 && (i == target || row.1.get() == i))
+    );
 }

@@ -77,7 +77,7 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
-- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including contract-appropriate finishing for small inputs.
+- `prepare_with` owns the single root-preparation policy for serial and parallel entries (`prepare` and `refine/parallel.rs::sort`); [Routing an input](../explain/routing.md#varying-bits-and-flat-inputs) documents the phase order. `insertion_probe` owns insertion eligibility, its window and budget, including contract-appropriate finishing for small inputs.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
 - Root, node-child and tile-child variation share `order::scan_varying_bits`; key digit windows have one representation in `key::Digit`.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
@@ -96,7 +96,7 @@ Every partition completes movement for every band. Only further analysis and fin
 
 ## Parallel root completion
 
-With the optional `rayon` feature, inputs below the parallel byte threshold and one-thread pools use the serial engine. Larger roots share `prepare` with serial sorting. The [parallel layout](../explain/block-partition.md#parallel-roots) owns the byte gates, shard clamps and block sizing.
+With the optional `rayon` feature, inputs below the parallel byte threshold and one-thread pools use the serial engine. Larger roots execute the shared [root-preparation phases](../explain/routing.md#varying-bits-and-flat-inputs) through `prepare_with`, sharding order confirmation, strictly descending reversal and varying-bit reduction across Rayon without allocating heap scratch on ordered or constant inputs. The [parallel layout](../explain/block-partition.md#parallel-roots) owns the byte gates, shard clamps and block sizing.
 
 Each shard scatters its own input range with its own scratch. `Partition` borrows the reusable `Buffers` directly: record scratch stays in that allocation, and its capacity cannot change until completion and recovery finish. The source ledger is built directly from the shard chains: bucket prefixes in original shard order, over each shard's own scratch. Shard guards own recovery until every ledger table exists, then hand it over without a fallible step; no packed output is allocated.
 

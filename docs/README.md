@@ -35,5 +35,6 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Planned CI reuse, operation benchmark selection and cache policy | [CI scaling proposal](design/ci-scaling-proposal.md) | A planned step changes or lands; move landed facts to CI or continuous benchmarks |
 | Planned comparisons of operations beyond full sorting | [comparison model proposal](design/comparison-model-proposal.md) | The plan changes or lands; move landed facts to the benchmark protocol, tooling design or continuous benchmarks |
 | How to choose comparison references and cases | [benchmark protocol](development/benchmarking.md#choosing-references-and-cases) | A selection rule changes |
+| What automated PR review reports | [review rules](../.agentic-review.md) | A review bar or the acceptance it cites changes |
 
 An algorithm change normally edits the Rust code, its explanation page and that page's model, plus semantics only when a guarantee changes. If a page needs a number it does not own, it links to the owner.

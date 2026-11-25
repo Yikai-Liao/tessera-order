@@ -139,7 +139,9 @@ impl<T> Scratch<T> {
         if len < 2 || varying == 0 {
             return;
         }
-        match plan_tile::<T>(len, varying) {
+        let simd_msd = len >= crate::engine::portable_simd::SIMD_MIN
+            && E::DIRECT.is_some_and(|direct| (direct.can_finish_msd)());
+        match plan_tile::<T>(len, varying, simd_msd) {
             TilePlan::Insertion => extractor.finish_insertion(records),
             TilePlan::Msd(digit) => {
                 self.partition_tile::<_>(records, digit, varying, extractor);
@@ -241,21 +243,22 @@ impl<T> Scratch<T> {
     }
 
     /// Runs one stable counting pass per digit, the last digit first, and
-    /// returns the largest bucket of the first digit.
+    /// returns the restoration guard together with the largest bucket of the
+    /// first digit.
     ///
-    /// The records end in the tile, also when a key function panics. `cursor`
-    /// then holds each bucket's end for the first digit.
+    /// Dropping the guard restores the records into `records`, also on panic.
+    /// `cursor` then holds each bucket's end for the first digit.
     // Keep `counting_passes` inlined into its callers so single-pass MSD and
-    // two-pass LSD retain their specialized control flow without extra spills.
-    // Counter and placement evidence: docs/design/evidence.md#landed-with-open-losses.
+    // two-pass flat plans retain their specialized control flow without extra
+    // spills. Counter and placement evidence: docs/design/evidence.md#landed-with-open-losses.
     #[inline(always)]
-    fn counting_passes<E: Extract<T>>(
-        &mut self,
-        records: &mut [T],
+    fn counting_passes<'a, E: Extract<T>>(
+        &'a mut self,
+        records: &'a mut [T],
         digits: &[Digit],
         cursor: &mut MaybeUninit<[Cursor; MAX_DIGIT_BUCKETS]>,
         extractor: &mut E,
-    ) -> Cursor {
+    ) -> (RestoreTile<'a, T>, Cursor) {
         let len = records.len();
         debug_assert!(len <= MAX_TILE_RECORDS);
         let (scratch, bucket_ids) = self.reserve_scratch::<E>(len);
@@ -265,6 +268,7 @@ impl<T> Scratch<T> {
             tile,
             len,
             source: tile,
+            _buffers: core::marker::PhantomData,
         };
         let mut destination = scratch;
         let mut largest = 0;
@@ -287,7 +291,7 @@ impl<T> Scratch<T> {
             // Only a completed pass makes its output the live record set.
             core::mem::swap(&mut guard.source, &mut destination);
         }
-        largest
+        (guard, largest)
     }
 
     /// Partitions a tile through scratch, then finishes each bucket.
@@ -300,7 +304,27 @@ impl<T> Scratch<T> {
     ) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
+        let (mut guard, largest) = self.counting_passes(records, &[digit], &mut counts, extractor);
+        if largest <= 1 {
+            return;
+        }
+        if let Some(direct) = E::DIRECT {
+            // SAFETY: `E::DIRECT` guarantees `T` is a sealed `Copy`, panic-free
+            // `RadixKey`. After one pass, `guard.source` holds `len` initialized
+            // records in scratch disjoint from `guard.tile`, and deriving `dest`
+            // from `guard.tile` keeps the guard's provenance valid on decline.
+            let (src, dest) = unsafe {
+                (
+                    core::slice::from_raw_parts(guard.source, len),
+                    core::slice::from_raw_parts_mut(guard.tile, len),
+                )
+            };
+            if (direct.finish_msd)(src, dest, largest as usize) {
+                guard.source = guard.tile;
+                return;
+            }
+        }
+        drop(guard);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= insertion_limit::<T>() {
@@ -329,15 +353,18 @@ impl<T> Scratch<T> {
 /// Tracks which buffer holds the records of a tile between counting passes.
 ///
 /// `source` points at the records written by the last completed pass, either
-/// the tile itself or scratch. On drop, including during a key-function panic,
-/// records in scratch are copied back so the tile again owns all of them.
-struct RestoreTile<T> {
+/// the tile itself or scratch. Borrowing both buffers for `'a` prevents callers
+/// from reallocating scratch or dropping the tile while the guard is live. On
+/// drop, including during a key-function panic, records in scratch are copied
+/// back so the tile again owns all of them.
+struct RestoreTile<'a, T> {
     tile: *mut T,
     len: usize,
     source: *mut T,
+    _buffers: core::marker::PhantomData<(&'a mut [T], &'a mut Scratch<T>)>,
 }
 
-impl<T> Drop for RestoreTile<T> {
+impl<T> Drop for RestoreTile<'_, T> {
     fn drop(&mut self) {
         if self.source != self.tile {
             // SAFETY: source holds initialized records in scratch; tile holds

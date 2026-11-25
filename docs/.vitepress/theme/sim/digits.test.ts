@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chooseTileLeaf, planDigits, sampleKeys } from "./digits.ts";
+import { chooseTileLeaf, planDigits, planTile, sampleKeys } from "./digits.ts";
 
 test("short flat plans balance shifted runs and sparse bits", () => {
   for (const shift of [0n, 17n, 96n]) {
@@ -39,6 +39,25 @@ test("wide tiles partition without sampling and short tiles retain insertion", (
   assert.equal(chooseTileLeaf(24, varying, 6, 64), "insertion");
   assert.equal(chooseTileLeaf(24, varying, 6, 64, 128), "msd");
   assert.deepEqual(planDigits(varying, 12, 64), [{ shift: 52, width: 12 }]);
+
+  // Direct-key SIMD MSD overrides a two-pass LSD split only when one top digit
+  // provides at least one bucket per record with fewer table slots.
+  const bits25 = (1n << 25n) - 1n;
+  assert.deepEqual(planTile(8192, bits25, 13, 32, 4, false), {
+    leaf: "lsd",
+    digits: [
+      { shift: 12, width: 13 },
+      { shift: 0, width: 12 },
+    ],
+    simdMsdOverride: false,
+  });
+  assert.deepEqual(planTile(8192, bits25, 13, 32, 4, true), {
+    leaf: "msd",
+    digits: [{ shift: 12, width: 13 }],
+    simdMsdOverride: true,
+  });
+  assert.equal(chooseTileLeaf(8192, (0xffn << 24n) | 0xffn, 13, 32, 4, true), "lsd");
+  assert.equal(chooseTileLeaf(8192, (1n << 16n) - 1n, 13, 32, 4, true), "lsd");
 });
 
 test("bounded sampling covers short inputs and does not alias periodic keys", () => {

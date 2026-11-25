@@ -42,29 +42,61 @@ export function topWindow(
   return { digit: { shift: low, width: high - low + 1 }, window };
 }
 
-/** One or two flat digits, or one MSD digit when flat completion needs more. */
-export function planDigits(varying: bigint, width: number, bits: number): Digit[] {
-  if (varying === 0n) return [];
-  const { digit: high, window } = topWindow(varying, width, bits);
+export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
+
+export interface TileDecision {
+  leaf: TileLeaf;
+  digits: Digit[];
+  simdMsdOverride: boolean;
+}
+
+const SIMD_MIN = 64;
+
+/** Shared tile-leaf and digit decision mirroring `engine/tile/plan.rs` and `Scratch::sort`. */
+export function planTile(
+  records: number,
+  varying: bigint,
+  tableWidth: number,
+  bits: number,
+  recordBytes = bits / 8,
+  simdMsd = false,
+): TileDecision {
+  if (records < 2 || varying === 0n) return { leaf: "done", digits: [], simdMsdOverride: false };
+  const insertionLimit = Math.max(16, Math.floor((48 * 16) / (16 + recordBytes)));
+  if (records <= insertionLimit) return { leaf: "insertion", digits: [], simdMsdOverride: false };
+  const { digit: high, window } = topWindow(varying, tableWidth, bits);
   const remaining = varying & ~window;
-  if (remaining === 0n) return [high];
+  if (remaining === 0n) return { leaf: "lsd", digits: [high], simdMsdOverride: false };
   const low = topWindow(remaining, bits, bits).digit;
-  if (low.width > width) return [high];
+  if (low.width > tableWidth) return { leaf: "msd", digits: [high], simdMsdOverride: false };
   let digits = [high, low];
   let slots = 2 ** high.width + 2 ** low.width;
   for (let highWidth = 1; highWidth < high.width; highWidth++) {
     const next = topWindow(varying, highWidth, bits);
     const lower = topWindow(varying & ~next.window, bits, bits).digit;
     const cost = 2 ** next.digit.width + 2 ** lower.width;
-    if (lower.width <= width && cost < slots) {
+    if (lower.width <= tableWidth && cost < slots) {
       digits = [next.digit, lower];
       slots = cost;
     }
   }
-  return digits;
+  const msdSlots = 2 ** high.width;
+  if (simdMsd && records >= SIMD_MIN && msdSlots >= records && slots > msdSlots) {
+    return { leaf: "msd", digits: [high], simdMsdOverride: true };
+  }
+  return { leaf: "lsd", digits, simdMsdOverride: false };
 }
 
-export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
+/** One or two flat digits, or one MSD digit when flat completion needs more (or when SIMD MSD finishing dominates a two-pass split). */
+export function planDigits(
+  varying: bigint,
+  width: number,
+  bits: number,
+  len = Number.POSITIVE_INFINITY,
+  simdMsd = false,
+): Digit[] {
+  return planTile(len, varying, width, bits, bits / 8, simdMsd).digits;
+}
 
 /** Mirrors the bounded planner: finish at most two flat passes, otherwise split. */
 export function chooseTileLeaf(
@@ -73,12 +105,7 @@ export function chooseTileLeaf(
   tableWidth: number,
   bits: number,
   recordBytes = bits / 8,
+  simdMsd = false,
 ): TileLeaf {
-  if (records < 2 || varying === 0n) return "done";
-  const insertionLimit = Math.max(16, Math.floor((48 * 16) / (16 + recordBytes)));
-  if (records <= insertionLimit) return "insertion";
-  const remaining = varying & ~topWindow(varying, tableWidth, bits).window;
-  return remaining === 0n || topWindow(remaining, bits, bits).digit.width <= tableWidth
-    ? "lsd"
-    : "msd";
+  return planTile(records, varying, tableWidth, bits, recordBytes, simdMsd).leaf;
 }

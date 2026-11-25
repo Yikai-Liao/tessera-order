@@ -15,8 +15,8 @@ use crate::engine::key::Direct;
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
 
-/// Shortest slice worth a vector scan; below this the scalar loop wins.
-const SIMD_MIN: usize = 64;
+/// Shortest slice worth a vector scan or SIMD MSD finish; below this scalar wins.
+pub(crate) const SIMD_MIN: usize = 64;
 
 /// Pairs checked scalar before the vector kernel is used.
 ///
@@ -24,27 +24,175 @@ const SIMD_MIN: usize = 64;
 /// scalar check finds them without paying for a vector block.
 const PEEL: usize = 4;
 
-/// Native adjacent-pair comparison for direct keys; also seals [`RadixKey`].
-///
-/// The scan owns traversal and mask aggregation. Each key owns only the
-/// backend's lane count and comparison in its encoded order. One lane denotes
-/// a scalar fallback, used by wide and tuple keys.
-pub trait SimdKey: Copy {
-    /// Vector mask produced by [`Self::pair_gt`]; unused when [`Self::lanes`] is 1.
-    type Mask<S: Simd>: SimdMask<S>;
+/// Shortest native vector width for streaming SIMD odd-even MSD finishing.
+/// Narrower vectors (e.g. `u64x4` on AVX2 or `u32x4` on 128-bit backends)
+/// cover too few bucket sizes (`<= w + 1`) to amortize deinterleave/interleave
+/// overhead and lack native 64-bit unsigned min/max on AVX2.
+const MSD_MIN_LANES: usize = 8;
 
-    /// Number of pairs compared by [`Self::pair_gt`] under this backend,
-    /// from one through 64, matching the backend's native vector width.
+/// Native adjacent-pair comparison and encoded-order vector load/store for
+/// direct keys; also seals [`RadixKey`].
+///
+/// The kernels own traversal, mask aggregation and sorting networks. Each key
+/// owns only the backend's lane count and its total-order vector encoding. One
+/// lane denotes a scalar fallback, used by wide and tuple keys.
+pub trait SimdKey: Copy {
+    /// Native integer vector holding encoded keys in total order; unused when
+    /// [`Self::lanes`] is 1.
+    type Vec<S: Simd>: SimdInt<S>;
+
+    /// Number of lanes processed per vector under this backend, from one
+    /// through 64, matching the backend's native vector width.
+    #[inline(always)]
     fn lanes<S: Simd>() -> usize {
         1
+    }
+
+    /// Largest representable lane value in [`Self::Vec`], used as sentinel
+    /// padding during odd-even compare-exchange steps.
+    fn max_lane<S: Simd>() -> <Self::Vec<S> as SimdBase<S>>::Element {
+        unreachable!("max_lane called on scalar SimdKey")
+    }
+
+    /// Loads [`Self::lanes`] keys into a vector whose native integer order
+    /// matches `Self`'s key order. Only called when `lanes > 1`.
+    fn load_encoded<S: Simd>(_simd: S, _slice: &[Self]) -> Self::Vec<S> {
+        unreachable!("load_encoded called on scalar SimdKey")
+    }
+
+    /// Decodes and stores [`Self::lanes`] keys loaded by [`Self::load_encoded`],
+    /// preserving exact bit patterns. Only called when `lanes > 1`.
+    fn store_decoded<S: Simd>(_vec: Self::Vec<S>, _slice: &mut [Self]) {
+        unreachable!("store_decoded called on scalar SimdKey")
     }
 
     /// Lane `i` is true iff `left[i]`'s encoded key exceeds `right[i]`'s,
     /// for the first [`Self::lanes`] pairs. Both slices have exact length
     /// [`Self::lanes`]; only called when `lanes > 1`.
-    fn pair_gt<S: Simd>(simd: S, _left: &[Self], _right: &[Self]) -> Self::Mask<S> {
-        Self::Mask::<S>::splat(simd, false)
+    #[inline(always)]
+    fn pair_gt<S: Simd>(
+        simd: S,
+        left: &[Self],
+        right: &[Self],
+    ) -> <Self::Vec<S> as SimdBase<S>>::Mask {
+        Self::load_encoded(simd, left).simd_gt(Self::load_encoded(simd, right))
     }
+}
+
+/// Independent streaming lanes in [`finish_msd_with`] to hide odd-even carry
+/// latency while staying within AVX2's 16 vector registers without spilling.
+const MSD_STREAMS: usize = 4;
+
+/// Shared eligibility rule for both planning and finishing: require a real SIMD
+/// backend (never scalar `Fallback` emulation) with at least [`MSD_MIN_LANES`].
+#[inline(always)]
+fn msd_supported<S: Simd, K: SimdKey>(simd: S) -> bool {
+    !simd.level().is_fallback() && K::lanes::<S>() >= MSD_MIN_LANES
+}
+
+/// Whether the active backend supports SIMD MSD finishing for `K`.
+pub(crate) fn can_finish_msd<K: RadixKey>() -> bool {
+    dispatch!(Level::new(), simd => msd_supported::<_, K>(simd))
+}
+
+/// Finishes an MSD-partitioned buffer `src` directly into `dest` via a
+/// branchless streaming odd-even network when every bucket has at most
+/// `largest` records and fits within one vector of overlap.
+#[inline]
+pub(crate) fn finish_msd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bool {
+    src.len() >= SIMD_MIN && finish_msd_simd(src, dest, largest)
+}
+
+#[inline(never)]
+fn finish_msd_simd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bool {
+    dispatch!(Level::new(), simd => finish_msd_with(simd, src, dest, largest))
+}
+
+/// Streams `2 * w` overlapping windows across `src -> dest` in four independent
+/// streams (breaking the carry chain across adjacent windows), then sweeps any
+/// remainder and repairs all seams. Every bucket of length `<= w + 1` fits
+/// completely inside at least one `2 * w` window.
+#[inline(always)]
+fn finish_msd_with<S: Simd, K: RadixKey>(
+    simd: S,
+    src: &[K],
+    dest: &mut [K],
+    largest: usize,
+) -> bool {
+    let (w, len) = (K::lanes::<S>(), src.len());
+    if !msd_supported::<S, K>(simd) || len < 2 * w || largest > w + 1 || dest.len() != len {
+        return false;
+    }
+    if largest <= 1 {
+        dest.copy_from_slice(src);
+        return true;
+    }
+    let max_v = K::Vec::<S>::splat(simd, K::max_lane::<S>());
+    let lane0 = K::Vec::<S>::from_fn(simd, |i| <K::Vec<S> as SimdBase<S>>::Element::from(i == 0))
+        .simd_ne(<K::Vec<S> as SimdBase<S>>::Element::from(false));
+    macro_rules! sort_pair {
+        ($a:expr, $b:expr) => {{
+            let (mut even, mut odd) = ($a).deinterleave($b);
+            for _ in 0..largest / 2 {
+                let (e, o) = (even.min(odd), even.max(odd));
+                let e_next = e.slide::<1>(max_v);
+                odd = o.min(e_next);
+                even = lane0.select(e, o.max(e_next).rotate_elements_right::<1>());
+            }
+            if largest & 1 != 0 {
+                (even, odd) = (even.min(odd), even.max(odd));
+            }
+            even.interleave(odd)
+        }};
+    }
+    macro_rules! repair {
+        ($win:expr) => {{
+            let win = $win;
+            let (lo, hi) = sort_pair!(
+                K::load_encoded(simd, &win[..w]),
+                K::load_encoded(simd, &win[w..2 * w])
+            );
+            K::store_decoded::<S>(lo, &mut win[..w]);
+            K::store_decoded::<S>(hi, &mut win[w..2 * w]);
+        }};
+    }
+    let mut pos = 0;
+    if len >= 2 * MSD_STREAMS * w {
+        let seg = (len / (MSD_STREAMS * w)) * w;
+        let mut carry = [max_v; MSD_STREAMS];
+        for (i, slot) in carry.iter_mut().enumerate() {
+            *slot = K::load_encoded(simd, &src[i * seg..i * seg + w]);
+        }
+        let mut off = w;
+        while off < seg {
+            for (i, slot) in carry.iter_mut().enumerate() {
+                let s = i * seg + off;
+                let (lo, hi) = sort_pair!(*slot, K::load_encoded(simd, &src[s..s + w]));
+                K::store_decoded::<S>(lo, &mut dest[s - w..s]);
+                *slot = hi;
+            }
+            off += w;
+        }
+        for (i, &slot) in carry.iter().enumerate() {
+            K::store_decoded::<S>(slot, &mut dest[(i + 1) * seg - w..(i + 1) * seg]);
+        }
+        for i in 1..MSD_STREAMS {
+            repair!(&mut dest[i * seg - w..i * seg + w]);
+        }
+        pos = MSD_STREAMS * seg;
+    }
+    if pos < len {
+        dest[pos..len].copy_from_slice(&src[pos..len]);
+        let mut p = pos.saturating_sub(w);
+        while p + 2 * w <= len {
+            repair!(&mut dest[p..p + 2 * w]);
+            p += w;
+        }
+        if p + w != len {
+            repair!(&mut dest[len - 2 * w..len]);
+        }
+    }
+    true
 }
 
 /// Sorts `keys` stably by insertion, without a swap limit.
@@ -231,19 +379,16 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
 macro_rules! integer_key {
     ($($ty:ty),* $(,)?) => {$(
         impl SimdKey for $ty {
-            type Mask<S: Simd> = <<Self as SimdIntElement>::Native<S> as SimdBase<S>>::Mask;
-
+            type Vec<S: Simd> = <Self as SimdIntElement>::Native<S>;
+            #[inline(always)] fn lanes<S: Simd>() -> usize { Self::Vec::<S>::LEN }
+            #[inline(always)] fn max_lane<S: Simd>() -> Self { Self::MAX }
             #[inline(always)]
-            fn lanes<S: Simd>() -> usize {
-                <Self as SimdIntElement>::Native::<S>::LEN
+            fn load_encoded<S: Simd>(simd: S, slice: &[Self]) -> Self::Vec<S> {
+                Self::Vec::<S>::from_slice(simd, slice)
             }
-
             #[inline(always)]
-            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
-                let left = <Self as SimdIntElement>::Native::<S>::from_slice(simd, left);
-                let right = <Self as SimdIntElement>::Native::<S>::from_slice(simd, right);
-                // Native signed comparison has the same order as sign-flip encoding.
-                left.simd_gt(right)
+            fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {
+                vec.store_slice(slice);
             }
         }
     )*};
@@ -253,24 +398,29 @@ integer_key!(u8, u16, u32, u64, i8, i16, i32, i64);
 macro_rules! pointer_key {
     ($(($ptr:ty, $fixed:ty)),* $(,)?) => {$(
         impl SimdKey for $ptr {
-            type Mask<S: Simd> = <$fixed as SimdKey>::Mask<S>;
+            type Vec<S: Simd> = <$fixed as SimdKey>::Vec<S>;
+            #[inline(always)] fn lanes<S: Simd>() -> usize { <$fixed as SimdKey>::lanes::<S>() }
+            #[inline(always)] fn max_lane<S: Simd>() -> $fixed { <$fixed as SimdKey>::max_lane::<S>() }
             #[inline(always)]
-            fn lanes<S: Simd>() -> usize {
-                <$fixed as SimdKey>::lanes::<S>()
-            }
-            #[inline(always)]
-            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
+            fn load_encoded<S: Simd>(simd: S, slice: &[Self]) -> Self::Vec<S> {
                 const { assert!(size_of::<$ptr>() == size_of::<$fixed>() && align_of::<$ptr>() == align_of::<$fixed>()) }
                 // SAFETY: pointer-sized integers have the same size, alignment,
                 // signed/two's-complement bit validity and shared-borrow
                 // lifetimes as the selected fixed-width integer.
-                let (left, right) = unsafe {
-                    (
-                        core::slice::from_raw_parts(left.as_ptr().cast::<$fixed>(), left.len()),
-                        core::slice::from_raw_parts(right.as_ptr().cast::<$fixed>(), right.len()),
-                    )
+                let slice = unsafe {
+                    core::slice::from_raw_parts(slice.as_ptr().cast::<$fixed>(), slice.len())
                 };
-                <$fixed as SimdKey>::pair_gt(simd, left, right)
+                <$fixed as SimdKey>::load_encoded(simd, slice)
+            }
+            #[inline(always)]
+            fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {
+                const { assert!(size_of::<$ptr>() == size_of::<$fixed>() && align_of::<$ptr>() == align_of::<$fixed>()) }
+                // SAFETY: same layout, alignment, bit validity and exclusive
+                // borrow lifetime as `$fixed`.
+                let slice = unsafe {
+                    core::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<$fixed>(), slice.len())
+                };
+                <$fixed as SimdKey>::store_decoded::<S>(vec, slice);
             }
         }
     )*};
@@ -285,26 +435,27 @@ pointer_key!((usize, u16), (isize, i16));
 macro_rules! float_key {
     ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl SimdKey for $f {
-            type Mask<S: Simd> =
-                <<<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits as SimdBase<S>>::Mask;
-
+            type Vec<S: Simd> = <<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits;
+            #[inline(always)] fn lanes<S: Simd>() -> usize { <Self as SimdFloatElement>::Native::<S>::LEN }
+            #[inline(always)] fn max_lane<S: Simd>() -> $u { <$u>::MAX }
             #[inline(always)]
-            fn lanes<S: Simd>() -> usize {
-                <Self as SimdFloatElement>::Native::<S>::LEN
+            fn load_encoded<S: Simd>(simd: S, slice: &[Self]) -> Self::Vec<S> {
+                let sign: Self::Vec<S> = ((1 as $u) << (<$u>::BITS - 1)).simd_into(simd);
+                let zero: Self::Vec<S> = (0 as $u).simd_into(simd);
+                let bits = <Self as SimdFloatElement>::Native::<S>::from_slice(simd, slice).to_bits();
+                // The sign is zero or one; subtraction expands it to
+                // zero or all ones, preserving total_cmp including NaN bits.
+                bits ^ ((zero - (bits >> (<$u>::BITS - 1))) | sign)
             }
-
             #[inline(always)]
-            fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
-                let sign = (1 as $u) << (<$u>::BITS - 1);
-                let encode = |values: &[Self]| {
-                    let bits = <Self as SimdFloatElement>::Native::<S>::from_slice(simd, values).to_bits();
-                    let zero: <<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits = (0 as $u).simd_into(simd);
-                    let sign: <<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits = sign.simd_into(simd);
-                    // The sign is zero or one; subtraction expands it to
-                    // zero or all ones, preserving total_cmp including NaN bits.
-                    bits ^ ((zero - (bits >> (<$u>::BITS - 1))) | sign)
-                };
-                encode(left).simd_gt(encode(right))
+            fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {
+                let simd = vec.token();
+                let sign: Self::Vec<S> = ((1 as $u) << (<$u>::BITS - 1)).simd_into(simd);
+                let one: Self::Vec<S> = (1 as $u).simd_into(simd);
+                // Encoded non-negatives have sign bit 1 (invert sign only);
+                // encoded negatives have sign bit 0 (invert all bits).
+                let bits = vec ^ (((vec >> (<$u>::BITS - 1)) - one) | sign);
+                <Self as SimdFloatElement>::Native::<S>::from_bits(bits).store_slice(slice);
             }
         }
     )*};
@@ -314,7 +465,7 @@ float_key!((f32, u32), (f64, u64));
 macro_rules! scalar_key {
     ($($ty:ty),* $(,)?) => {$(
         impl SimdKey for $ty {
-            type Mask<S: Simd> = S::mask64s;
+            type Vec<S: Simd> = S::u64s;
         }
     )*};
 }
@@ -329,7 +480,7 @@ scalar_key!(usize, isize);
 macro_rules! tuple_simd_key {
     (@step [$($head:ident),+]; $last:ident $(, $rest:ident)*) => {
         impl<$($head: SimdKey,)+ $last: SimdKey> SimdKey for ($($head,)+ $last) {
-            type Mask<S: Simd> = S::mask64s;
+            type Vec<S: Simd> = S::u64s;
         }
         tuple_simd_key!(@step [$($head,)+ $last]; $($rest),*);
     };
@@ -338,25 +489,31 @@ macro_rules! tuple_simd_key {
 tuple_simd_key!(@step [A]; B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 
 impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
-    type Mask<S: Simd> = K::Mask<S>;
-
+    type Vec<S: Simd> = K::Vec<S>;
     #[inline(always)]
     fn lanes<S: Simd>() -> usize {
         K::lanes::<S>()
     }
+    #[inline(always)]
+    fn max_lane<S: Simd>() -> <Self::Vec<S> as SimdBase<S>>::Element {
+        K::max_lane::<S>()
+    }
 
     #[inline(always)]
-    fn pair_gt<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> Self::Mask<S> {
-        // SAFETY: Reverse<K> is repr(transparent) over K, so both shared views
-        // have the same layout, alignment, validity and lifetimes as the inputs.
-        let (left, right) = unsafe {
-            (
-                core::slice::from_raw_parts(left.as_ptr().cast::<K>(), left.len()),
-                core::slice::from_raw_parts(right.as_ptr().cast::<K>(), right.len()),
-            )
-        };
-        // Complementing both encoded keys reverses >, including equal keys.
-        K::pair_gt(simd, right, left)
+    fn load_encoded<S: Simd>(simd: S, slice: &[Self]) -> Self::Vec<S> {
+        // SAFETY: Reverse<K> is repr(transparent) over K.
+        let slice = unsafe { core::slice::from_raw_parts(slice.as_ptr().cast::<K>(), slice.len()) };
+        // Bitwise complement strictly reverses unsigned, two's-complement
+        // signed, and encoded-float order, and is its own inverse.
+        !K::load_encoded(simd, slice)
+    }
+
+    #[inline(always)]
+    fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {
+        // SAFETY: Reverse<K> is repr(transparent) over K.
+        let slice =
+            unsafe { core::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<K>(), slice.len()) };
+        K::store_decoded::<S>(!vec, slice);
     }
 }
 
@@ -691,5 +848,220 @@ mod tests {
                 assert_eq!(keys, (0..length).collect::<Vec<_>>());
             }
         }
+    }
+
+    #[test]
+    fn finish_msd_edge_boundaries_and_encodings() {
+        fn check_type<K: RadixKey>(make: impl Fn(usize) -> K, same: impl Fn(K, K) -> bool) {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            let levels: Vec<Level> = [
+                Some(Level::baseline()),
+                Level::new().as_avx2().map(Level::Avx2),
+                Some(Level::new()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+            let levels = [Level::baseline(), Level::new()];
+            for level in levels {
+                let (w, supported) = dispatch!(level, simd => {
+                    fn info<S: Simd, K: SimdKey>(simd: S) -> (usize, bool) {
+                        (K::lanes::<S>(), msd_supported::<S, K>(simd))
+                    }
+                    info::<_, K>(simd)
+                });
+                let lengths: Vec<usize> = if cfg!(miri) {
+                    vec![
+                        0,
+                        (2 * w.max(8)).saturating_sub(1),
+                        2 * w.max(8),
+                        8 * w.max(8) + w.max(8) + 3,
+                    ]
+                } else {
+                    vec![
+                        0,
+                        1,
+                        (2 * w).saturating_sub(1),
+                        2 * w,
+                        2 * w + 1,
+                        3 * w - 1,
+                        3 * w,
+                        8 * w - 1,
+                        8 * w,
+                        8 * w + 1,
+                        8 * w + w - 1,
+                        8 * w + w,
+                        8 * w + w + 3,
+                        8 * w + 2 * w + 3,
+                    ]
+                };
+                for len in lengths {
+                    let max_buckets: Vec<usize> = if cfg!(miri) {
+                        vec![1, 2, w + 1, w + 2]
+                    } else {
+                        (1..=w + 2).collect()
+                    };
+                    for largest in max_buckets {
+                        let mut expected: Vec<K> = (0..len).map(&make).collect();
+                        expected.sort_by_key(|k| k.encode());
+                        let mut src = expected.clone();
+                        let mut pos = 0;
+                        let mut step = 0usize;
+                        while pos < len {
+                            let size = ((step % largest) + 1).min(len - pos);
+                            src[pos..pos + size].reverse();
+                            pos += size;
+                            step += 1;
+                        }
+                        // Use distinct pre-scatter sentinel contents in `dest` so
+                        // omitted writes (including `largest == 1` and tails) fail
+                        // on `handled == true` and stray writes fail on decline.
+                        let sentinel: Vec<K> = (0..len)
+                            .map(|i| make(i.wrapping_add(1).wrapping_mul(13)))
+                            .collect();
+                        let mut dest = sentinel.clone();
+                        let handled = dispatch!(level, simd => {
+                            finish_msd_with(simd, &src, &mut dest, largest)
+                        });
+                        let should_handle = supported && len >= 2 * w && largest <= w + 1;
+                        assert_eq!(
+                            handled, should_handle,
+                            "level={level:?} w={w} len={len} largest={largest}"
+                        );
+                        let want = if handled { &expected } else { &sentinel };
+                        assert!(
+                            dest.iter().zip(want).all(|(&a, &b)| same(a, b)),
+                            "mismatch: level={level:?} handled={handled} w={w} len={len} largest={largest}"
+                        );
+                    }
+                }
+                // Place a worst-case reversed `(w + 1)`-element bucket across
+                // every stream seam and tail boundary at both even and odd start parities.
+                if supported {
+                    let len = 8 * w + w + 3;
+                    let seg = (len / (4 * w)) * w;
+                    let mut expected: Vec<K> = (0..len).map(&make).collect();
+                    expected.sort_by_key(|k| k.encode());
+                    for seam in [seg, 2 * seg, 3 * seg, 4 * seg, len - w] {
+                        for parity in [0usize, 1] {
+                            let start = seam.saturating_sub(w / 2 + parity);
+                            let end = (start + w + 1).min(len);
+                            let mut src = expected.clone();
+                            src[start..end].reverse();
+                            let mut dest = src.clone();
+                            assert!(dispatch!(level, simd => {
+                                finish_msd_with(simd, &src, &mut dest, w + 1)
+                            }));
+                            assert!(
+                                dest.iter().zip(&expected).all(|(&a, &b)| same(a, b)),
+                                "seam mismatch: level={level:?} w={w} seam={seam} start={start}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        check_type(|i| (i.wrapping_mul(251)) as u8, |a, b| a == b);
+        check_type(|i| (i.wrapping_mul(251)) as i8, |a, b| a == b);
+        check_type(|i| (i.wrapping_mul(4099)) as u16, |a, b| a == b);
+        check_type(|i| (i.wrapping_mul(4099)) as i16, |a, b| a == b);
+        check_type(|i| (i as u32).wrapping_mul(2_654_435_761), |a, b| a == b);
+        check_type(
+            |i| ((i as u32).wrapping_mul(2_654_435_761)) as i32,
+            |a, b| a == b,
+        );
+        check_type(
+            |i| (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15),
+            |a, b| a == b,
+        );
+        check_type(
+            |i| ((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)) as i64,
+            |a, b| a == b,
+        );
+        check_type(|i| i.wrapping_mul(0x9e37_79b9), |a, b| a == b);
+        check_type(|i| i.wrapping_mul(0x9e37_79b9) as isize, |a, b| a == b);
+        check_type(
+            |i| core::cmp::Reverse((i as u32).wrapping_mul(2_654_435_761)),
+            |a, b| a == b,
+        );
+        check_type(
+            |i| core::cmp::Reverse(((i as u32).wrapping_mul(2_654_435_761)) as i32),
+            |a, b| a == b,
+        );
+        check_type(
+            |i| {
+                core::cmp::Reverse(core::cmp::Reverse(
+                    ((i as u32).wrapping_mul(2_654_435_761)) as i32,
+                ))
+            },
+            |a, b| a == b,
+        );
+        check_type(
+            |i| {
+                core::cmp::Reverse(core::cmp::Reverse(
+                    ((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)) as i64,
+                ))
+            },
+            |a, b| a == b,
+        );
+        let f32_specials: [u32; 9] = [
+            (-f32::NAN).to_bits(),
+            f32::NEG_INFINITY.to_bits(),
+            (-1.0f32).to_bits(),
+            (-0.0f32).to_bits(),
+            0.0f32.to_bits(),
+            1,
+            1.0f32.to_bits(),
+            f32::INFINITY.to_bits(),
+            f32::NAN.to_bits(),
+        ];
+        check_type(
+            |i| {
+                if i < f32_specials.len() {
+                    f32::from_bits(f32_specials[i])
+                } else {
+                    f32::from_bits((i as u32).wrapping_mul(2_654_435_761))
+                }
+            },
+            |a, b| a.to_bits() == b.to_bits(),
+        );
+        check_type(
+            |i| core::cmp::Reverse(f32::from_bits(f32_specials[i % f32_specials.len()])),
+            |a, b| a.0.to_bits() == b.0.to_bits(),
+        );
+        let f64_specials: [u64; 9] = [
+            (-f64::NAN).to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+            (-1.0f64).to_bits(),
+            (-0.0f64).to_bits(),
+            0.0f64.to_bits(),
+            1,
+            1.0f64.to_bits(),
+            f64::INFINITY.to_bits(),
+            f64::NAN.to_bits(),
+        ];
+        check_type(
+            |i| {
+                if i < f64_specials.len() {
+                    f64::from_bits(f64_specials[i])
+                } else {
+                    f64::from_bits((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                }
+            },
+            |a, b| a.to_bits() == b.to_bits(),
+        );
+        check_type(
+            |i| core::cmp::Reverse(f64::from_bits(f64_specials[i % f64_specials.len()])),
+            |a, b| a.0.to_bits() == b.0.to_bits(),
+        );
+        // Short slices below SIMD_MIN and scalar keys (`u128`) always decline.
+        let short = [2u32; SIMD_MIN - 1];
+        let mut short_dest = [0u32; SIMD_MIN - 1];
+        assert!(!finish_msd(&short, &mut short_dest, 2));
+        let src = [3u128; SIMD_MIN];
+        let mut dest = src;
+        assert!(!finish_msd(&src, &mut dest, 2));
     }
 }

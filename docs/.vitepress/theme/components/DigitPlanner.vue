@@ -2,17 +2,21 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bucketColor } from "../palette";
-import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
+import { type Digit, planTile } from "../sim/digits";
 
 const BITS = 32;
+const RECORDS = 8192;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
-const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, BITS));
+const simdMsd = ref(true);
+const decision = computed(() => planTile(RECORDS, varying.value, width.value, BITS, 8, simdMsd.value));
+const tileLeaf = computed(() => decision.value.leaf);
 const tileLeafLabel = computed(() =>
   ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
 );
 const presets: [string, bigint][] = [
   ["all 32 bits", (1n << 32n) - 1n],
+  ["low 25 bits", (1n << 25n) - 1n],
   ["low 20 bits", (1n << 20n) - 1n],
   ["two bytes with a gap", 0xff00ffn],
   ["scattered", 0x80f0_0f01n],
@@ -23,9 +27,12 @@ function toggle(bit: number) {
 }
 const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
-const plan = computed(() => planDigits(varying.value, width.value, BITS));
+const plan = computed(() => decision.value.digits);
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
+  if (decision.value.simdMsdOverride) {
+    return "One top digit already provides at least one bucket per record with fewer table slots than the two-pass LSD split, so direct-key SIMD MSD finishing overrides it.";
+  }
   return tileLeaf.value === "lsd"
     ? "At most two flat passes finish this tile; their split minimizes table slots."
     : "One top-digit partition exposes actual child variation. Each child chooses its own finishing plan.";
@@ -56,6 +63,10 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       <label>
         Widest digit (cursor table): {{ width }} bits
         <input v-model.number="width" type="range" min="6" max="14" />
+      </label>
+      <label>
+        <input v-model="simdMsd" type="checkbox" />
+        Direct-key SIMD MSD (8+ lanes)
       </label>
       <span>Presets:</span>
       <button v-for="[name, mask] in presets" :key="name" type="button" class="preset" @click="varying = mask">

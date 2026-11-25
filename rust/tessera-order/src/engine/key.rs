@@ -478,6 +478,8 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     const DIRECT: Option<DirectKeys<K>> = Some(DirectKeys {
         shift: 0,
         count: count_keys::<K>,
+        can_finish_msd: crate::engine::portable_simd::can_finish_msd::<K>,
+        finish_msd: crate::engine::portable_simd::finish_msd::<K>,
     });
     type Value = K::Encoded;
     const KEY_MASK: u128 = K::Width::MASK;
@@ -503,11 +505,11 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     }
 }
 
-/// Counting access to the complete encoding of sealed native-key records.
+/// Counting and SIMD finishing access to the complete encoding of sealed native-key records.
 ///
 /// Only [`Extract::DIRECT`] supplies it, so classification caching and
-/// count/fill eligibility cannot disagree. Counting retains the shared bits
-/// outside its full-record window; an extractor's projection alone need not
+/// direct-key finishing eligibility cannot disagree. Counting retains the shared
+/// bits outside its full-record window; an extractor's projection alone need not
 /// identify a record.
 pub(crate) struct DirectKeys<T> {
     /// Position of the extractor's key bit 0 in the record's encoded key.
@@ -515,6 +517,10 @@ pub(crate) struct DirectKeys<T> {
     /// Counts/fills a window in the full encoding, whose outside bits agree.
     /// The final flag selects parallel execution when the `rayon` feature is on.
     count: fn(&mut [T], usize, usize, bool),
+    /// Whether SIMD MSD finishing supports this key type on the active CPU.
+    pub(crate) can_finish_msd: fn() -> bool,
+    /// Finishes an MSD-partitioned buffer into `dest` when bounded by `largest`.
+    pub(crate) finish_msd: fn(&[T], &mut [T], usize) -> bool,
 }
 
 /// Finishes a slice by counting a small encoded-key window and decoding its runs.

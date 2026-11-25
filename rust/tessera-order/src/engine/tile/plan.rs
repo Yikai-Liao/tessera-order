@@ -27,8 +27,11 @@ fn top_window(remaining: u128, width: usize) -> (Digit, u128) {
 
 /// Finishes in one or two flat passes, otherwise partitions the highest digit.
 /// Two-pass plans minimize table slots by checking at most `width` split points;
-/// longer plans inspect actual children instead of predicting their work.
-fn plan_digits(varying: u128, width: usize) -> TilePlan {
+/// when direct-key SIMD MSD finishing is available and one top digit already
+/// provides at least one bucket per record with fewer table slots than the
+/// two-pass split, prefer that single MSD pass. Longer plans inspect actual
+/// children instead of predicting their work.
+fn plan_digits(varying: u128, width: usize, len: usize, simd_msd: bool) -> TilePlan {
     let (high, window) = top_window(varying, width);
     let remaining = varying & !window;
     if remaining == 0 {
@@ -53,6 +56,10 @@ fn plan_digits(varying: u128, width: usize) -> TilePlan {
                 slots = cost;
             }
         }
+    }
+    let msd_slots = 1usize << high.width;
+    if simd_msd && msd_slots >= len && slots > msd_slots {
+        return TilePlan::Msd(high);
     }
     TilePlan::Lsd { digits, passes: 2 }
 }
@@ -82,11 +89,17 @@ pub(super) enum TilePlan {
 }
 
 /// Chooses a leaf for a nonconstant, nonempty tile without allocating scratch.
-pub(super) fn plan_tile<T>(len: usize, varying: u128) -> TilePlan {
+#[inline]
+pub(super) fn plan_tile<T>(len: usize, varying: u128, simd_msd: bool) -> TilePlan {
     if len <= insertion_limit::<T>() {
         return TilePlan::Insertion;
     }
-    plan_digits(varying, tile_digit_bits(len, core::mem::size_of::<T>()))
+    plan_digits(
+        varying,
+        tile_digit_bits(len, core::mem::size_of::<T>()),
+        len,
+        simd_msd,
+    )
 }
 
 #[cfg(test)]
@@ -118,7 +131,7 @@ mod tests {
         for bits in 1..256u128 {
             for width in 1..=5 {
                 let optimum = optimal_digit_cost(bits, width);
-                match plan_digits(bits, width) {
+                match plan_digits(bits, width, usize::MAX, false) {
                     TilePlan::Lsd { digits, passes } => {
                         assert!(optimum.0 <= 2);
                         assert_eq!(
@@ -144,14 +157,17 @@ mod tests {
             }
         }
         for shift in [0, 17, 96] {
-            let TilePlan::Lsd { digits, passes } = plan_digits(0xffff_ffffu128 << shift, 16) else {
+            let TilePlan::Lsd { digits, passes } =
+                plan_digits(0xffff_ffffu128 << shift, 16, usize::MAX, false)
+            else {
                 panic!("two-pass plan expected")
             };
             assert_eq!(passes, 2);
             assert_eq!(digits[0].width, 16);
             assert_eq!(digits[1].width, 16);
         }
-        let TilePlan::Lsd { digits, passes } = plan_digits((1 << 127) | 1, 14) else {
+        let TilePlan::Lsd { digits, passes } = plan_digits((1 << 127) | 1, 14, usize::MAX, false)
+        else {
             panic!("two sparse passes expected")
         };
         assert_eq!(passes, 2);
@@ -160,8 +176,30 @@ mod tests {
             (1 << 127) | 1
         );
         assert!(matches!(
-            plan_tile::<u64>(16, u64::MAX as u128),
+            plan_tile::<u64>(16, u64::MAX as u128, true),
             TilePlan::Insertion
+        ));
+        // When one 13-bit digit covers at least `len` buckets with fewer slots
+        // than the 13+12 two-pass plan, SIMD MSD selects that single MSD pass;
+        // without SIMD MSD, or for sparse/compact two-pass splits, LSD stays.
+        assert!(matches!(
+            plan_tile::<u32>(7812, (1u128 << 25) - 1, false),
+            TilePlan::Lsd { passes: 2, .. }
+        ));
+        assert!(matches!(
+            plan_tile::<u32>(7812, (1u128 << 25) - 1, true),
+            TilePlan::Msd(Digit {
+                shift: 12,
+                width: 13
+            })
+        ));
+        assert!(matches!(
+            plan_tile::<u32>(7812, (0xffu128 << 24) | 0xff, true),
+            TilePlan::Lsd { passes: 2, .. }
+        ));
+        assert!(matches!(
+            plan_tile::<u32>(7812, (1u128 << 16) - 1, true),
+            TilePlan::Lsd { passes: 2, .. }
         ));
     }
 }

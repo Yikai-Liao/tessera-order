@@ -20,7 +20,7 @@ A digit's width is limited by its cursor table, one `u16` per bucket. The widest
 - has at most 4 buckets per record, so empty buckets cannot dominate;
 - is between 6 and 14 bits wide.
 
-**One or two passes.** If all varying bits fit one digit, one pass finishes the tile. If they fit two, the planner picks the split with the smallest total table. For 20 adjacent varying bits and a 14-bit limit, it uses 10 + 10 bits rather than 14 + 6: both move each record twice, but the balanced tables have 2,048 slots instead of 16,448. Varying bits need not be adjacent: two far-apart varying bits take two one-bit passes.
+**One or two passes.** If all varying bits fit one digit, one pass finishes the tile. If they fit two, the planner picks the split with the smallest total table. For 20 adjacent varying bits and a 14-bit limit, it uses 10 + 10 bits rather than 14 + 6: both move each record twice, but the balanced tables have 2,048 slots instead of 16,448. Varying bits need not be adjacent: two far-apart varying bits take two one-bit passes. When direct-key SIMD MSD finishing is available on the active CPU backend and one top digit already provides at least one bucket per record with fewer table slots than the two-pass split (for example, 25 remaining bits on an 8,000-record `u32` tile), the planner chooses that single MSD pass instead of two scatter passes.
 
 **Otherwise, partition and look.** One MSD pass consumes the highest digit, and each bucket plans again from the bits that actually vary in it. There is no cost estimate: an insertion-sized bucket needs no scan, and a larger one scans its remaining bits and is done if they are constant. Concentrated distributions thus get recursive finishing for free. This can choose MSD where a longer LSD plan would have been faster; [engine evidence](../design/evidence.md#landed-with-open-losses) lists the measured cases.
 
@@ -44,7 +44,7 @@ Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass), wi
 
 A bucket's remaining varying bits are scanned only within the parent's remaining bits. A digit that has been partitioned cannot reappear, even if the key function changes its answers, so each level removes key bits.
 
-An MSD pass reads its bucket boundaries from the finished cursor table instead of recomputing them; recomputing measured 48% slower at about one bucket per record. If every bucket is insertion-sized, one adjacent-inversion sweep over the whole tile finishes it without walking the boundaries.
+An MSD pass reads its bucket boundaries from the finished cursor table instead of recomputing them; recomputing measured 48% slower at about one bucket per record. When every bucket holds at most one record, restoring from scratch already finishes the tile. For direct primitive keys (including `Reverse` wrappers) on backends with at least 8 vector lanes, when the tile has at least `max(64, 2 * lanes)` records and the largest bucket fits within one vector of overlap (`<= lanes + 1`), a branchless streaming odd-even network finishes scratch directly into the tile without a separate copy-back pass. Otherwise, if every bucket is insertion-sized, one adjacent-inversion sweep over the whole tile finishes it without walking the boundaries.
 
 ## Parallel child allowance
 

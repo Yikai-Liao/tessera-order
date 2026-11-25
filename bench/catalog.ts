@@ -192,6 +192,12 @@ export function operationParts(operation: Operation) {
   return { entry, values };
 }
 
+/** Identity of an operation including its parameters, independent of object property order. */
+export function operationKey(operation: Operation) {
+  const { entry, values } = operationParts(operation);
+  return [entry.id, ...values].join("/");
+}
+
 /** Each parameter with its optional label, for presentation. */
 function parameterText(operation: Operation) {
   const { entry, values } = operationParts(operation);

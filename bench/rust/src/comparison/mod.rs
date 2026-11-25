@@ -171,14 +171,25 @@ impl Options {
         Ok(cases)
     }
 
-    /// The planned columns whose adapters support this case, in catalog and
-    /// execution order, and the planned columns they omit.
-    fn columns(&self, case: &InputCase, executions: &[Execution]) -> (Columns, Columns) {
-        let input = record::CaseInput::new(&case.probe());
+    /// Planned columns in catalog and execution order, before capability checks.
+    fn planned_columns(
+        &self,
+        executions: &[Execution],
+    ) -> impl Iterator<Item = (Variant, Execution)> {
         self.variants()
             .into_iter()
             .flat_map(|v| executions.iter().map(move |&e| (v, e)))
-            .partition(|(v, e)| v.supports(&input, *e))
+    }
+
+    fn supported_columns(
+        &self,
+        case: &InputCase,
+        executions: &[Execution],
+    ) -> Vec<(Variant, Execution)> {
+        let probe = record::CaseInput::new(&case.probe());
+        self.planned_columns(executions)
+            .filter(|(v, e)| v.supports(&probe, *e))
+            .collect()
     }
 
     /// Retains the selected implementations available in this build configuration.
@@ -189,8 +200,6 @@ impl Options {
             .collect()
     }
 }
-/// Implementation adapters, each at one execution.
-type Columns = Vec<(Variant, Execution)>;
 
 /// Holds a kernel lock until this worker exits, including after its Node parent dies.
 ///
@@ -257,16 +266,23 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
             .iter()
             .map(|(case, executions)| {
                 let input = record::CaseInput::new(&case.probe());
-                let (supported, omitted) = options.columns(case, executions);
-                measured.extend(supported.iter().map(|&(v, e)| (v.name, e)));
+                let mut columns = Vec::new();
+                let mut omitted = Vec::new();
+                let mut routes = std::collections::BTreeMap::new();
+                for (v, e) in options.planned_columns(executions) {
+                    let id = run::column_id(v, e);
+                    if let Some(route) = v.route(&input, e) {
+                        measured.insert((v.name, e));
+                        columns.push(id.clone());
+                        routes.insert(id, route);
+                    } else {
+                        omitted.push(json!({"column":id,"reason":"unsupported operation/input/execution combination"}));
+                    }
+                }
                 let mut entry = json!(case);
-                entry["columns"] = json!(supported.iter().map(|&(v, e)| run::column_id(v, e)).collect::<Vec<_>>());
-                entry["omitted"] = json!(omitted.iter()
-                    .map(|&(v, e)| json!({"column":run::column_id(v, e),"reason":"unsupported operation/input/execution combination"}))
-                    .collect::<Vec<_>>());
-                entry["routes"] = json!(supported.iter()
-                    .map(|&(v, e)| (run::column_id(v, e), v.route(&input, e)))
-                    .collect::<std::collections::BTreeMap<_, _>>());
+                entry["columns"] = json!(columns);
+                entry["omitted"] = json!(omitted);
+                entry["routes"] = json!(routes);
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
                     let mut entry = entry;
@@ -446,7 +462,7 @@ fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             case.id()
         );
         let input = record::CaseInput::new(case);
-        for (v, e) in options.columns(case, executions).0 {
+        for (v, e) in options.supported_columns(case, executions) {
             if let Some(mut k) = v.prepare(&input, e, 32_768) {
                 k.measure_batch(1)
                     .map_err(|error| format!("{} {}: {error}", case.id(), run::column_id(v, e)))?;
@@ -510,7 +526,7 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
                 .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
             run::measure_case(
                 case,
-                &options.columns(case, executions).0,
+                &options.supported_columns(case, executions),
                 bytes,
                 &options.sampling,
                 BUILD,
@@ -568,10 +584,9 @@ pub fn main(memory: bool) -> Result<()> {
                             len: 32,
                             operation: probe_operation.clone(),
                         });
-                        if !v.supports(&probe, execution) {
+                        let Some(route) = v.route(&probe, execution) else {
                             continue;
-                        }
-                        let route = v.route(&probe, execution);
+                        };
                         match routes.iter_mut().find(|(r, _)| *r == route) {
                             Some((_, types)) => types.push(&ty.id),
                             None => routes.push((route, vec![&ty.id])),
@@ -629,7 +644,7 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             case.id()
         );
         let input = record::CaseInput::new(case);
-        for (v, e) in options.columns(case, executions).0 {
+        for (v, e) in options.supported_columns(case, executions) {
             if case.operation.is_sort()
                 && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
                 && v.name != "tessera"

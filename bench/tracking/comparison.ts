@@ -14,6 +14,7 @@ import {
   isComposition,
   type Operation,
   operationDescription,
+  operationKey,
   operationKinds,
   operationParts,
   parseCaseId,
@@ -89,20 +90,20 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
       value(caseId(input), "tessera") !== null &&
       value(caseId(input), serialReference(input.operation)) !== null,
   );
-  // Parameter values in identity order; JSON keeps the parsed key order, so it names a group.
+  // Break coverage ties by parameter values in catalog identity order.
   const lexical = (a: number[], b: number[]) => {
     const at = a.findIndex((value, index) => value !== b[index]);
     return at < 0 ? 0 : a[at] - b[at];
   };
-  const [chosen] = [...Map.groupBy(measured, (input) => JSON.stringify(input.operation)).values()]
+  const [chosen] = [...Map.groupBy(measured, (input) => operationKey(input.operation)).values()]
     .toSorted(
       (a, b) =>
         b.length - a.length ||
         lexical(operationParts(a[0].operation).values, operationParts(b[0].operation).values),
     )
     .map((group) => group[0].operation);
-  const same = (input: CaseIdentity) => JSON.stringify(input.operation) === JSON.stringify(chosen);
   if (!chosen) return null;
+  const key = operationKey(chosen);
   const reference = serialReference(chosen);
   const field = (cases: CaseIdentity[]): Field => ({
     operation: chosen,
@@ -124,7 +125,7 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
     peak: (id, name) => serial(name)?.memory?.[criterionId(parseCaseId(id), "serial")] ?? null,
   });
   return {
-    primary: field([...cases.values()].filter(same)),
+    primary: field([...cases.values()].filter((input) => operationKey(input.operation) === key)),
     parameters: operationParts(chosen).values.length ? field(measured) : null,
   };
 }

@@ -8,6 +8,7 @@ import {
   compareExecutions,
   type Execution,
   type Operation,
+  operationKey,
   operationSchema,
   parseExecution,
   SORT,
@@ -72,9 +73,6 @@ export function parsePlan(value: unknown): Plan {
   return plan;
 }
 
-const sameOperation = (a: Operation, b: Operation) =>
-  JSON.stringify(a, Object.keys(a).sort()) === JSON.stringify(b, Object.keys(b).sort());
-
 /** Check operation parameters on every surviving literal count, as Rust does on its
  * expanded cases; engine-relative boundaries resolve only in Rust, for sorting. */
 function validateOperations(plan: Plan) {
@@ -94,7 +92,7 @@ function validateOperations(plan: Plan) {
                   (!r.types || r.types.includes(ty)) &&
                   (!r.distributions || r.distributions.includes(distribution)) &&
                   (!r.lengths || r.lengths.includes(len)) &&
-                  (!r.operation || sameOperation(r.operation, operation)) &&
+                  (!r.operation || operationKey(r.operation) === operationKey(operation)) &&
                   (!r.executions || r.executions.includes(execution)),
               ),
           ),
@@ -140,14 +138,13 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
   });
 }
 
+function operationGroups(plan: Plan) {
+  return Map.groupBy(plan.include, (rule) => operationKey(rule.operation ?? SORT)).values();
+}
+
 /** Every operation an include rule selects, defaulting to sort. */
 export function planOperations(plan: Plan) {
-  const operations: Operation[] = [];
-  for (const rule of plan.include) {
-    const operation = rule.operation ?? SORT;
-    if (!operations.some((known) => sameOperation(known, operation))) operations.push(operation);
-  }
-  return operations;
+  return Array.from(operationGroups(plan), (rules) => rules[0].operation ?? SORT);
 }
 
 /**
@@ -155,10 +152,7 @@ export function planOperations(plan: Plan) {
  * measures one operation, so a plan that selects several runs one session per part.
  */
 export function plansByOperation(plan: Plan): Plan[] {
-  return planOperations(plan).map((operation) => ({
-    ...plan,
-    include: plan.include.filter((rule) => sameOperation(rule.operation ?? SORT, operation)),
-  }));
+  return Array.from(operationGroups(plan), (include) => ({ ...plan, include }));
 }
 
 /** Every execution an include rule selects, serial first, then ascending worker counts. */

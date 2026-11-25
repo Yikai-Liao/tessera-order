@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chooseTileLeaf, planDigits, planTile, sampleKeys } from "./digits.ts";
+import { chooseTileLeaf, planDigits, sampleKeys } from "./digits.ts";
 
 function optimalDigitCost(bits: bigint, width: number): { passes: number; slots: number } {
   if (bits === 0n) return { passes: 0, slots: 0 };
@@ -33,9 +33,8 @@ test("short flat plans balance shifted runs and sparse bits", () => {
   // cannot be silently dropped into MSD.
   for (let mask = 1n; mask < 256n; mask++) {
     const optimum = optimalDigitCost(mask, 3);
-    const decision = planTile(1024, mask, 3, 128, 16, false);
     const plan = planDigits(mask, 3, 128);
-    assert.deepEqual(plan, decision.digits);
+    const leaf = chooseTileLeaf(1024, mask, 3, 128);
     let covered = 0n;
     let slots = 0;
     for (const digit of plan) {
@@ -46,25 +45,23 @@ test("short flat plans balance shifted runs and sparse bits", () => {
       slots += 1 << digit.width;
     }
     if (optimum.passes <= 2) {
-      assert.equal(decision.leaf, "lsd");
+      assert.equal(leaf, "lsd");
       assert.equal(plan.length, optimum.passes);
       assert.equal(slots, optimum.slots);
       assert.equal(covered & mask, mask);
     } else {
-      assert.equal(decision.leaf, "msd");
+      assert.equal(leaf, "msd");
       assert.equal(plan.length, 1);
       assert.notEqual(covered & mask, 0n);
     }
   }
   // Exact-fit lower digit (width === tableWidth) must stay a two-pass LSD plan.
-  assert.deepEqual(planTile(1024, (1n << 11n) | (1n << 5n) | 1n, 6, 16, 2, false), {
-    leaf: "lsd",
-    digits: [
-      { shift: 11, width: 1 },
-      { shift: 0, width: 6 },
-    ],
-    simdMsdOverride: false,
-  });
+  const exactFit = (1n << 11n) | (1n << 5n) | 1n;
+  assert.equal(chooseTileLeaf(1024, exactFit, 6, 16, 2), "lsd");
+  assert.deepEqual(planDigits(exactFit, 6, 16), [
+    { shift: 11, width: 1 },
+    { shift: 0, width: 6 },
+  ]);
   const sparse = (1n << 127n) | 1n;
   assert.deepEqual(planDigits(sparse, 14, 128), [
     { shift: 127, width: 1 },
@@ -83,19 +80,13 @@ test("wide tiles partition without sampling and short tiles retain insertion", (
   // Direct-key SIMD MSD overrides a two-pass LSD split only when one top digit
   // provides at least one bucket per record with fewer table slots.
   const bits25 = (1n << 25n) - 1n;
-  assert.deepEqual(planTile(8192, bits25, 13, 32, 4, false), {
-    leaf: "lsd",
-    digits: [
-      { shift: 12, width: 13 },
-      { shift: 0, width: 12 },
-    ],
-    simdMsdOverride: false,
-  });
-  assert.deepEqual(planTile(8192, bits25, 13, 32, 4, true), {
-    leaf: "msd",
-    digits: [{ shift: 12, width: 13 }],
-    simdMsdOverride: true,
-  });
+  assert.equal(chooseTileLeaf(8192, bits25, 13, 32, 4, false), "lsd");
+  assert.deepEqual(planDigits(bits25, 13, 32, 8192, false), [
+    { shift: 12, width: 13 },
+    { shift: 0, width: 12 },
+  ]);
+  assert.equal(chooseTileLeaf(8192, bits25, 13, 32, 4, true), "msd");
+  assert.deepEqual(planDigits(bits25, 13, 32, 8192, true), [{ shift: 12, width: 13 }]);
   assert.equal(chooseTileLeaf(8192, (0xffn << 24n) | 0xffn, 13, 32, 4, true), "lsd");
   assert.equal(chooseTileLeaf(8192, (1n << 16n) - 1n, 13, 32, 4, true), "lsd");
 });

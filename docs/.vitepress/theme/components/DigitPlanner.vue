@@ -2,15 +2,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bucketColor } from "../palette";
-import { type Digit, planTile } from "../sim/digits";
+import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
 
 const BITS = 32;
 const RECORDS = 8192;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
 const simdMsd = ref(true);
-const decision = computed(() => planTile(RECORDS, varying.value, width.value, BITS, 8, simdMsd.value));
-const tileLeaf = computed(() => decision.value.leaf);
+const tileLeaf = computed(() =>
+  chooseTileLeaf(RECORDS, varying.value, width.value, BITS, 4, simdMsd.value),
+);
 const tileLeafLabel = computed(() =>
   ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
 );
@@ -27,15 +28,14 @@ function toggle(bit: number) {
 }
 const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
-const plan = computed(() => decision.value.digits);
+const plan = computed(() =>
+  planDigits(varying.value, width.value, BITS, RECORDS, simdMsd.value),
+);
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  if (decision.value.simdMsdOverride) {
-    return "One top digit already provides at least one bucket per record with fewer table slots than the two-pass LSD split, so direct-key SIMD MSD finishing overrides it.";
-  }
   return tileLeaf.value === "lsd"
     ? "At most two flat passes finish this tile; their split minimizes table slots."
-    : "One top-digit partition exposes actual child variation. Each child chooses its own finishing plan.";
+    : "One top-digit partition exposes child variation. Eligible small direct-key buckets use SIMD finishing; other children choose their own plan.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {

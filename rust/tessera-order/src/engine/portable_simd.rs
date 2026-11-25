@@ -955,99 +955,58 @@ mod tests {
             }
         }
 
-        check_type(|i| (i.wrapping_mul(251)) as u8, |a, b| a == b);
-        check_type(|i| (i.wrapping_mul(251)) as i8, |a, b| a == b);
-        check_type(|i| (i.wrapping_mul(4099)) as u16, |a, b| a == b);
-        check_type(|i| (i.wrapping_mul(4099)) as i16, |a, b| a == b);
-        check_type(|i| (i as u32).wrapping_mul(2_654_435_761), |a, b| a == b);
-        check_type(
-            |i| ((i as u32).wrapping_mul(2_654_435_761)) as i32,
-            |a, b| a == b,
+        macro_rules! integers {
+            ($(($u:ty, $i:ty, $factor:expr)),* $(,)?) => {$(
+                check_type(|i| (i as $u).wrapping_mul($factor), |a, b| a == b);
+                check_type(|i| (i as $u).wrapping_mul($factor) as $i, |a, b| a == b);
+            )*};
+        }
+        integers!(
+            (u8, i8, 251),
+            (u16, i16, 4099),
+            (u32, i32, 2_654_435_761),
+            (u64, i64, 0x9e37_79b9_7f4a_7c15),
+            (usize, isize, 0x9e37_79b9),
         );
-        check_type(
-            |i| (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15),
-            |a, b| a == b,
-        );
-        check_type(
-            |i| ((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)) as i64,
-            |a, b| a == b,
-        );
-        check_type(|i| i.wrapping_mul(0x9e37_79b9), |a, b| a == b);
-        check_type(|i| i.wrapping_mul(0x9e37_79b9) as isize, |a, b| a == b);
-        check_type(
-            |i| core::cmp::Reverse((i as u32).wrapping_mul(2_654_435_761)),
-            |a, b| a == b,
-        );
-        check_type(
-            |i| core::cmp::Reverse(((i as u32).wrapping_mul(2_654_435_761)) as i32),
-            |a, b| a == b,
-        );
-        check_type(
-            |i| {
-                core::cmp::Reverse(core::cmp::Reverse(
-                    ((i as u32).wrapping_mul(2_654_435_761)) as i32,
-                ))
-            },
-            |a, b| a == b,
-        );
-        check_type(
-            |i| {
-                core::cmp::Reverse(core::cmp::Reverse(
-                    ((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)) as i64,
-                ))
-            },
-            |a, b| a == b,
-        );
-        let f32_specials: [u32; 9] = [
-            (-f32::NAN).to_bits(),
-            f32::NEG_INFINITY.to_bits(),
-            (-1.0f32).to_bits(),
-            (-0.0f32).to_bits(),
-            0.0f32.to_bits(),
-            1,
-            1.0f32.to_bits(),
-            f32::INFINITY.to_bits(),
-            f32::NAN.to_bits(),
-        ];
-        check_type(
-            |i| {
-                if i < f32_specials.len() {
-                    f32::from_bits(f32_specials[i])
-                } else {
-                    f32::from_bits((i as u32).wrapping_mul(2_654_435_761))
-                }
-            },
-            |a, b| a.to_bits() == b.to_bits(),
-        );
-        check_type(
-            |i| core::cmp::Reverse(f32::from_bits(f32_specials[i % f32_specials.len()])),
-            |a, b| a.0.to_bits() == b.0.to_bits(),
-        );
-        let f64_specials: [u64; 9] = [
-            (-f64::NAN).to_bits(),
-            f64::NEG_INFINITY.to_bits(),
-            (-1.0f64).to_bits(),
-            (-0.0f64).to_bits(),
-            0.0f64.to_bits(),
-            1,
-            1.0f64.to_bits(),
-            f64::INFINITY.to_bits(),
-            f64::NAN.to_bits(),
-        ];
-        check_type(
-            |i| {
-                if i < f64_specials.len() {
-                    f64::from_bits(f64_specials[i])
-                } else {
-                    f64::from_bits((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
-                }
-            },
-            |a, b| a.to_bits() == b.to_bits(),
-        );
-        check_type(
-            |i| core::cmp::Reverse(f64::from_bits(f64_specials[i % f64_specials.len()])),
-            |a, b| a.0.to_bits() == b.0.to_bits(),
-        );
+        use core::cmp::Reverse;
+        let u32_key = |i| (i as u32).wrapping_mul(2_654_435_761);
+        let i32_key = |i| u32_key(i) as i32;
+        let i64_key = |i| (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) as i64;
+        check_type(|i| Reverse(u32_key(i)), |a, b| a == b);
+        check_type(|i| Reverse(i32_key(i)), |a, b| a == b);
+        check_type(|i| Reverse(Reverse(i32_key(i))), |a, b| a == b);
+        check_type(|i| Reverse(Reverse(i64_key(i))), |a, b| a == b);
+        macro_rules! floats {
+            ($f:ty, $u:ty, $factor:expr) => {{
+                let specials = [
+                    (-<$f>::NAN).to_bits(),
+                    <$f>::NEG_INFINITY.to_bits(),
+                    (-1.0 as $f).to_bits(),
+                    (-0.0 as $f).to_bits(),
+                    (0.0 as $f).to_bits(),
+                    1,
+                    (1.0 as $f).to_bits(),
+                    <$f>::INFINITY.to_bits(),
+                    <$f>::NAN.to_bits(),
+                ];
+                check_type(
+                    |i| {
+                        <$f>::from_bits(if i < specials.len() {
+                            specials[i]
+                        } else {
+                            (i as $u).wrapping_mul($factor)
+                        })
+                    },
+                    |a, b| a.to_bits() == b.to_bits(),
+                );
+                check_type(
+                    |i| Reverse(<$f>::from_bits(specials[i % specials.len()])),
+                    |a, b| a.0.to_bits() == b.0.to_bits(),
+                );
+            }};
+        }
+        floats!(f32, u32, 2_654_435_761);
+        floats!(f64, u64, 0x9e37_79b9_7f4a_7c15);
         // Short slices below SIMD_MIN and scalar keys (`u128`) always decline.
         let mut short = [2u32; SIMD_MIN - 1];
         assert!(!finish_msd(&mut short, 2));

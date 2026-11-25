@@ -44,6 +44,8 @@ export const catalog = z
         parallel: z.enum(["also", "only"]).optional(),
         detail: z.string().optional(),
         description: z.string().optional(),
+        /** Why the memory curve has an unexpected shape, as a sentence for the memory figure. */
+        memory: z.string().optional(),
         /** The call each listed operation makes, where the label names only the sort. */
         routes: z
           .record(z.string(), z.strictObject({ call: z.string(), stable: z.boolean().optional() }))

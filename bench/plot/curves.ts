@@ -17,6 +17,8 @@ export interface Curve {
   name: string;
   tone: Tone;
   strong?: boolean;
+  /** The growth order of the last step, such as "∝ √n", shown after the end label. */
+  growth?: string;
   /** Increasing x; a y below the axis is drawn as a triangle on its edge. */
   points: [number, number][];
 }
@@ -27,8 +29,11 @@ export interface CurveChart {
   x: Axis;
   y: Axis;
   curves: Curve[];
-  /** Dashed or dotted guides that are not measurements; the legend names them. */
-  references: { dotted?: boolean; points: [number, number][] }[];
+  /**
+   * Dashed or dotted guides that are not measurements. A guide is named by its label at its
+   * right end, or else by the legend.
+   */
+  references: { dotted?: boolean; label?: string; points: [number, number][] }[];
   legend: [CurveSwatch[], string][];
   /** A sentence under the legend, for sorts the axes cannot show. */
   note?: string;
@@ -37,7 +42,8 @@ export interface CurveChart {
 /** A legend key: a sort kind's line, a reference's dash pattern, or the off-axis triangle. */
 export type CurveSwatch = Exclude<Tone, "composition"> | "dashed" | "dotted" | "edge";
 
-const LABEL_GAP = 14;
+export const CURVE_LABEL_GAP = 14;
+export const CURVE_PLOT_HEIGHT = 300;
 
 /** Spread end labels vertically by at least the label height, keeping their order. */
 function dodge(targets: number[], low: number, high: number) {
@@ -45,7 +51,7 @@ function dodge(targets: number[], low: number, high: number) {
   const placed = new Array<number>(targets.length);
   let previous = -Infinity;
   for (const index of order) {
-    placed[index] = Math.max(targets[index], previous + LABEL_GAP);
+    placed[index] = Math.max(targets[index], previous + CURVE_LABEL_GAP);
     previous = placed[index];
   }
   // Shift the stack back inside the plot if it ran past the bottom.
@@ -81,7 +87,7 @@ export function renderCurves(spec: CurveChart) {
   const yTicksWidth = Math.max(...spec.y.ticks.map((tick) => textWidth(tick.label, 10))) + 12;
   const left = pad + yTicksWidth;
   const top = headerRule + 24;
-  const bottom = top + 300;
+  const bottom = top + CURVE_PLOT_HEIGHT;
   const scale = (axis: Axis, from: number, to: number) => (value: number) =>
     from +
     ((Math.log(value) - Math.log(axis.low)) / (Math.log(axis.high) - Math.log(axis.low))) *
@@ -100,9 +106,17 @@ export function renderCurves(spec: CurveChart) {
     else rows.push([y, [curve]]);
   }
   const separator = ", ";
+  // A row names its growth once when its lines share it, and after each name otherwise.
+  const shared = (curves: Curve[]) => curves.every((curve) => curve.growth === curves[0].growth);
+  const growthGap = 8;
+  const growthWidth = (curve: Curve) =>
+    curve.growth ? growthGap + textWidth(curve.growth, 11) : 0;
   const rowWidth = (curves: Curve[]) =>
     textWidth(curves.map((curve) => curve.name).join(separator), 12) +
-    (curves.some((curve) => curve.tone === "primary") ? 4 : 0);
+    (curves.some((curve) => curve.tone === "primary") ? 4 : 0) +
+    (shared(curves)
+      ? growthWidth(curves[0])
+      : curves.reduce((sum, curve) => sum + growthWidth(curve), 0));
   const labelsWidth = Math.max(...rows.map(([, curves]) => rowWidth(curves))) + 28;
   const right = width - pad - labelsWidth;
   const px = scale(spec.x, left, right);
@@ -195,6 +209,13 @@ export function renderCurves(spec: CurveChart) {
         strokeLinecap: "round",
       }),
     );
+    if (reference.label && points.length)
+      marks.push(
+        label(reference.label, points.at(-1)![0] + 6, points.at(-1)![1] + 4, {
+          size: 11,
+          tone: ink.muted,
+        }),
+      );
   }
 
   // Name every line at its right end, spreading crowded labels with a leader to their line.
@@ -215,8 +236,15 @@ export function renderCurves(spec: CurveChart) {
       ),
     );
     let x = right + 22;
+    const growth = (curve: Curve) => {
+      if (!curve.growth) return;
+      x += growthGap;
+      marks.push(label(curve.growth, x, placed[index] + 4, { size: 11, tone: ink.muted }));
+      x += textWidth(curve.growth, 11);
+    };
     group.forEach((curve, position) => {
-      const text = curve.name + (position < group.length - 1 ? separator : "");
+      const last = position === group.length - 1;
+      const text = curve.name + (last || !shared(group) ? "" : separator);
       marks.push(
         label(text, x, placed[index] + 4, {
           size: 12,
@@ -225,7 +253,15 @@ export function renderCurves(spec: CurveChart) {
         }),
       );
       x += textWidth(text, 12) + (curve.tone === "primary" ? 2 : 0);
+      if (!shared(group)) {
+        growth(curve);
+        if (!last) {
+          marks.push(label(separator, x, placed[index] + 4, { size: 12, tone: ink.muted }));
+          x += textWidth(separator, 12);
+        }
+      }
     });
+    if (shared(group)) growth(group[0]);
   });
 
   const legend: [(CurveSwatch | "composition")[], string][] = [...spec.legend];
@@ -282,9 +318,13 @@ export function renderCurves(spec: CurveChart) {
       height,
       id: spec.id,
       title: spec.title,
+      // The note explains what the axes cannot show, so the description carries it too.
       description: `${spec.guide}. ${spec.curves
-        .map((curve) => `${curve.name}: ${curve.points.map(([, y]) => y).join(", ")}`)
-        .join("; ")}`,
+        .map(
+          (curve) =>
+            `${curve.name}${curve.growth ? ` (${curve.growth})` : ""}: ${curve.points.map(([, y]) => y).join(", ")}`,
+        )
+        .join("; ")}.${spec.note ? ` ${spec.note}` : ""}`,
     },
     [{ marks }],
   )}\n`;

@@ -124,6 +124,7 @@ test("curves ending together share a label, and only a clipped curve adds the ed
     references: [
       {
         dotted: true,
+        label: "∝ √n",
         points: [
           [1, 20],
           [4, 40],
@@ -135,6 +136,24 @@ test("curves ending together share a label, and only a clipped curve adds the ed
   const svg = renderCurves(chart(1));
   assert.ok(svg.includes(">alpha, <"));
   assert.ok(svg.includes(">beta<"));
+  // A labelled guide is named at its end instead of in the legend.
+  assert.ok(svg.includes(">∝ √n<"));
+  // Lines sharing an end label name a shared growth once, and differing growths each.
+  const shared = chart(1);
+  shared.curves[0].growth = shared.curves[1].growth = "∝ n";
+  shared.curves[1].points = shared.curves[0].points;
+  assert.equal(renderCurves(shared).match(/>∝ n</g)?.length, 1);
+  const differing = chart(1);
+  differing.curves[0].growth = "∝ n";
+  differing.curves[1].growth = "constant";
+  differing.curves[1].points = differing.curves[0].points;
+  const { document: both } = parseHTML(renderCurves(differing));
+  const labels = [...both.querySelectorAll("svg text")].map((element) => element.textContent);
+  const namesAndTags = ["alpha", "∝ n", "beta", "constant"];
+  assert.deepEqual(
+    labels.filter((text) => namesAndTags.includes(text!)),
+    namesAndTags,
+  );
   assert.doesNotMatch(svg, /below the axis/);
   assert.match(renderCurves(chart(10)), /below the axis, value in table/);
   assert.doesNotMatch(svg, /Tessera composition/);

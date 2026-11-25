@@ -86,42 +86,53 @@ fn insertion_sort_simd<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usi
     dispatch!(Level::new(), simd => crate::engine::order::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
 }
 
-/// Converts per-bucket counts to per-bucket starts, in place.
+/// Converts per-bucket counts to per-bucket starts in place, returning the
+/// largest bucket count observed before prefixing.
 ///
 /// The scalar loop is a dependent chain of one add per bucket; a vector
-/// prefix sum shortens the chain to log2(lanes) adds per lane group.
+/// prefix sum shortens the chain to log2(lanes) adds per lane group while
+/// tracking the maximum count with one SIMD max per chunk.
 /// Counting passes bound the total count by `u16::MAX`, so every start fits.
-pub(crate) fn prefix_sum(counts: &mut [u16]) {
+pub(crate) fn prefix_sum(counts: &mut [u16]) -> u16 {
     dispatch!(Level::new(), simd => prefix_sum_with(simd, counts))
 }
 
 #[inline(always)]
-fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
+fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) -> u16 {
     const SHIFT1: [u8; 16] = [0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
     const SHIFT2: [u8; 16] = [0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
     const SHIFT4: [u8; 16] = [
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7,
     ];
+    const LAST: [u8; 16] = [
+        14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+    ];
     let shift1 = u8x16::<S>::from_slice(simd, &SHIFT1);
     let shift2 = u8x16::<S>::from_slice(simd, &SHIFT2);
     let shift4 = u8x16::<S>::from_slice(simd, &SHIFT4);
-    let mut carry = 0u16;
+    let last = u8x16::<S>::from_slice(simd, &LAST);
+    let mut carry = u16x8::<S>::splat(simd, 0);
+    let mut max_vec = u16x8::<S>::splat(simd, 0);
     let (chunks, remainder) = counts.as_chunks_mut::<8>();
     for chunk in chunks {
-        let mut scan = u16x8::<S>::from_slice(simd, chunk);
-        scan = scan + scan.swizzle_dyn_precise(shift1);
+        let raw = u16x8::<S>::from_slice(simd, chunk);
+        max_vec = max_vec.max(raw);
+        let mut scan = raw + raw.swizzle_dyn_precise(shift1);
         scan = scan + scan.swizzle_dyn_precise(shift2);
         scan = scan + scan.swizzle_dyn_precise(shift4);
-        let starts = scan.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry);
+        let starts = scan.swizzle_dyn_precise(shift1) + carry;
         starts.store_slice(chunk);
-        carry = carry.wrapping_add(scan.to_array()[7]);
+        carry += scan.swizzle_dyn_precise(last);
     }
-    let mut offset = carry;
+    let mut largest = max_vec.reduce_max();
+    let mut offset = carry.to_array()[0];
     for slot in remainder {
         let count = *slot;
+        largest = largest.max(count);
         *slot = offset;
         offset = offset.wrapping_add(count);
     }
+    largest
 }
 
 /// Confirms ascending direct keys after an already encoded predecessor.
@@ -562,7 +573,7 @@ mod tests {
             if cfg!(miri) && length > 257 {
                 continue;
             }
-            for shape in 0..3 {
+            for shape in 0..4 {
                 let counts: Vec<u16> = (0..length)
                     .map(|index| match shape {
                         0 => 0,
@@ -573,9 +584,17 @@ mod tests {
                                 0
                             }
                         }
+                        2 => {
+                            if index + 1 == length {
+                                u16::MAX
+                            } else {
+                                0
+                            }
+                        }
                         _ => ((index * 37 + 11) % 4) as u16,
                     })
                     .collect();
+                let expected_max = counts.iter().copied().max().unwrap_or(0);
                 let mut total = 0u32;
                 let expected: Vec<u16> = counts
                     .iter()
@@ -588,10 +607,14 @@ mod tests {
                     .collect();
                 for level in [Level::baseline(), Level::new()] {
                     let mut actual = counts.clone();
-                    dispatch!(level, simd => prefix_sum_with(simd, &mut actual));
+                    let largest = dispatch!(level, simd => prefix_sum_with(simd, &mut actual));
                     assert_eq!(
                         actual, expected,
                         "level={level:?} len={length} shape={shape}"
+                    );
+                    assert_eq!(
+                        largest, expected_max,
+                        "largest mismatch: level={level:?} len={length} shape={shape}"
                     );
                 }
             }

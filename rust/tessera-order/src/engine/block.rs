@@ -246,28 +246,52 @@ pub(crate) fn partition_in_blocks<'records, T, C: Classify<T>>(
     finish::complete_serial(&mut sorter, Some(&mut callback))
 }
 
-/// Branch hint for a condition that is almost never true, without a nightly
-/// feature. The cold marker tells the optimiser to keep this path out of line,
-/// so the hot loop falls through on the common case instead of taking a jump
-/// over the rare one. Same shape as the `branches` crate.
-#[cold]
-#[inline(never)]
-fn cold_path() {}
+/// Cold-path state for linking a full output block and recycling the next input
+/// block, kept behind one pointer so the hot scatter loop does not hold cold
+/// slice lengths or link tables live in registers.
+struct Refill<'a, T> {
+    input: *mut T,
+    block_size: usize,
+    scratch_blocks: usize,
+    full_blocks: usize,
+    position: &'a mut ScatterPosition,
+    block_links: &'a mut [u32],
+    writer_physical: &'a mut [u32],
+}
 
-#[inline]
-fn unlikely(condition: bool) -> bool {
-    if condition {
-        cold_path();
+impl<T> Refill<'_, T> {
+    /// Links the filled block for `bucket` to the next recycled input block and
+    /// returns its fresh write cursor.
+    #[cold]
+    #[inline(never)]
+    fn next_block(&mut self, bucket: usize) -> BucketWriter<T> {
+        debug_assert!(self.position.output <= self.position.input);
+        let physical = self.scratch_blocks + self.position.output;
+        assert!(self.position.output < self.full_blocks);
+        // SAFETY: output <= input; equality can occur only on this full input
+        // block's last record. The recycled block is fully read and uses the
+        // same raw input ancestor.
+        let out = unsafe { self.input.add(self.position.output * self.block_size) };
+        self.block_links[self.writer_physical[bucket] as usize] = physical as u32;
+        self.writer_physical[bucket] = physical as u32;
+        self.position.output += 1;
+        trace::emit(|| Event::Writer { bucket, physical });
+        BucketWriter {
+            next: out,
+            // SAFETY: the checked recycled input block is complete.
+            end: unsafe { out.add(self.block_size) },
+        }
     }
-    condition
 }
 
 /// A bucket's write cursor in its current output block.
+///
+/// Kept at two pointers (16 bytes on 64-bit targets) so the hot scatter loop
+/// indexes buckets by a shift instead of multiplying by three; the cold-path
+/// physical block ID lives in [`Buffers::writer_physical`].
 struct BucketWriter<T> {
     next: *mut T,
     end: *mut T,
-    /// The last physical block in this bucket's chain.
-    physical: u32,
 }
 
 // SAFETY: cursors are used only by the partition that exclusively owns their
@@ -284,6 +308,9 @@ pub(crate) struct Buffers<T> {
     /// Physical next links in each bucket's stable output chain.
     block_links: Vec<u32>,
     writers: Vec<BucketWriter<T>>,
+    /// Last physical block in each bucket's chain, touched only when a block
+    /// fills or when reading completed chains.
+    writer_physical: Vec<u32>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,
 }
@@ -294,6 +321,7 @@ impl<T> Buffers<T> {
             scratch: Vec::new(),
             block_links: Vec::new(),
             writers: Vec::new(),
+            writer_physical: Vec::new(),
             #[cfg(debug_assertions)]
             seen: Vec::new(),
         }
@@ -433,7 +461,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     /// tail, so no uninitialized next link is read after its partial prefix.
     fn bucket_blocks(&self, bucket: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
         let writer = &self.buffers.writers[bucket];
-        let last = writer.physical as usize;
+        let last = self.buffers.writer_physical[bucket] as usize;
         // SAFETY: both cursors delimit the same reserved non-zero-sized block.
         let tail_len = self.block_size - unsafe { writer.end.offset_from(writer.next) as usize };
         core::iter::successors(Some(bucket), move |&physical| {
@@ -455,14 +483,16 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn begin_pass(&mut self) {
         self.buffers.writers.clear();
         self.buffers.writers.reserve(self.bucket_count);
+        self.buffers.writer_physical.clear();
+        self.buffers.writer_physical.reserve(self.bucket_count);
         for physical in 0..self.bucket_count {
             let out = self.block_ptr(physical);
             self.buffers.writers.push(BucketWriter {
                 next: out,
                 // SAFETY: block_ptr returns a complete block.
                 end: unsafe { out.add(self.block_size) },
-                physical: physical as u32,
             });
+            self.buffers.writer_physical.push(physical as u32);
             trace::emit(|| Event::Writer {
                 bucket: physical,
                 physical,
@@ -483,16 +513,21 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let input_ptr = self.input;
         let input_len = self.input_len;
         let block_size = self.block_size;
-        let scratch_blocks = self.scratch_blocks;
-        let full_blocks = self.block_count - scratch_blocks;
-        let position = &mut self.position;
         let buckets = self.buffers.writers.as_mut_slice();
-        let block_links = self.buffers.block_links.as_mut_slice();
+        let mut refill = Refill {
+            input: input_ptr,
+            block_size,
+            scratch_blocks: self.scratch_blocks,
+            full_blocks: self.block_count - self.scratch_blocks,
+            position: &mut self.position,
+            block_links: self.buffers.block_links.as_mut_slice(),
+            writer_physical: self.buffers.writer_physical.as_mut_slice(),
+        };
         debug_assert!(buckets.len().is_power_of_two());
         let last_bucket = buckets.len() - 1;
         let mut begin = first_offset;
-        while position.input * block_size < input_len {
-            let input = position.input;
+        while refill.position.input * block_size < input_len {
+            let input = refill.position.input;
             let begin_record = input * block_size;
             // SAFETY: this block's unread records still occupy their original
             // input range. Only fully read input blocks can become outputs.
@@ -521,30 +556,12 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 trace::emit(|| Event::Scatter {
                     input: begin_record + offset,
                     bucket: b,
-                    physical: bucket.physical as usize,
+                    physical: refill.writer_physical[b] as usize,
                     // SAFETY: both cursors delimit the same reserved block.
                     slot: block_size - unsafe { end.offset_from(next) } as usize - 1,
                 });
-                if unlikely(next == end) {
-                    debug_assert!(position.output <= input);
-                    let physical = scratch_blocks + position.output;
-                    assert!(position.output < full_blocks);
-                    // SAFETY: output <= input; equality can occur only on
-                    // this full input block's last record. The recycled block
-                    // is fully read and uses the same raw input ancestor.
-                    let out = unsafe { input_ptr.add(position.output * block_size) };
-                    block_links[bucket.physical as usize] = physical as u32;
-                    *bucket = BucketWriter {
-                        next: out,
-                        // SAFETY: the checked recycled input block is complete.
-                        end: unsafe { out.add(block_size) },
-                        physical: physical as u32,
-                    };
-                    position.output += 1;
-                    trace::emit(|| Event::Writer {
-                        bucket: b,
-                        physical,
-                    });
+                if next == end {
+                    *bucket = refill.next_block(b);
                 }
             };
             // Four records per bucket-cursor reload. Measured cheaper than one
@@ -561,7 +578,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             for offset in complete..length {
                 write(offset);
             }
-            position.input += 1;
+            refill.position.input += 1;
             begin = 0;
         }
         state

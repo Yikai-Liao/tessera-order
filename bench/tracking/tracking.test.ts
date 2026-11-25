@@ -522,6 +522,15 @@ test("history connects reports across other executions and preserves same-execut
     );
     // The case row and its call's aggregate each split at the same missing serial report.
     assert.deepEqual([...new Set(linePaths(trend))], ["MLML"]);
+    const document = parseHTML(trend).document;
+    const points = document.querySelector('[aria-label="line"] path')!.getAttribute("d")!;
+    const positions = [...points.matchAll(/[ML]([\d.]+),/g)].map(([, x]) => Number(x));
+    const dots = Array.from(document.querySelectorAll('[aria-label="dot"] circle'), (dot) =>
+      Number(Number(dot.getAttribute("cx")).toFixed(3)),
+    );
+    // Both rows mark the first and latest serial points, even with a later t4 report.
+    const endpoints = [positions[0], positions.at(-1)];
+    assert.deepEqual(dots, [...endpoints, ...endpoints]);
   }
   assert.deepEqual(
     latestValues(runs, [serialCase, parallelCase]).map((row) => row.current),

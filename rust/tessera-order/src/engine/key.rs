@@ -519,8 +519,8 @@ pub(crate) struct DirectKeys<T> {
     count: fn(&mut [T], usize, usize, bool),
     /// Whether SIMD MSD finishing supports this key type on the active CPU.
     pub(crate) can_finish_msd: fn() -> bool,
-    /// Finishes an MSD-partitioned buffer into `dest` when bounded by `largest`.
-    pub(crate) finish_msd: fn(&[T], &mut [T], usize) -> bool,
+    /// Finishes MSD-partitioned records in place when bounded by `largest`.
+    pub(crate) finish_msd: fn(&mut [T], usize) -> bool,
 }
 
 /// Finishes a slice by counting a small encoded-key window and decoding its runs.

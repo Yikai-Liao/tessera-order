@@ -156,8 +156,6 @@ Dispatch happens once per insertion pass and the loop is inlined into the dispat
 
 Records move by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; stale bytes of moved non-`Copy` records are never dropped, borrowed or returned.
 
-For sealed `Copy`, panic-free `Extract::DIRECT` keys, after an MSD counting pass writes the complete record set into scratch, the previous tile buffer still holds initialized `Copy` values. `partition_tile` may therefore borrow scratch as `&[T]` and the tile as `&mut [T]` for SIMD MSD finishing while the restoration guard remains armed over scratch. If finishing declines, the guard still copies the complete scratch set back into the tile; only when finishing returns `true` (having initialized every tile slot) does `partition_tile` disarm the guard so the tile owns the finished records. Callback-key paths never take this borrow.
-
 A counting pass reads each key twice, for the histogram and for the scatter:
 
 - **User key functions** (`sort_by_key`). The histogram stores a two-byte bucket per record and the scatter reads it back. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe on one path.

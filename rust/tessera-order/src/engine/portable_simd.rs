@@ -24,7 +24,7 @@ pub(crate) const SIMD_MIN: usize = 64;
 /// scalar check finds them without paying for a vector block.
 const PEEL: usize = 4;
 
-/// Shortest native vector width for streaming SIMD odd-even MSD finishing.
+/// Shortest native vector width for SIMD odd-even MSD finishing.
 /// Narrower vectors (e.g. `u64x4` on AVX2 or `u32x4` on 128-bit backends)
 /// cover too few bucket sizes (`<= w + 1`) to amortize deinterleave/interleave
 /// overhead and lack native 64-bit unsigned min/max on AVX2.
@@ -95,39 +95,30 @@ pub(crate) fn can_finish_msd<K: RadixKey>() -> bool {
     dispatch!(Level::new(), simd => msd_supported::<_, K>(simd))
 }
 
-/// Finishes an MSD-partitioned buffer `src` into `dest` via a branchless
-/// odd-even vector network when every bucket has at most `largest` records and
-/// fits within one vector of overlap. Longer slices (`>= 2 * MSD_STREAMS * w`)
-/// stream the bulk directly from `src` into `dest`; shorter eligible slices
-/// copy `src` into `dest` first and repair in place.
+/// Finishes MSD-partitioned keys in place via a branchless odd-even vector
+/// network when every bucket has at most `largest` records and fits within one
+/// vector of overlap. Returns false without changing keys when ineligible.
 #[inline]
-pub(crate) fn finish_msd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bool {
-    src.len() >= SIMD_MIN && finish_msd_simd(src, dest, largest)
+pub(crate) fn finish_msd<K: RadixKey>(keys: &mut [K], largest: usize) -> bool {
+    keys.len() >= SIMD_MIN && finish_msd_simd(keys, largest)
 }
 
 #[inline(never)]
-fn finish_msd_simd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bool {
-    dispatch!(Level::new(), simd => finish_msd_with(simd, src, dest, largest))
+fn finish_msd_simd<K: RadixKey>(keys: &mut [K], largest: usize) -> bool {
+    dispatch!(Level::new(), simd => finish_msd_with(simd, keys, largest))
 }
 
-/// For `len >= 2 * MSD_STREAMS * w`, streams `2 * w` overlapping windows across
-/// `src -> dest` in [`MSD_STREAMS`] independent streams and repairs the stream
-/// seams, then copies and repairs any tail. Shorter eligible slices copy `src`
-/// into `dest` and run the same overlapping repair in place. Every bucket of
-/// length `<= w + 1` fits completely inside at least one `2 * w` window.
+/// Repairs `2 * w` overlapping windows in [`MSD_STREAMS`] independent streams
+/// when each stream can hold two vectors, then repairs their seams and any
+/// tail. Shorter slices use one overlapping sweep. Every bucket of length
+/// `<= w + 1` fits completely inside at least one window.
 #[inline(always)]
-fn finish_msd_with<S: Simd, K: RadixKey>(
-    simd: S,
-    src: &[K],
-    dest: &mut [K],
-    largest: usize,
-) -> bool {
-    let (w, len) = (K::lanes::<S>(), src.len());
-    if !msd_supported::<S, K>(simd) || len < 2 * w || largest > w + 1 || dest.len() != len {
+fn finish_msd_with<S: Simd, K: RadixKey>(simd: S, keys: &mut [K], largest: usize) -> bool {
+    let (w, len) = (K::lanes::<S>(), keys.len());
+    if !msd_supported::<S, K>(simd) || len < 2 * w || largest > w + 1 {
         return false;
     }
     if largest <= 1 {
-        dest.copy_from_slice(src);
         return true;
     }
     let max_v = K::Vec::<S>::splat(simd, K::max_lane::<S>());
@@ -164,35 +155,37 @@ fn finish_msd_with<S: Simd, K: RadixKey>(
         let seg = (len / (MSD_STREAMS * w)) * w;
         let mut carry = [max_v; MSD_STREAMS];
         for (i, slot) in carry.iter_mut().enumerate() {
-            *slot = K::load_encoded(simd, &src[i * seg..i * seg + w]);
+            *slot = K::load_encoded(simd, &keys[i * seg..i * seg + w]);
         }
         let mut off = w;
         while off < seg {
             for (i, slot) in carry.iter_mut().enumerate() {
                 let s = i * seg + off;
-                let (lo, hi) = sort_pair!(*slot, K::load_encoded(simd, &src[s..s + w]));
-                K::store_decoded::<S>(lo, &mut dest[s - w..s]);
+                // Read this stream's next vector before overwriting its consumed
+                // predecessor. Other streams occupy disjoint `seg` ranges;
+                // seam repair starts only after every carry has been stored.
+                let (lo, hi) = sort_pair!(*slot, K::load_encoded(simd, &keys[s..s + w]));
+                K::store_decoded::<S>(lo, &mut keys[s - w..s]);
                 *slot = hi;
             }
             off += w;
         }
         for (i, &slot) in carry.iter().enumerate() {
-            K::store_decoded::<S>(slot, &mut dest[(i + 1) * seg - w..(i + 1) * seg]);
+            K::store_decoded::<S>(slot, &mut keys[(i + 1) * seg - w..(i + 1) * seg]);
         }
         for i in 1..MSD_STREAMS {
-            repair!(&mut dest[i * seg - w..i * seg + w]);
+            repair!(&mut keys[i * seg - w..i * seg + w]);
         }
         pos = MSD_STREAMS * seg;
     }
     if pos < len {
-        dest[pos..len].copy_from_slice(&src[pos..len]);
         let mut p = pos.saturating_sub(w);
         while p + 2 * w <= len {
-            repair!(&mut dest[p..p + 2 * w]);
+            repair!(&mut keys[p..p + 2 * w]);
             p += w;
         }
         if p + w != len {
-            repair!(&mut dest[len - 2 * w..len]);
+            repair!(&mut keys[len - 2 * w..len]);
         }
     }
     true
@@ -917,22 +910,18 @@ mod tests {
                             pos += size;
                             step += 1;
                         }
-                        // Use distinct pre-scatter sentinel contents in `dest` so
-                        // omitted writes (including `largest == 1` and tails) fail
-                        // on `handled == true` and stray writes fail on decline.
-                        let sentinel: Vec<K> = (0..len)
-                            .map(|i| make(i.wrapping_add(1).wrapping_mul(13)))
-                            .collect();
-                        let mut dest = sentinel.clone();
+                        // Declining must preserve the partitioned input; success
+                        // must preserve every original bit pattern in sorted order.
+                        let mut dest = src.clone();
                         let handled = dispatch!(level, simd => {
-                            finish_msd_with(simd, &src, &mut dest, largest)
+                            finish_msd_with(simd, &mut dest, largest)
                         });
                         let should_handle = supported && len >= 2 * w && largest <= w + 1;
                         assert_eq!(
                             handled, should_handle,
                             "level={level:?} w={w} len={len} largest={largest}"
                         );
-                        let want = if handled { &expected } else { &sentinel };
+                        let want = if handled { &expected } else { &src };
                         assert!(
                             dest.iter().zip(want).all(|(&a, &b)| same(a, b)),
                             "mismatch: level={level:?} handled={handled} w={w} len={len} largest={largest}"
@@ -954,7 +943,7 @@ mod tests {
                             src[start..end].reverse();
                             let mut dest = src.clone();
                             assert!(dispatch!(level, simd => {
-                                finish_msd_with(simd, &src, &mut dest, w + 1)
+                                finish_msd_with(simd, &mut dest, w + 1)
                             }));
                             assert!(
                                 dest.iter().zip(&expected).all(|(&a, &b)| same(a, b)),
@@ -1060,11 +1049,11 @@ mod tests {
             |a, b| a.0.to_bits() == b.0.to_bits(),
         );
         // Short slices below SIMD_MIN and scalar keys (`u128`) always decline.
-        let short = [2u32; SIMD_MIN - 1];
-        let mut short_dest = [0u32; SIMD_MIN - 1];
-        assert!(!finish_msd(&short, &mut short_dest, 2));
-        let src = [3u128; SIMD_MIN];
-        let mut dest = src;
-        assert!(!finish_msd(&src, &mut dest, 2));
+        let mut short = [2u32; SIMD_MIN - 1];
+        assert!(!finish_msd(&mut short, 2));
+        assert_eq!(short, [2u32; SIMD_MIN - 1]);
+        let mut wide = [3u128; SIMD_MIN];
+        assert!(!finish_msd(&mut wide, 2));
+        assert_eq!(wide, [3u128; SIMD_MIN]);
     }
 }

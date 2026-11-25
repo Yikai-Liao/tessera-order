@@ -62,7 +62,7 @@ jobs:
       CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
       CARGO_PROFILE_BENCH_DEBUG: "0"
       # Native adapters need the GNU C++ shared runtime; Rust workers match PR preparation.
-      RUSTFLAGS: ${{ !matrix.native && '-C target-feature=+crt-static' || '' }}
+      RUSTFLAGS: ${{ !matrix.native && '-C target-feature=+crt-static -C llvm-args=-x86-branches-within-32B-boundaries -C llvm-args=-align-all-functions=6' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,8 +80,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/benchmark"
-          # Static Rust and native tracking builds use separate dependency caches.
-          shared-key: ${{ matrix.native && 'benchmark-native' || 'benchmark-static' }}-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
+          # Static Rust tracking shares the PR aligned cache; keep native outputs separate.
+          shared-key: ${{ matrix.native && 'benchmark-native' || 'benchmark-aligned' }}-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

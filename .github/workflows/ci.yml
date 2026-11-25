@@ -230,8 +230,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/benchmark"
+          # Main tracking saves this key from main; save here only for same-repo PRs while it is off.
+          save-if: ${{ env.PUBLISH == 'true' && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}
           # Include virtual-root profiles and builder-owned flags in both workflows.
-          shared-key: benchmark-pr-aligned-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
+          shared-key: benchmark-aligned-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

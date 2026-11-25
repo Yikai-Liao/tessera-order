@@ -197,6 +197,15 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
             &block[3 * lanes + 1..4 * lanes + 1],
         );
         if ((m0 | m1) | (m2 | m3)).to_bitmask() != 0 {
+            // Pack the masks in scan order when all four fit in a u64.
+            // One trailing-zero count avoids a branch for each mask on a hit.
+            if lanes <= u64::BITS as usize / 4 {
+                let bits = m0.to_bitmask()
+                    | (m1.to_bitmask() << lanes)
+                    | (m2.to_bitmask() << (2 * lanes))
+                    | (m3.to_bitmask() << (3 * lanes));
+                return Some(index + bits.trailing_zeros() as usize);
+            }
             let masks = [m0, m1, m2, m3];
             for (vector, &mask) in masks.iter().enumerate() {
                 let bits = mask.to_bitmask();
@@ -564,6 +573,22 @@ mod tests {
                     Some(first)
                 );
             }
+        }
+    }
+
+    #[test]
+    fn earliest_inversion_in_last_mask() {
+        // On AVX2 the first inversion sets bit 63 of the packed u16 masks.
+        // Wider backends use the same input to exercise the per-mask search.
+        let mut keys: Vec<u16> = (0..145).collect();
+        keys.swap(67, 68);
+        keys.swap(71, 72);
+        for level in [Level::baseline(), Level::new()] {
+            assert_eq!(
+                dispatch!(level, simd => first_inversion_with(simd, &keys)),
+                Some(67),
+                "level={level:?}"
+            );
         }
     }
 

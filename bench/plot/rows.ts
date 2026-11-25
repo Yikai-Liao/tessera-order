@@ -9,7 +9,7 @@ import {
   rowName,
   textWidth,
 } from "./annotations.ts";
-import { renderFigure } from "./figure.ts";
+import { implementationAttributes, markAttributes, renderFigure } from "./figure.ts";
 import { type NameCell, nameWidth } from "./layout.ts";
 import { theme } from "./theme.ts";
 
@@ -17,6 +17,7 @@ export type Tone = "primary" | "radix" | "comparison" | "composition";
 export interface Mark {
   value: number;
   tone: Tone;
+  implementation?: string;
   dy?: number;
   hollow?: boolean;
 }
@@ -187,6 +188,8 @@ export function renderRows(spec: RowChart) {
         tone: ink.muted,
         caps: true,
         anchor: "end",
+        // A page can restyle the columns when they show another implementation.
+        ...markAttributes(() => ({ "data-comparison-heading": heading })),
       }),
     );
   });
@@ -239,6 +242,7 @@ export function renderRows(spec: RowChart) {
     },
   ];
 
+  let rowIndex = 0;
   for (const group of layout) {
     annotations.push(
       label(group.title.toUpperCase(), pad, group.titleY, {
@@ -248,7 +252,18 @@ export function renderRows(spec: RowChart) {
       }),
     );
     for (const { row, cy } of group.placed) {
-      annotations.push(...rowName(row.name, cy));
+      const rowNumber = String(rowIndex++);
+      annotations.push(
+        ...rowName(
+          row.name,
+          cy,
+          // The group title qualifies rows whose names repeat across groups.
+          markAttributes(() => ({
+            "data-comparison-row-name": rowNumber,
+            ...(group.title ? { "data-comparison-row-group": group.title } : {}),
+          })).render,
+        ),
+      );
       row.cells.forEach((cell, index) => {
         annotations.push(
           label(cell, columns[index], cy + 4, {
@@ -261,6 +276,10 @@ export function renderRows(spec: RowChart) {
                   : ink.muted,
             strong: !!row.strong && index === row.cells.length - 1,
             anchor: "end",
+            ...markAttributes(() => ({
+              "data-comparison-cell": String(index),
+              "data-comparison-row": rowNumber,
+            })),
           }),
         );
       });
@@ -329,6 +348,11 @@ export function renderRows(spec: RowChart) {
                       ? "none"
                       : ink.panel,
                 strokeWidth: 2,
+                ...markAttributes((index) =>
+                  implementationAttributes(
+                    field[index] === anchor ? undefined : field[index].implementation,
+                  ),
+                ),
               }),
             ),
           ],
@@ -342,6 +366,7 @@ export function renderRows(spec: RowChart) {
           fill: ink[mark.tone],
           stroke: ink.panel,
           strokeWidth: 2,
+          ...markAttributes(() => implementationAttributes(mark.implementation)),
           ...(mark.tone === "composition" ? compositionDot : {}),
         };
         layers.push({

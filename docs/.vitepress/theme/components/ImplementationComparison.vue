@@ -2,16 +2,19 @@
 <script setup lang="ts">
 import { getScrollOffset, withBase } from "vitepress";
 import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
-import { computed, onMounted, shallowRef, useId, watch } from "vue";
+import { computed, onMounted, onUnmounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
 import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
 import { formatBytes, ordinal, times } from "../../../../bench/report/format.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
+import { useFigureSelection } from "./figureSelection.ts";
+import { data as implementationChoices } from "./implementationChoices.data.ts";
 
 // `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
 const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
   view: "all",
   source:
+    (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) ||
     "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json",
 });
 
@@ -50,6 +53,7 @@ const cards = computed(() =>
 );
 
 onMounted(async () => {
+  window.addEventListener("keydown", clearOnEscape);
   let response: Response;
   try {
     response = await fetch(props.source, { cache: "no-cache" });
@@ -69,6 +73,7 @@ onMounted(async () => {
     error.value = "The published comparison data has a format this page cannot read.";
   }
 });
+onUnmounted(() => window.removeEventListener("keydown", clearOnEscape));
 
 // Inline SVG follows the page's light or dark class; each chart needs its own element ids.
 const id = useId();
@@ -84,6 +89,7 @@ const rendered = (operation: string, figure: Figure) => {
       figure.kind === "curves"
         ? renderCurves({ ...(figure.chart as CurveChart), id: key })
         : renderRows({ ...(figure.chart as RowChart), id: key }),
+    selection: figure.selection,
     table: cells(figure.table),
   };
 };
@@ -111,6 +117,16 @@ const sections = computed(() => {
     figures: operation.figures.map((figure) => rendered(operation.id, figure)),
   }));
 });
+const root = shallowRef<HTMLElement | null>(null);
+const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
+  () => root.value,
+  () => sections.value.flatMap((section) => section.figures),
+  implementationChoices,
+);
+function clearOnEscape(event: KeyboardEvent) {
+  if (event.key === "Escape") clear();
+}
+
 // The figure's Markdown table as rows of plain-text cells, rendered by Vue as text.
 function cells(markdown: string) {
   const rows = markdown
@@ -144,7 +160,7 @@ function provenance(runs: Run[]) {
 </script>
 
 <template>
-  <div class="implementation-comparison">
+  <div ref="root" class="implementation-comparison">
     <p v-if="error" class="notice" role="alert">{{ error }}</p>
     <p v-else-if="!data" class="notice" role="status">Loading the latest measurements…</p>
     <p v-else-if="!sections.length" class="notice">
@@ -180,6 +196,15 @@ function provenance(runs: Run[]) {
           half the time. Tessera is the blue dot. Every figure lists its values in a table below it.
         </p>
       </template>
+      <div v-if="view === 'all' && choices.length" class="highlight-control">
+        <label :for="`${id}-highlight`">Highlight</label>
+        <select :id="`${id}-highlight`" v-model="pinned">
+          <option v-for="choice in choices" :key="choice.id" :value="choice.id">
+            {{ choice.label }}
+          </option>
+        </select>
+        <span>Hover or click a mark to highlight its implementation in every figure; the Speed and Rank columns then show its values. Esc returns to Tessera.</span>
+      </div>
       <section v-for="section in sections" :key="section.id" class="operation">
         <template v-if="view === 'all'">
           <h2 :id="section.id" class="operation-title" tabindex="-1">{{ section.label }}</h2>
@@ -201,7 +226,14 @@ function provenance(runs: Run[]) {
           </h3>
           <p v-if="figure.summary" class="lead">{{ figure.summary }}</p>
           <!-- The shared renderer escapes labels through DOM text nodes. -->
-          <div v-html="figure.svg" />
+          <!-- biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: The SVG delegates pointer selection without making individual marks keyboard stops. Escape and the clear button reset it. -->
+          <div
+            :data-comparison-figure="figure.anchor"
+            @pointerover="preview($event.target)"
+            @pointerout="preview($event.relatedTarget)"
+            @click="pin"
+            v-html="figure.svg"
+          />
           <details v-if="figure.table.body.length" class="data">
             <summary>Values as a table</summary>
             <table>
@@ -235,6 +267,18 @@ function provenance(runs: Run[]) {
         </template>
       </section>
     </template>
+    <Transition name="selection-bar">
+      <div v-if="bar" class="selection-bar" role="status">
+        <span class="selection-swatch" :style="{ background: bar.ink }" />
+        <span class="selection-text">
+          <strong>{{ bar.label }}</strong>
+          <span v-if="bar.pinnedLabel" class="selection-detail">· pinned: {{ bar.pinnedLabel }}</span>
+        </span>
+        <button type="button" class="selection-clear" @click="clear">
+          Back to Tessera <kbd>Esc</kbd>
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -328,10 +372,153 @@ function provenance(runs: Run[]) {
   color: var(--vp-c-text-2);
   line-height: 1.6;
 }
+.highlight-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 16px 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+.highlight-control label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.highlight-control select {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  padding: 4px 28px 4px 10px;
+  background: var(--vp-c-bg)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  color: var(--vp-c-text-1);
+  font-size: 14px;
+  appearance: none;
+  cursor: pointer;
+}
+.highlight-control select:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 1px;
+}
+.highlight-control span {
+  flex: 1 1 18em;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
 .figure :deep(svg) {
   display: block;
   width: 100%;
   height: auto;
+}
+/* Selecting an implementation dims the rest, outlines its marks and colours the columns. */
+.figure :deep([data-implementation]) {
+  transition: opacity 0.15s ease;
+}
+.figure :deep(.dimmed) {
+  opacity: 0.15;
+}
+.figure :deep([aria-label="dot"] .selected) {
+  stroke: var(--ink);
+  stroke-width: 1.5px;
+  stroke-opacity: 1;
+  fill-opacity: 1;
+}
+.figure :deep([aria-label="line"] .selected) {
+  stroke-width: 3px;
+  stroke-opacity: 1;
+}
+.figure :deep([data-implementation]) {
+  cursor: pointer;
+}
+[data-selecting] :deep([data-comparison-cell]),
+[data-selecting] :deep([data-comparison-heading]) {
+  fill: var(--selection-ink);
+  transition: fill 0.15s ease;
+}
+.figure :deep(.selection-description) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg-elv);
+  box-shadow: var(--vp-shadow-3);
+  font-size: 14px;
+  line-height: 20px;
+}
+.selection-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.selection-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selection-detail {
+  margin-left: 6px;
+  color: var(--vp-c-text-2);
+}
+.selection-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-1);
+  font-weight: 500;
+}
+.selection-clear:hover {
+  background: var(--vp-c-default-2);
+}
+.selection-clear kbd {
+  padding: 0 6px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--vp-c-text-2);
+}
+.selection-bar-enter-active,
+.selection-bar-leave-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+.selection-bar-enter-from,
+.selection-bar-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+@media (max-width: 640px) {
+  .selection-clear kbd {
+    display: none;
+  }
 }
 .data {
   margin-top: 8px;

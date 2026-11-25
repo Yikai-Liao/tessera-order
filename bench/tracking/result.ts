@@ -167,6 +167,13 @@ export function parseRuns(text: string): TrackingRun[] {
     : [];
 }
 
+// Each implementation's Speed/Rank cells by row; the catalog owns its label and colour.
+const figureSelectionSchema = z.record(
+  z.string(),
+  z.object({ rows: z.array(z.tuple([z.string(), z.string()])) }),
+);
+export type FigureSelection = z.infer<typeof figureSelectionSchema>;
+
 const figureSchema = z.object({
   name: z.string().min(1),
   // Optional while comparisons published before section headings remain the latest.
@@ -177,6 +184,8 @@ const figureSchema = z.object({
   chart: z.custom<RowChart | CurveChart>((value) => typeof value === "object" && value !== null),
   /** The template that draws `chart`; absent means rows. */
   kind: z.literal("curves").optional(),
+  /** Display labels and Speed/Rank cells in SVG row order, keyed by catalog ID. */
+  selection: figureSelectionSchema.optional(),
   /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
   table: z.string(),
 });

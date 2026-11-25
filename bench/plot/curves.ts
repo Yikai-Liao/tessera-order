@@ -2,7 +2,7 @@
 
 import * as Plot from "@observablehq/plot";
 import { compositionDot, compositionLegend, ink, label, textWidth } from "./annotations.ts";
-import { renderFigure } from "./figure.ts";
+import { implementationAttributes, markAttributes, renderFigure } from "./figure.ts";
 import type { Tone } from "./rows.ts";
 import { theme } from "./theme.ts";
 
@@ -15,6 +15,7 @@ export interface Axis {
 }
 export interface Curve {
   name: string;
+  implementation?: string;
   tone: Tone;
   strong?: boolean;
   /** The growth order of the last step, such as "∝ √n", shown after the end label. */
@@ -163,6 +164,7 @@ export function renderCurves(spec: CurveChart) {
   const curves = spec.curves.toSorted((a, b) => depth[a.tone] - depth[b.tone]);
   for (const curve of curves) {
     const points = curve.points.map(([x, y]) => [px(x), py(y)]);
+    const attributes = markAttributes(() => implementationAttributes(curve.implementation));
     // Tessera is the subject: a heavy line with its measured points. The composition uses
     // rings on a thin line; the other sorts use thin lines alone.
     const focus = curve.tone === "primary";
@@ -173,6 +175,7 @@ export function renderCurves(spec: CurveChart) {
         strokeWidth: focus ? 3 : 1.25,
         strokeOpacity: focus ? 1 : 0.7,
         strokeLinejoin: "round",
+        ...attributes,
       }),
       Plot.dot(
         focus || composition
@@ -183,6 +186,7 @@ export function renderCurves(spec: CurveChart) {
           ...(composition
             ? compositionDot
             : { fill: ink[curve.tone], stroke: ink.panel, strokeWidth: 1.5 }),
+          ...attributes,
         },
       ),
       Plot.dot(
@@ -192,6 +196,7 @@ export function renderCurves(spec: CurveChart) {
           rotate: 180,
           r: 4.5,
           ...(composition ? compositionDot : { fill: ink[curve.tone], stroke: ink.panel }),
+          ...attributes,
         },
       ),
     );
@@ -250,6 +255,7 @@ export function renderCurves(spec: CurveChart) {
           size: 12,
           tone: ink[curve.tone],
           strong: curve.tone === "primary",
+          ...markAttributes(() => implementationAttributes(curve.implementation)),
         }),
       );
       x += textWidth(text, 12) + (curve.tone === "primary" ? 2 : 0);

@@ -13,6 +13,27 @@ interface FigureOptions {
   id?: string;
 }
 
+/** Attach metadata to the SVG elements in Plot's rendered index order. */
+export function markAttributes(attributes: (index: number) => Record<string, string>) {
+  const render: Plot.RenderFunction = (index, scales, values, dimensions, context, next) => {
+    const group = next!(index, scales, values, dimensions, context);
+    if (group) {
+      const children: ArrayLike<{ setAttribute(name: string, value: string): void }> =
+        group.children;
+      Array.from(children).forEach((element, position) => {
+        for (const [name, value] of Object.entries(attributes(index[position]))) {
+          element.setAttribute(name, value);
+        }
+      });
+    }
+    return group;
+  };
+  return { render };
+}
+
+export const implementationAttributes = (id?: string): Record<string, string> =>
+  id ? { "data-implementation": id } : {};
+
 /** Render Plot layers into one deterministic, accessible, standalone SVG.
  *
  * Layers share a document and typography but may have independent scales,

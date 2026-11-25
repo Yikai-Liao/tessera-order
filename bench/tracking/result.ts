@@ -9,6 +9,9 @@ import type { RowChart } from "../plot/rows.ts";
 export const TRACKING_SPEC = { slug: "intel-v1", cpus: 4 } as const;
 
 const positive = z.number().finite().positive();
+/** The Criterion ID's final segment identifies the execution that can measure it. */
+export const caseUsesExecution = (id: string, execution: string) => id.endsWith(`/${execution}`);
+
 const metric = z
   .object({ value: positive, lower_value: positive, upper_value: positive })
   .refine((m) => m.lower_value <= m.value && m.value <= m.upper_value);
@@ -86,7 +89,7 @@ export const runSchema = z
     "Memory must cover exactly the timed cases",
   )
   .refine(
-    (run) => Object.keys(run.values).every((id) => id.endsWith(`/${run.execution}`)),
+    (run) => Object.keys(run.values).every((id) => caseUsesExecution(id, run.execution)),
     "Every value must measure the run's execution",
   );
 export type TrackingRun = z.infer<typeof runSchema>;

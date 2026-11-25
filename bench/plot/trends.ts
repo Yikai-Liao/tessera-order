@@ -8,8 +8,8 @@ import { type Headline, matrixHeader } from "./matrix.ts";
 import { theme } from "./theme.ts";
 
 export interface TrendCell {
-  /** One entry per shared run; null leaves a gap, so every row keeps the same run positions. */
-  changes: (number | null)[];
+  /** One entry per shared run. Null breaks the line; undefined skips the slot. */
+  changes: (number | null | undefined)[];
   value: string;
   major: boolean;
 }
@@ -36,7 +36,8 @@ export interface TrendChart {
   guide: string;
 }
 const color = (value: number) => (value < 0 ? ink.primary : value > 0 ? ink.radix : ink.axis);
-const present = (values: (number | null)[]) => values.filter((value) => value !== null);
+const present = (values: TrendCell["changes"]) =>
+  values.filter((value) => typeof value === "number");
 
 /** Render grouped small-multiple histories with a shared vertical scale per row. */
 export function renderTrends(spec: TrendChart) {
@@ -144,8 +145,8 @@ export function renderTrends(spec: TrendChart) {
         );
         if (!cell) return;
         const last = cell.changes.length - 1,
-          first = cell.changes.findIndex((value) => value !== null),
-          latest = cell.changes.findLastIndex((value) => value !== null),
+          first = cell.changes.findIndex((value) => typeof value === "number"),
+          latest = cell.changes.findLastIndex((value) => typeof value === "number"),
           left = column.left + 6,
           right = column.plotR - 8;
         const xs = spec.positions ?? cell.changes.map((_, run) => run);
@@ -155,6 +156,7 @@ export function renderTrends(spec: TrendChart) {
           lowX === highX ? (spec.positions ? [lowX - 1, highX + 1] : [-1, 0]) : [lowX, highX];
         const x: Plot.ScaleOptions = { type: "linear", domain, range: [left, right], nice: false };
         const points = cell.changes.map((value, run) => ({ value, run: xs[run] }));
+        const linePoints = points.filter(({ value }) => value !== undefined);
         layers.push({
           x,
           y,
@@ -169,7 +171,7 @@ export function renderTrends(spec: TrendChart) {
         });
         // A null value breaks Plot's line, so a missing run stays a visible gap.
         const line = (stroke: string) =>
-          Plot.line(points, {
+          Plot.line(linePoints, {
             x: "run",
             y: "value",
             stroke,

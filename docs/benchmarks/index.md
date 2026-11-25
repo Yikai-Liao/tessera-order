@@ -34,6 +34,7 @@ How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel
 - **All cases** shows one row per case, grouped by the call it measures, relative to its first run in the range: blue is faster, orange slower. Each row has its own scale, so read the size of a change from its value. A step aligned across rows came from one commit.
 - **Click a row** to compare up to four cases on one axis, as change in percent or as run time. Pale bars are Criterion's within-run intervals. Hover for details; click a point to open its commit.
 - **Axis and range:** reports are ordered by commit time, one slot per report or spaced by time. Presets and dates select benchmark days (UTC); drag across the comparison to zoom. The URL records the whole view, so it can be shared.
+- **Gaps** mark reports for a case's execution mode that omitted the case. Each line skips report slots from other execution modes.
 - **Latest values** lists each case's latest estimate, interval and change.
 
 ## Reading the trend

@@ -298,7 +298,12 @@ mod tests {
         "#,
         )
         .unwrap();
-        let mut cases: Vec<_> = plan.cases().iter().map(|(case, _)| case.clone()).collect();
+        let mut cases: Vec<_> = plan
+            .cases()
+            .unwrap()
+            .into_iter()
+            .map(|(case, _)| case)
+            .collect();
         // The public plan requires positive lengths; the FFI also accepts empty input.
         cases.extend(
             crate::plan::catalog()

@@ -39,52 +39,59 @@ struct Options {
     sampling: run::Sampling,
 }
 impl Options {
-    /// Parses one comparison command, or returns none for help.
-    fn parse(memory: bool) -> Result<Option<Self>> {
+    /// Parses the executable arguments into one comparison command.
+    fn parse(memory: bool) -> Result<Self> {
         let mut args = std::env::args().skip(1);
         let command = if memory {
             "memory".into()
         } else {
             args.next().unwrap_or_else(|| "help".into())
         };
-        let mut plan_name = String::from("smoke");
-        let mut plan_path: Option<PathBuf> = None;
-        let mut group = None;
-        let mut output_dir = PathBuf::from("bench/results/local");
-        let mut sampling = run::Sampling {
-            min_sample_ns: 5_000_000,
-            prepared_cap_bytes: 256 << 20,
-            blocks: catalog().paired_blocks.extended.count,
+        let mut options = Self {
+            command,
+            plan_name: "smoke".into(),
+            group: None,
+            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"))?,
+            plan_path: None,
+            output_dir: "bench/results/local".into(),
+            sampling: run::Sampling {
+                min_sample_ns: 5_000_000,
+                prepared_cap_bytes: 256 << 20,
+                blocks: catalog().paired_blocks.extended.count,
+            },
         };
         while let Some(key) = args.next() {
             if key == "--help" || key == "-h" {
-                return Ok(None);
+                options.command = "help".into();
+                return Ok(options);
             }
             let value = args
                 .next()
                 .ok_or_else(|| format!("missing value for {key}"))?;
             match key.as_str() {
-                "--group" => group = Some(value),
-                "--plan" if matches!(value.as_str(), "smoke" | "release") => plan_name = value,
-                "--plan" => plan_path = Some(value.into()),
-                "--out" => output_dir = value.into(),
+                "--group" => options.group = Some(value),
+                "--plan" if matches!(value.as_str(), "smoke" | "release") => {
+                    options.plan_name = value
+                }
+                "--plan" => options.plan_path = Some(value.into()),
+                "--out" => options.output_dir = value.into(),
                 "--blocks" => {
                     let count = value.parse::<usize>()?;
                     let budgets = &catalog().paired_blocks;
                     if count != budgets.short.count && count != budgets.extended.count {
                         return Err(format!("unsupported paired-block budget: {count}").into());
                     }
-                    sampling.blocks = count;
+                    options.sampling.blocks = count;
                 }
                 "--sample-ms" => {
-                    sampling.min_sample_ns = value
+                    options.sampling.min_sample_ns = value
                         .parse::<u64>()?
                         .checked_mul(1_000_000)
                         .filter(|&n| n > 0)
                         .ok_or("sample duration must be positive")?
                 }
                 "--memory-mib" => {
-                    sampling.prepared_cap_bytes = value
+                    options.sampling.prepared_cap_bytes = value
                         .parse::<usize>()?
                         .checked_mul(1 << 20)
                         .filter(|&n| n > 0)
@@ -93,40 +100,33 @@ impl Options {
                 _ => return Err(format!("unknown option {key}").into()),
             }
         }
-        let text = if let Some(path) = &plan_path {
-            plan_name = "custom".into();
+        let text = if let Some(path) = &options.plan_path {
+            options.plan_name = "custom".into();
             fs::read_to_string(path)?
         } else {
-            match plan_name.as_str() {
+            match options.plan_name.as_str() {
                 "smoke" => include_str!("../../../plans/smoke.toml").into(),
                 "release" => include_str!("../../../plans/release.toml").into(),
                 _ => return Err("expected smoke or release plan".into()),
             }
         };
-        let options = Self {
-            command,
-            plan_name,
-            plan_path,
-            group,
-            output_dir,
-            sampling,
-            plan: crate::plan::Plan::parse(&text)?,
-        };
-        let operation = options.operation();
-        if options
+        options.plan = crate::plan::Plan::parse(&text)?;
+        let operations: BTreeSet<_> = options
             .plan
-            .cases()
-            .iter()
-            .any(|(case, _)| &case.operation != operation)
-        {
+            .cases()?
+            .into_iter()
+            .map(|(case, _)| case.operation)
+            .collect();
+        if operations.len() != 1 {
             return Err("an implementation comparison measures one operation per session; split the plan by operation".into());
         }
-        let reference = crate::plan::operation_reference(operation);
+        let reference =
+            crate::plan::operation_reference(operations.first().expect("one operation"));
         if options.command == "run"
             && ["tessera", reference].iter().any(|id| {
                 !options
                     .plan
-                    .implementations()
+                    .implementations
                     .iter()
                     .any(|selected| selected == id)
             })
@@ -136,11 +136,11 @@ impl Options {
             )
             .into());
         }
-        if !operation.is_sort() && !cfg!(feature = "operations") {
+        if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
         let available = variant::list_variants();
-        for id in options.plan.implementations() {
+        for id in &options.plan.implementations {
             if BUILD == "default"
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
@@ -148,12 +148,27 @@ impl Options {
                 return Err(format!("implementation {id} is unavailable; enable its compare-native/rayon feature or use tools compare revisions for revision adapters").into());
             }
         }
-        Ok((!matches!(options.command.as_str(), "help" | "--help" | "-h")).then_some(options))
+        Ok(options)
     }
 
     /// The session's single operation, checked by [`Self::parse`].
-    fn operation(&self) -> &Operation {
-        &self.plan.cases()[0].0.operation
+    fn operation(&self) -> Operation {
+        let (case, _) = &self.plan.cases().expect("validated plan")[0];
+        case.operation.clone()
+    }
+
+    /// Selects all cases before applying a resumable group restriction.
+    fn cases(&self, group: Option<&str>) -> Result<Vec<(InputCase, Vec<Execution>)>> {
+        let cases: Vec<_> = self
+            .plan
+            .cases()?
+            .into_iter()
+            .filter(|(case, _)| group.is_none_or(|group| case.group() == group))
+            .collect();
+        if cases.is_empty() {
+            return Err("the benchmark plan selects no supported cases".into());
+        }
+        Ok(cases)
     }
 
     /// Planned columns in catalog and execution order, before capability checks.
@@ -181,12 +196,7 @@ impl Options {
     fn variants(&self) -> Vec<variant::Variant> {
         variant::list_variants()
             .into_iter()
-            .filter(|entry| {
-                self.plan
-                    .implementations()
-                    .iter()
-                    .any(|id| id == entry.name)
-            })
+            .filter(|entry| self.plan.implementations.iter().any(|id| id == entry.name))
             .collect()
     }
 }
@@ -233,7 +243,7 @@ fn append_record(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 /// Combines build provenance with the plan and adapter capabilities.
-fn create_manifest(options: &Options) -> Value {
+fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Value {
     let mut provenance: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
             .expect("build provenance is valid JSON");
@@ -252,7 +262,7 @@ fn create_manifest(options: &Options) -> Value {
     provenance["plan"] = json!(options.plan);
     let mut measured = BTreeSet::new();
     provenance["cases"] = json!(
-        options.plan.cases()
+        cases
             .iter()
             .map(|(case, executions)| {
                 let input = record::CaseInput::new(&case.probe());
@@ -300,7 +310,7 @@ fn create_manifest(options: &Options) -> Value {
                             "id": run::column_id(*v, e),
                             "implementation": v.name,
                             "execution": e,
-                            "stable": v.route_stable(operation),
+                            "stable": v.route_stable(&operation),
                             "adapter": v.adapter,
                         })
                     })
@@ -321,7 +331,8 @@ fn prepare_output(options: &Options) -> Result<()> {
         &options.output_dir.join("host.json"),
         &host::read_fingerprint(),
     )?;
-    let mut provenance = create_manifest(options);
+    let all = options.cases(None)?;
+    let mut provenance = create_manifest(options, &all);
     if options.command == "memory" {
         provenance.as_object_mut().unwrap().remove("min_sample_ns");
         provenance
@@ -435,9 +446,9 @@ pub fn read_scratch(directory: &Path) -> Result<std::collections::BTreeMap<Strin
 const TESSERA_SERIAL: &str = "tessera/serial";
 
 /// Finds serial Tessera's measured peak allocation size for a case.
-fn find_scratch_bytes(case_id: &str, rows: &[Value]) -> Option<usize> {
+fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
     rows.iter()
-        .find(|r| r["case_id"] == case_id && r["column"] == TESSERA_SERIAL && r["build"] == BUILD)
+        .find(|r| r["case_id"] == case.id() && r["column"] == TESSERA_SERIAL && r["build"] == BUILD)
         .and_then(|r| r["peak_extra_bytes"].as_u64())
         .map(|n| n as usize)
 }
@@ -451,7 +462,7 @@ fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             case.id()
         );
         let input = record::CaseInput::new(case);
-        for (v, e) in options.planned_columns(executions) {
+        for (v, e) in options.supported_columns(case, executions) {
             if let Some(mut k) = v.prepare(&input, e, 32_768) {
                 k.measure_batch(1)
                     .map_err(|error| format!("{} {}: {error}", case.id(), run::column_id(v, e)))?;
@@ -537,7 +548,8 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
 pub fn main(memory: bool) -> Result<()> {
     #[cfg(feature = "compare-native")]
     native::check_layouts();
-    let Some(options) = Options::parse(memory)? else {
+    let options = Options::parse(memory)?;
+    if options.command == "help" || options.command == "--help" || options.command == "-h" {
         let command = if memory {
             "memory"
         } else {
@@ -547,26 +559,12 @@ pub fn main(memory: bool) -> Result<()> {
             "{command} [--plan smoke|release|FILE] [--group OPERATION/TYPE/DISTRIBUTION[/PARAMETERS]] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
         );
         return Ok(());
-    };
-    let all = options.plan.cases();
-    let selected;
-    let cases = if let Some(group) = &options.group {
-        selected = all
-            .iter()
-            .filter(|(case, _)| case.group() == *group)
-            .cloned()
-            .collect::<Vec<_>>();
-        if selected.is_empty() {
-            return Err("the benchmark plan selects no supported cases".into());
-        }
-        &selected[..]
-    } else {
-        all
-    };
+    }
+    let cases = options.cases(options.group.as_deref())?;
     if options.command == "run" {
         // The manifest includes every case, even for a restricted group. Keep
         // required-control admission with native capabilities, not a TS limit.
-        run::validate_controls(all, &options.variants())?;
+        run::validate_controls(&options.cases(None)?, &options.variants())?;
     }
     match options.command.as_str() {
         "list" => {
@@ -598,7 +596,7 @@ pub fn main(memory: bool) -> Result<()> {
                         println!(
                             "{}\t{}\t{}\t{}",
                             run::column_id(v, execution),
-                            if v.route_stable(operation) {
+                            if v.route_stable(&operation) {
                                 "stable"
                             } else {
                                 "unstable"
@@ -614,14 +612,14 @@ pub fn main(memory: bool) -> Result<()> {
         "validate" | "run" => {
             let _lock = lock_worker(&options.output_dir, "comparison")?;
             if options.command == "validate" {
-                validate_cases(&options, cases)
+                validate_cases(&options, &cases)
             } else {
-                measure_cases(&options, cases)
+                measure_cases(&options, &cases)
             }
         }
         "memory" => {
             let _lock = lock_worker(&options.output_dir, "memory")?;
-            measure_memory(&options, cases)
+            measure_memory(&options, &cases)
         }
         _ => Err(format!("unknown command {}", options.command).into()),
     }
@@ -645,8 +643,7 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             cases.len(),
             case.id()
         );
-        let case_id = case.id();
-        let mut input = None;
+        let input = record::CaseInput::new(case);
         for (v, e) in options.supported_columns(case, executions) {
             if case.operation.is_sort()
                 && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
@@ -657,13 +654,11 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             let column = run::column_id(v, e);
             if rows
                 .iter()
-                .any(|r| r["case_id"] == case_id && r["column"] == column && r["build"] == BUILD)
+                .any(|r| r["case_id"] == case.id() && r["column"] == column && r["build"] == BUILD)
             {
                 continue;
             }
-            let input = input.get_or_insert_with(|| record::CaseInput::new(case));
-            if let Some(mut k) =
-                v.prepare(input, e, find_scratch_bytes(&case_id, &rows).unwrap_or(0))
+            if let Some(mut k) = v.prepare(&input, e, find_scratch_bytes(case, &rows).unwrap_or(0))
             {
                 k.restore(1);
                 super::allocation::begin();

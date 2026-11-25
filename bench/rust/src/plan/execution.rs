@@ -47,8 +47,8 @@ impl FromStr for Execution {
             return Ok(Self::Serial);
         }
         text.strip_prefix('t')
-            .and_then(super::parse_count)
-            .and_then(NonZeroUsize::new)
+            .filter(|count| !count.starts_with('0') && count.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|count| count.parse().ok())
             .map(Self::Threads)
             .ok_or_else(|| format!("invalid execution {text:?}; expected serial or tN with N >= 1"))
     }

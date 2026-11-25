@@ -10,14 +10,11 @@ import {
   continuous,
   criterionId,
   isComposition,
-  operationKey,
   parseCaseId,
-  parseCriterionId,
   SORT,
 } from "../catalog.ts";
 import { loadPlan, type Plan, plansByOperation } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
-import { memoryRows, verifiedPeak } from "../report/model.ts";
 import {
   benchmarkEnvironment,
   buildBenchmark,
@@ -77,13 +74,21 @@ export function columnPlan(plan: Plan, column: Column): Plan {
 export function trackingMemory(journal: string, column: Column, ids: string[]) {
   const timed = new Set(ids);
   const peaks: Record<string, number> = {};
-  for (const row of memoryRows(journal)) {
+  for (const line of journal.split("\n").filter(Boolean)) {
+    const row = JSON.parse(line) as {
+      case_id: string;
+      column: string;
+      build: string;
+      peak_extra_bytes: number;
+      verified: boolean;
+    };
     if (row.build !== "default" || row.column !== columnId(column)) continue;
     const id = criterionId(parseCaseId(row.case_id), column.execution);
     if (!timed.has(id)) continue;
-    const peak = verifiedPeak(row);
+    if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
+      throw new Error("Invalid memory row: " + id);
     if (id in peaks) throw new Error("Duplicate memory row: " + id);
-    peaks[id] = peak;
+    peaks[id] = row.peak_extra_bytes;
   }
   const missing = ids.filter((id) => !(id in peaks));
   if (missing.length) throw new Error("Missing memory rows: " + missing.join(", "));
@@ -133,6 +138,32 @@ if (import.meta.main) {
         await command("strip", ["--strip-debug", join(context, "benchmark")]);
         const plan = columnPlan(await loadPlan("continuous"), column);
         await writeFile(join(context, "plan.json"), JSON.stringify(plan));
+        // Peak extra allocation per case, measured by the same instrumented worker as local
+        // comparisons. Counts do not depend on the host, so Actions measures them once per build.
+        // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
+        const memory = await buildBenchmark(tree, target, "memory", features, {
+          profile: "bench",
+          targetTriple: "x86_64-unknown-linux-gnu",
+          env,
+        });
+        const memoryImplementations =
+          implementation.id === "glidesort-sqrt"
+            ? ["tessera", implementation.id]
+            : [implementation.id];
+        // The worker measures one operation per session. The sort session's directory is the
+        // image's scratch evidence; every session's rows give the peaks.
+        const journals: string[] = [];
+        for (const [index, part] of plansByOperation(plan).entries()) {
+          const sort = (part.include[0].operation ?? SORT).kind === SORT.kind;
+          const directory = sort ? join(context, "scratch") : join(out, `memory-${index}`);
+          const partPlan = join(out, `memory-plan-${index}.json`);
+          await writeFile(
+            partPlan,
+            JSON.stringify({ ...part, implementations: memoryImplementations }),
+          );
+          await command(memory.executable, ["--plan", partPlan, "--out", directory]);
+          journals.push(await readFile(join(directory, "memory.jsonl"), "utf8"));
+        }
         const ids = (
           await command(built.executable, [], {
             capture: true,
@@ -143,35 +174,6 @@ if (import.meta.main) {
           .filter(Boolean);
         if (!ids.length) throw new Error("Tracking plan selects no supported cases");
         await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
-        const measured = new Set(ids.map((id) => operationKey(parseCriterionId(id).operation)));
-        // Peak extra allocation per case, measured by the same instrumented worker as local
-        // comparisons. Counts do not depend on the host, so Actions measures them once per build.
-        // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
-        const memory = await buildBenchmark(tree, target, "memory", features, {
-          profile: "bench",
-          targetTriple: "x86_64-unknown-linux-gnu",
-          env,
-        });
-        // The worker measures one operation per session. The sort session's directory is the
-        // image's scratch evidence; every session's rows give the peaks.
-        const journals: string[] = [];
-        for (const [index, part] of plansByOperation(plan).entries()) {
-          const operation = part.include[0].operation ?? SORT;
-          if (!measured.has(operationKey(operation))) continue;
-          const sort = operation.kind === SORT.kind;
-          const directory = sort ? join(context, "scratch") : join(out, `memory-${index}`);
-          const partPlan = join(out, `memory-plan-${index}.json`);
-          await writeFile(
-            partPlan,
-            JSON.stringify(
-              sort && implementation.id === "glidesort-sqrt"
-                ? { ...part, implementations: ["tessera", implementation.id] }
-                : part,
-            ),
-          );
-          await command(memory.executable, ["--plan", partPlan, "--out", directory]);
-          journals.push(await readFile(join(directory, "memory.jsonl"), "utf8"));
-        }
         const peaks = trackingMemory(journals.join("\n"), column, ids);
         const jobs = remoteJobs(ids);
         for (const [index, job] of jobs.entries())

@@ -41,7 +41,7 @@ import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } fr
 
 /** A column's value on a case, keyed as Criterion names it. */
 const timed = (run: TrackingRun | undefined, id: string, execution: Execution) =>
-  run?.values[criterionId(id, execution)];
+  run?.values[criterionId(parseCaseId(id), execution)];
 
 /**
  * Each column's latest run on the hardware of Tessera's latest serial run, by column ID.
@@ -77,15 +77,15 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
   const serial = (name: string) =>
     runs.get(columnId({ implementation: name, execution: "serial" }));
   const value = (id: string, name: string) => timed(serial(name), id, "serial")?.[0] ?? null;
-  const byId = new Map<string, CaseIdentity>();
+  const cases = new Map<string, CaseIdentity>();
   for (const [column, run] of runs) {
     if (parseColumnId(column).execution !== "serial") continue;
     for (const key of Object.keys(run.values)) {
       const input = parseCriterionId(key);
-      if (input.operation.kind === kind) byId.set(caseId(input), input);
+      if (input.operation.kind === kind) cases.set(caseId(input), input);
     }
   }
-  const measured = [...byId.values()].filter(
+  const measured = [...cases.values()].filter(
     (input) =>
       value(caseId(input), "tessera") !== null &&
       value(caseId(input), serialReference(input.operation)) !== null,
@@ -120,12 +120,12 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
     },
     nsPerKey: (id, name) => {
       const own = value(id, name);
-      return own === null ? null : own / byId.get(id)!.len;
+      return own === null ? null : own / parseCaseId(id).len;
     },
-    peak: (id, name) => serial(name)?.memory?.[criterionId(id, "serial")] ?? null,
+    peak: (id, name) => serial(name)?.memory?.[criterionId(parseCaseId(id), "serial")] ?? null,
   });
   return {
-    primary: field([...byId.values()].filter((input) => operationKey(input.operation) === key)),
+    primary: field([...cases.values()].filter((input) => operationKey(input.operation) === key)),
     parameters: operationParts(chosen).values.length ? field(measured) : null,
   };
 }

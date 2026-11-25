@@ -414,23 +414,15 @@ impl FromStr for Column {
     }
 }
 
-/// A validated selection and its expanded case inventory. Only the selection is persisted.
-#[derive(Clone, Debug, Serialize)]
-#[serde(transparent)]
-pub struct Plan {
-    selection: Selection,
-    #[serde(skip)]
-    cases: Vec<(InputCase, Vec<Execution>)>,
-}
-
+/// A versioned experiment selection, independent of its measurement protocol.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Selection {
+pub struct Plan {
     #[serde(rename = "$comment", skip_serializing_if = "Option::is_none")]
     _comment: Option<String>,
     schema: u32,
     /// Explicit implementation selection; measurement drivers own their controls.
-    implementations: Vec<String>,
+    pub(crate) implementations: Vec<String>,
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
@@ -441,7 +433,7 @@ impl Plan {
     /// Invalid identities, empty axes and duplicate choices return an error
     /// before input generation or measurement.
     pub fn parse(text: &str) -> Result<Self, String> {
-        let plan: Selection = serde_json::from_str(text).or_else(|json_error| {
+        let plan: Self = serde_json::from_str(text).or_else(|json_error| {
             toml::from_str(text).map_err(|toml_error| {
                 format!("invalid plan document\nJSON: {json_error}\nTOML: {toml_error}")
             })
@@ -512,39 +504,30 @@ impl Plan {
         }) {
             return Err("non-sort rules require literal record counts".into());
         }
-        let cases = plan.expand()?;
-        Ok(Self {
-            selection: plan,
-            cases,
-        })
+        plan.cases()?;
+        Ok(plan)
     }
 
     /// Returns exactly the implementations selected in this plan.
     pub fn implementations(&self) -> &[String] {
-        &self.selection.implementations
-    }
-
-    /// Unique cases and their selected executions, resolved once during parsing.
-    pub fn cases(&self) -> &[(InputCase, Vec<Execution>)] {
-        &self.cases
+        &self.implementations
     }
 
     /// Whether a case at one execution survives the include and exclude rules.
     #[cfg(test)]
     fn selects(&self, case: &InputCase, execution: Execution) -> bool {
         self.cases()
+            .unwrap()
             .iter()
             .any(|(selected, executions)| selected == case && executions.contains(&execution))
     }
-}
 
-impl Selection {
     /// Expands rules into unique cases, each with its selected executions in
     /// ascending order, before allocating any records.
     ///
     /// Omitted axes use catalog identities, default lengths, `sort` and
     /// `serial`. Invalid operation parameters or an empty experiment return an error.
-    fn expand(&self) -> Result<Vec<(InputCase, Vec<Execution>)>, String> {
+    pub fn cases(&self) -> Result<Vec<(InputCase, Vec<Execution>)>, String> {
         let mut cases = BTreeMap::<InputCase, BTreeSet<Execution>>::new();
         for rule in &self.include {
             let types = rule
@@ -710,8 +693,7 @@ mod tests {
             });
             let parsed = Plan::parse(&plan.to_string());
             if let Some(id) = entry["case_id"].as_str() {
-                let plan = parsed.unwrap();
-                let cases = plan.cases();
+                let cases = parsed.unwrap().cases().unwrap();
                 assert_eq!(cases.len(), 1);
                 assert_eq!(cases[0].0.id(), id);
             } else {
@@ -759,7 +741,7 @@ mod tests {
     /// Counts measured (case, execution) pairs per preset.
     fn measurements(text: &str) -> usize {
         let plan = Plan::parse(text).unwrap();
-        plan.cases().iter().map(|(_, e)| e.len()).sum()
+        plan.cases().unwrap().iter().map(|(_, e)| e.len()).sum()
     }
 
     #[test]
@@ -770,13 +752,14 @@ mod tests {
             (include_str!("../../plans/release.toml"), 381, 381),
             (include_str!("../../plans/parallel.toml"), 16, 32),
         ] {
-            assert_eq!(Plan::parse(text).unwrap().cases().len(), cases);
+            assert_eq!(Plan::parse(text).unwrap().cases().unwrap().len(), cases);
             assert_eq!(measurements(text), measured);
         }
         let pairs = |text| {
             Plan::parse(text)
                 .unwrap()
-                .cases
+                .cases()
+                .unwrap()
                 .into_iter()
                 .map(|(case, _)| (case.ty, case.distribution))
                 .collect::<BTreeSet<_>>()
@@ -790,7 +773,7 @@ mod tests {
     #[test]
     fn continuous_preserves_required_screens() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml")).unwrap();
-        let all = continuous.cases();
+        let all = continuous.cases().unwrap();
         let at = |execution: Execution| {
             all.iter()
                 .filter(|(_, e)| e.contains(&execution))
@@ -979,6 +962,7 @@ mod tests {
         };
         let ids = |plan: Plan| {
             plan.cases()
+                .unwrap()
                 .iter()
                 .flat_map(|(case, executions)| executions.iter().map(|e| case.criterion_id(*e)))
                 .collect::<Vec<_>>()
@@ -1020,7 +1004,7 @@ mod tests {
     fn relative_lengths_follow_records() {
         let plan = Plan::parse(r#"{"schema":3,"implementations":["tessera"],
             "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#).unwrap();
-        for (case, _) in plan.cases() {
+        for (case, _) in plan.cases().unwrap() {
             let bytes = if case.ty == "u64" { 8 } else { 16 };
             assert_eq!(case.len, TILE_BYTES / bytes + 1);
         }

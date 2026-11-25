@@ -26,17 +26,20 @@ import {
 
 /** Present cases by call, then in catalog reading order; historical IDs keep readable fallbacks. */
 export function trackingCases(ids: string[]): TrackingCase[] {
-  return ids.toSorted(compareCases).map((id) => {
-    const parts = caseParts(id);
-    return {
-      id,
-      label: caseLabel(id),
-      group: caseSection(id).title || "other",
-      ...caseName(id),
-      type: parts.type || "other",
-      length: parts.n || "other",
-    };
-  });
+  const section = (id: string) => caseSection(id).order;
+  return ids
+    .toSorted((a, b) => section(a) - section(b) || compareCases(a, b))
+    .map((id) => {
+      const parts = caseParts(id);
+      return {
+        id,
+        label: caseLabel(id),
+        group: caseSection(id).title || "other",
+        ...caseName(id),
+        type: parts.type || "other",
+        length: parts.n || "other",
+      };
+    });
 }
 
 /** Each filterable field's values in catalog order; unknown values follow, in reading order. */

@@ -110,8 +110,9 @@ fn main() {
     // Serial IDs precede every worker count, and worker counts ascend.
     let mut supported: Vec<_> = plan
         .cases()
-        .iter()
-        .flat_map(|(case, executions)| executions.iter().map(move |&e| (case, e)))
+        .unwrap()
+        .into_iter()
+        .flat_map(|(case, executions)| executions.into_iter().map(move |e| (case.clone(), e)))
         .filter(|(case, e)| variant.supports(&CaseInput::new(&case.probe()), *e))
         .map(|(case, e)| {
             let id = case.criterion_id(e);
@@ -161,9 +162,9 @@ fn main() {
             0
         };
         let mut kernel = variant
-            .prepare(&CaseInput::new(case), execution, bytes)
+            .prepare(&CaseInput::new(&case), execution, bytes)
             .expect("listed capability changed");
-        measure(&mut criterion, case, execution, kernel.as_mut());
+        measure(&mut criterion, &case, execution, kernel.as_mut());
     }
     criterion.final_summary();
 }

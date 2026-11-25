@@ -56,7 +56,7 @@ The planner keeps exact facts, advisory estimates and empirical budgets apart. A
 |---|---|---|
 | Flat digit plan | Remaining varying positions and maximum width | Fewest passes, then fewest table slots over legal splits |
 | Tile table width | Cursor size and actual tile bytes | A minimum width and a bucket-per-record cap |
-| Tile MSD versus LSD | Whether the width-bounded windows cover the remaining bits | Finish short flat plans; otherwise partition the highest digit and inspect actual children |
+| Tile MSD versus LSD | Whether the width-bounded windows cover the remaining bits | Finish short flat plans unless direct-key SIMD MSD finishing covers at least one bucket per record with fewer slots than a two-pass split; otherwise partition the highest digit and inspect actual children |
 | Node digit width | Tile capacity and block fan-out limit | Target children of a fraction of a tile; widen a concentrated digit using sampled occupancy |
 | Equality partition | Repeated complete keys in the bounded sample | A sample-share threshold, sampled only on nodes of several tiles |
 | Block size | Metadata bytes, bucket count, record size and input length | Storage owns its balanced-memory formula, scale and floors |
@@ -144,24 +144,26 @@ Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `
 | Key function (`sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
 | Primitive direct keys, probe and finish | Vector scan, instruction set selected once per pass |
 | Primitive direct keys, ascending confirmation | The same vector scan, dispatched once after checking the encoded predecessor |
-| `Reverse<K>` direct keys | The scan of `K`, with the pair sides exchanged |
+| `Reverse<K>` direct keys | Encoded-order vector load/store via bitwise complement of `K`'s encoding |
 
 Slices shorter than 64 records, 128-bit keys and tuple keys scan one pair at a time; pointer-sized keys (`usize`, `isize`) delegate to their fixed-width integer counterpart.
 
-Order confirmation (`confirm_order`) lets its first three keys establish a direction or rule out both; if they tie, the last key selects the direction to check, and equal endpoints require every intervening key to match. Its scalar ascending continuation extracts four successive keys and combines their comparisons before deciding whether to continue, so independent comparisons overlap; an inversion may evaluate the rest of its group. The short tail checks one pair at a time, and the descending continuation also records whether any adjacent pair ties. Each direct key type supplies its lane count and an encoded-order pair mask; one scan owns block traversal, mask aggregation and the scalar tail. Integer comparison and float encoding use explicit `fearless_simd` operations rather than autovectorization. `Reverse<K>` keeps the lane count of `K` by swapping transparent shared views, also for nested `Reverse`.
+Order confirmation (`confirm_order`) lets its first three keys establish a direction or rule out both; if they tie, the last key selects the direction to check, and equal endpoints require every intervening key to match. Its scalar ascending continuation extracts four successive keys and combines their comparisons before deciding whether to continue, so independent comparisons overlap; an inversion may evaluate the rest of its group. The short tail checks one pair at a time, and the descending continuation also records whether any adjacent pair ties. Each direct key type supplies its lane count and total-order vector load/store; one scan owns block traversal, mask aggregation and the scalar tail, and the same vector encoding feeds SIMD MSD tile finishing on backends with at least eight lanes. Integer comparison and float encoding use explicit `fearless_simd` operations rather than autovectorization. `Reverse<K>` keeps the lane count of `K` by bitwise-complementing `K`'s encoded vector over transparent views, also for nested `Reverse`.
 
 Dispatch happens once per insertion pass and the loop is inlined into the dispatched function: per-scan dispatch repeats overhead on short runs, and a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`; there is no backend switch. User-key tiles keep scalar callbacks rather than materializing a key array. The [SIMD constraints](evidence.md#rejected-or-on-hold) were measured outside the paired protocol and support no formal speedup claim.
 
 ## Record handling
 
-Records move by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; other physical copies are stale bytes that are never dropped, borrowed or returned.
+Records move by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; stale bytes of moved non-`Copy` records are never dropped, borrowed or returned.
+
+For sealed `Copy`, panic-free `Extract::DIRECT` keys, after an MSD counting pass writes the complete record set into scratch, the previous tile buffer still holds initialized `Copy` values. `partition_tile` may therefore borrow scratch as `&[T]` and the tile as `&mut [T]` for SIMD MSD finishing while the restoration guard remains armed over scratch. If finishing declines, the guard still copies the complete scratch set back into the tile; only when finishing returns `true` (having initialized every tile slot) does `partition_tile` disarm the guard so the tile owns the finished records. Callback-key paths never take this borrow.
 
 A counting pass reads each key twice, for the histogram and for the scatter:
 
 - **User key functions** (`sort_by_key`). The histogram stores a two-byte bucket per record and the scatter reads it back. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe on one path.
 - **Library-encoded keys** (`sort`). The records are their own keys, encoded deterministically by Tessera, so the scatter recomputes them and stores nothing.
 
-`Extract::DIRECT` owns this distinction, not a mode passed through the executors. It is present only when every record is its own sealed key; its unsafe contract requires deterministic, panic-free extraction, and narrowed extractors inherit it with a translated offset. Tile allocation, histogram, scatter and window counting consume this one fact.
+`Extract::DIRECT` owns this distinction, not a mode passed through the executors. It is present only when every record is its own sealed key; its unsafe contract requires deterministic, panic-free extraction, and narrowed extractors inherit it with a translated offset. Tile allocation, histogram, scatter, window counting and SIMD MSD finishing consume this one fact.
 
 The research prototype skipped stored buckets for `Copy` records by filling scratch with valid records first. The port stores them for every record type; the [measured cost](evidence.md#port-parity-baseline) is within 3% of the prototype forced onto cached IDs.
 

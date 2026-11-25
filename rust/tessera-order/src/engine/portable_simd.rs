@@ -79,8 +79,8 @@ pub trait SimdKey: Copy {
     }
 }
 
-/// Independent streaming lanes in [`finish_msd_with`] to hide odd-even carry
-/// latency while staying within AVX2's 16 vector registers without spilling.
+/// Provisional stream count for [`finish_msd_with`], kept small enough to stay
+/// within AVX2's 16 vector registers without spilling.
 const MSD_STREAMS: usize = 4;
 
 /// Shared eligibility rule for both planning and finishing: require a real SIMD
@@ -95,9 +95,11 @@ pub(crate) fn can_finish_msd<K: RadixKey>() -> bool {
     dispatch!(Level::new(), simd => msd_supported::<_, K>(simd))
 }
 
-/// Finishes an MSD-partitioned buffer `src` directly into `dest` via a
-/// branchless streaming odd-even network when every bucket has at most
-/// `largest` records and fits within one vector of overlap.
+/// Finishes an MSD-partitioned buffer `src` into `dest` via a branchless
+/// odd-even vector network when every bucket has at most `largest` records and
+/// fits within one vector of overlap. Longer slices (`>= 2 * MSD_STREAMS * w`)
+/// stream the bulk directly from `src` into `dest`; shorter eligible slices
+/// copy `src` into `dest` first and repair in place.
 #[inline]
 pub(crate) fn finish_msd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bool {
     src.len() >= SIMD_MIN && finish_msd_simd(src, dest, largest)
@@ -108,10 +110,11 @@ fn finish_msd_simd<K: RadixKey>(src: &[K], dest: &mut [K], largest: usize) -> bo
     dispatch!(Level::new(), simd => finish_msd_with(simd, src, dest, largest))
 }
 
-/// Streams `2 * w` overlapping windows across `src -> dest` in four independent
-/// streams (breaking the carry chain across adjacent windows), then sweeps any
-/// remainder and repairs all seams. Every bucket of length `<= w + 1` fits
-/// completely inside at least one `2 * w` window.
+/// For `len >= 2 * MSD_STREAMS * w`, streams `2 * w` overlapping windows across
+/// `src -> dest` in [`MSD_STREAMS`] independent streams and repairs the stream
+/// seams, then copies and repairs any tail. Shorter eligible slices copy `src`
+/// into `dest` and run the same overlapping repair in place. Every bucket of
+/// length `<= w + 1` fits completely inside at least one `2 * w` window.
 #[inline(always)]
 fn finish_msd_with<S: Simd, K: RadixKey>(
     simd: S,

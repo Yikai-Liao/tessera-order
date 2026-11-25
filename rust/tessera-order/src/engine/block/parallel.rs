@@ -10,12 +10,6 @@ use rayon::prelude::*;
 pub(super) type BucketVisit<'callback, 'records, T> =
     &'callback (dyn Fn(usize, Range<usize>, &'records mut [T]) + Sync);
 
-pub(super) struct Config {
-    pub(super) shards: usize,
-    pub(super) block_size: Option<usize>,
-    pub(super) parallel: bool,
-}
-
 /// Partitions the root into the `2^radix` buckets `classifier` assigns and
 /// completes it through the shared source ledger.
 pub(crate) fn partition_parallel<'records, T: Send, C: Classify<T> + Clone + Send>(
@@ -26,83 +20,72 @@ pub(crate) fn partition_parallel<'records, T: Send, C: Classify<T> + Clone + Sen
     shards: usize,
     visit: BucketVisit<'_, 'records, T>,
 ) -> Vec<usize> {
-    partition_impl_with_visit(
-        records,
-        radix,
-        classifier,
-        buffers,
-        Config {
-            shards,
-            block_size: None,
-            parallel: true,
-        },
-        Some(visit),
-    )
-}
-
-#[cfg(test)]
-fn partition_impl<T: Send, C: Classify<T> + Clone + Send>(
-    arr: &mut [T],
-    radix: usize,
-    classifier: C,
-    buffers: &mut Buffers<T>,
-    config: Config,
-) -> Vec<usize> {
-    partition_impl_with_visit(arr, radix, classifier, buffers, config, None)
-}
-
-pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
-    arr: &'records mut [T],
-    radix: usize,
-    classifier: C,
-    buffers: &mut Buffers<T>,
-    config: Config,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     assert!(core::mem::size_of::<T>() != 0);
-    assert!(arr.len() >= 2);
+    assert!(records.len() >= 2);
     let bucket_count = 1usize << radix;
-    let shards = config.shards.max(1).min(arr.len());
-    let record_bytes = core::mem::size_of::<T>();
-    let block_size = config.block_size.unwrap_or_else(|| {
-        // The completion owner charges all live tables, including shard links.
-        // Balance them against one scratch reserve per shard bucket.
-        let balanced = balanced_size(
-            arr.len(),
-            record_bytes,
-            shards * bucket_count,
-            finish::parallel_descriptor_bytes(),
-        );
-        // Source-ledger transfers pay per-block ownership work regardless of
-        // how the engine finishes a bucket. Use the shared amortization scale.
-        scaled_block_size(balanced, record_bytes, BLOCK_SCALE)
-    });
-    let full_blocks = arr.len() / block_size;
+    let shards = shards.clamp(1, records.len());
+    let size = block_size(
+        records.len(),
+        core::mem::size_of::<T>(),
+        shards * bucket_count,
+        finish::parallel_descriptor_bytes(),
+    );
+    let full_blocks = records.len() / size;
     let shards = shards.min(full_blocks.max(1));
-    if shards == 1 && config.block_size.is_none() {
+    if shards == 1 {
         return partition(
-            arr,
+            records,
             radix,
             classifier,
             buffers,
-            &mut |bucket, range, child, _| {
-                if let Some(callback) = visit {
-                    callback(bucket, range, child);
-                }
-            },
+            &mut |bucket, range, child, _| visit(bucket, range, child),
         );
     }
-    let input_len = arr.len();
-    let input = arr.as_mut_ptr();
+    let input_len = records.len();
+    let input = records.as_mut_ptr();
     // The first shard reuses the caller's buffers, which keep its scratch.
     let mut local_buffers: Vec<_> = (1..shards).map(|_| Buffers::new()).collect();
+    // SAFETY: `input` and `input_len` come from `records`, which stays uniquely
+    // borrowed for `'records`, and `shards` matches `1 + local_buffers.len()`.
+    let tasks = unsafe {
+        prepare_shards(
+            input,
+            input_len,
+            bucket_count,
+            size,
+            classifier,
+            buffers,
+            &mut local_buffers,
+        )
+    };
+    let mut partitions: Vec<_> = tasks.into_par_iter().map(scatter_shard).collect();
+    // SAFETY: these completed guards cover consecutive disjoint block-aligned
+    // ranges from the same ancestor. Only the final partition has a tail.
+    unsafe { finish::complete(input, input_len, &mut partitions, visit) }
+}
+
+/// Splits `input` into consecutive block-aligned shards derived from the same
+/// raw ancestor so the completion ledger can reclaim full input blocks.
+///
+/// # Safety
+///
+/// `input` must point to `input_len` initialized, exclusively accessible
+/// records for `'records`.
+unsafe fn prepare_shards<'records, 'w, T, C: Clone>(
+    input: *mut T,
+    input_len: usize,
+    bucket_count: usize,
+    block_size: usize,
+    classifier: C,
+    buffers: &'w mut Buffers<T>,
+    local_buffers: &'w mut [Buffers<T>],
+) -> Vec<(Partition<'records, 'w, T>, C)> {
+    let full_blocks = input_len / block_size;
+    let shards = 1 + local_buffers.len();
     let mut tasks = Vec::with_capacity(shards);
     let mut first_block = 0;
-    for (index, local) in core::iter::once(buffers)
-        .chain(&mut local_buffers)
-        .enumerate()
-    {
+    for (index, local) in core::iter::once(buffers).chain(local_buffers).enumerate() {
         let blocks = full_blocks / shards + usize::from(index < full_blocks % shards);
         let len = if index + 1 == shards {
             input_len - first_block * block_size
@@ -110,11 +93,8 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
             blocks * block_size
         };
         // SAFETY: cumulative full-block quotas cover disjoint consecutive
-        // ranges, with only the final shard including the input tail. Each
-        // range is initialized here and stays exclusively owned by its guard.
-        // Derive all shard borrows from this same raw ancestor: reborrowing
-        // `arr` via split_at_mut would invalidate the raw pointer the ledger
-        // uses after these shard guards have been retired.
+        // ranges, with only the final shard including the input tail. Deriving
+        // every borrow from `input` preserves the raw ancestor for the ledger.
         let part =
             unsafe { core::slice::from_raw_parts_mut(input.add(first_block * block_size), len) };
         tasks.push((
@@ -123,22 +103,60 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
         ));
         first_block += blocks;
     }
-    fn scatter<'a, 'w, T, C: Classify<T>>(
-        (mut partition, classifier): (Partition<'a, 'w, T>, C),
-    ) -> Partition<'a, 'w, T> {
-        // Each guard restores its original shard during unwinding. Rayon
-        // joins all jobs before the parent buffers can be released.
-        let _ = partition.step(classifier);
-        partition
-    }
-    let mut partitions: Vec<_> = if config.parallel {
-        tasks.into_par_iter().map(scatter).collect()
-    } else {
-        tasks.into_iter().map(scatter).collect()
+    tasks
+}
+
+fn scatter_shard<'a, 'w, T, C: Classify<T>>(
+    (mut partition, classifier): (Partition<'a, 'w, T>, C),
+) -> Partition<'a, 'w, T> {
+    // Each guard restores its original shard during unwinding. Rayon
+    // joins all jobs before the parent buffers can be released.
+    let _ = partition.step(classifier);
+    partition
+}
+
+/// Exercises sharded scatter and ledger completion with small test block sizes
+/// and optional serial execution under Miri.
+#[cfg(test)]
+#[expect(clippy::too_many_arguments, reason = "test geometry helper")]
+pub(super) fn partition_for_test<'records, T: Send, C: Classify<T> + Clone + Send>(
+    records: &'records mut [T],
+    radix: usize,
+    classifier: C,
+    buffers: &mut Buffers<T>,
+    shards: usize,
+    size: usize,
+    parallel: bool,
+    visit: Option<BucketVisit<'_, 'records, T>>,
+) -> Vec<usize> {
+    assert!((1..=MAX_RADIX_BITS).contains(&radix));
+    assert!(core::mem::size_of::<T>() != 0);
+    assert!(records.len() >= 2);
+    let bucket_count = 1usize << radix;
+    let full_blocks = records.len() / size;
+    let shards = shards.clamp(1, records.len()).min(full_blocks.max(1));
+    let input_len = records.len();
+    let input = records.as_mut_ptr();
+    let mut local_buffers: Vec<_> = (1..shards).map(|_| Buffers::new()).collect();
+    // SAFETY: `input` and `input_len` come from `records`, uniquely borrowed for `'records`.
+    let tasks = unsafe {
+        prepare_shards(
+            input,
+            input_len,
+            bucket_count,
+            size,
+            classifier,
+            buffers,
+            &mut local_buffers,
+        )
     };
-    // SAFETY: these completed guards cover consecutive disjoint block-aligned
-    // ranges from the same ancestor. Only the final partition has a tail.
-    unsafe { finish::complete(input, input_len, &mut partitions, config.parallel, visit) }
+    let mut partitions: Vec<_> = if parallel {
+        tasks.into_par_iter().map(scatter_shard).collect()
+    } else {
+        tasks.into_iter().map(scatter_shard).collect()
+    };
+    // SAFETY: completed shard guards cover `records` consecutively from `input`.
+    unsafe { finish::complete_for_test(input, input_len, &mut partitions, parallel, visit) }
 }
 
 #[cfg(test)]
@@ -160,12 +178,14 @@ mod tests {
         expected.sort_by_key(|row| row.0);
         let pending = std::sync::Mutex::new(None::<&mut [(u64, String)]>);
         let mut buffers = Buffers::new();
-        partition_impl_with_visit(
+        partition_for_test(
             &mut rows,
             2,
             KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
             &mut buffers,
-            config(3, 7),
+            3,
+            7,
+            !cfg!(miri),
             Some(&|_, _, child| {
                 let mut pending = pending.lock().unwrap();
                 if let Some(previous) = pending.take() {
@@ -189,26 +209,20 @@ mod tests {
         expected.sort();
         let mut buffers = Buffers::new();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            partition_impl_with_visit(
+            partition_for_test(
                 &mut rows,
                 2,
                 KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
                 &mut buffers,
-                config(3, 7),
+                3,
+                7,
+                !cfg!(miri),
                 Some(&|_, _, _| panic!("callback panic")),
             );
         }));
         assert!(result.is_err());
         rows.sort();
         assert_eq!(rows, expected);
-    }
-
-    fn config(shards: usize, block_size: usize) -> Config {
-        Config {
-            shards,
-            block_size: Some(block_size),
-            parallel: !cfg!(miri),
-        }
     }
 
     struct Owned {
@@ -239,7 +253,7 @@ mod tests {
                 })
                 .collect();
             let result = catch_unwind(AssertUnwindSafe(|| {
-                partition_impl(
+                partition_for_test(
                     &mut rows,
                     3,
                     KeyDigit::new(
@@ -250,7 +264,10 @@ mod tests {
                         0,
                     ),
                     &mut Buffers::new(),
-                    config(4, 5),
+                    4,
+                    5,
+                    !cfg!(miri),
+                    None,
                 );
             }));
             assert_eq!(result.is_err(), fail != usize::MAX);
@@ -270,7 +287,7 @@ mod tests {
             let mut backing: Vec<_> = (0..len).collect();
             let mut records: Vec<_> = backing.iter_mut().enumerate().collect();
             let calls = AtomicUsize::new(0);
-            partition_impl(
+            partition_for_test(
                 &mut records,
                 3,
                 KeyDigit::new(
@@ -285,7 +302,10 @@ mod tests {
                     0,
                 ),
                 &mut Buffers::new(),
-                config(4, 5),
+                4,
+                5,
+                !cfg!(miri),
+                None,
             );
             let mut ids = Vec::new();
             for (id, record) in records {
@@ -312,12 +332,14 @@ mod tests {
         expected.sort_by_key(|r| r.0);
         let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
         let callbacks = AtomicUsize::new(0);
-        partition_impl_with_visit(
+        partition_for_test(
             &mut rows,
             2,
             KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
             &mut Buffers::new(),
-            config(3, 7),
+            3,
+            7,
+            !cfg!(miri),
             Some(&|_, _, child| {
                 callbacks.fetch_add(1, Ordering::Relaxed);
                 let mut pending = pending.lock().unwrap();
@@ -356,12 +378,14 @@ mod tests {
             let consumed = AtomicUsize::new(0);
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
-                partition_impl_with_visit(
+                partition_for_test(
                     &mut rows,
                     2,
                     KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
                     &mut Buffers::new(),
-                    config(3, 7),
+                    3,
+                    7,
+                    !cfg!(miri),
                     Some(&|_, _, child| {
                         let mut pending = pending
                             .lock()

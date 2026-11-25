@@ -14,6 +14,7 @@ import {
   isComposition,
   type Operation,
   operationDescription,
+  operationKey,
   operationKinds,
   operationParts,
   parseCaseId,
@@ -40,7 +41,7 @@ import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } fr
 
 /** A column's value on a case, keyed as Criterion names it. */
 const timed = (run: TrackingRun | undefined, id: string, execution: Execution) =>
-  run?.values[criterionId(parseCaseId(id), execution)];
+  run?.values[criterionId(id, execution)];
 
 /**
  * Each column's latest run on the hardware of Tessera's latest serial run, by column ID.
@@ -76,33 +77,33 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
   const serial = (name: string) =>
     runs.get(columnId({ implementation: name, execution: "serial" }));
   const value = (id: string, name: string) => timed(serial(name), id, "serial")?.[0] ?? null;
-  const cases = new Map<string, CaseIdentity>();
+  const byId = new Map<string, CaseIdentity>();
   for (const [column, run] of runs) {
     if (parseColumnId(column).execution !== "serial") continue;
     for (const key of Object.keys(run.values)) {
       const input = parseCriterionId(key);
-      if (input.operation.kind === kind) cases.set(caseId(input), input);
+      if (input.operation.kind === kind) byId.set(caseId(input), input);
     }
   }
-  const measured = [...cases.values()].filter(
+  const measured = [...byId.values()].filter(
     (input) =>
       value(caseId(input), "tessera") !== null &&
       value(caseId(input), serialReference(input.operation)) !== null,
   );
-  // Parameter values in identity order; JSON keeps the parsed key order, so it names a group.
+  // Break coverage ties by parameter values in catalog identity order.
   const lexical = (a: number[], b: number[]) => {
     const at = a.findIndex((value, index) => value !== b[index]);
     return at < 0 ? 0 : a[at] - b[at];
   };
-  const [chosen] = [...Map.groupBy(measured, (input) => JSON.stringify(input.operation)).values()]
+  const [chosen] = [...Map.groupBy(measured, (input) => operationKey(input.operation)).values()]
     .toSorted(
       (a, b) =>
         b.length - a.length ||
         lexical(operationParts(a[0].operation).values, operationParts(b[0].operation).values),
     )
     .map((group) => group[0].operation);
-  const same = (input: CaseIdentity) => JSON.stringify(input.operation) === JSON.stringify(chosen);
   if (!chosen) return null;
+  const key = operationKey(chosen);
   const reference = serialReference(chosen);
   const field = (cases: CaseIdentity[]): Field => ({
     operation: chosen,
@@ -119,12 +120,12 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
     },
     nsPerKey: (id, name) => {
       const own = value(id, name);
-      return own === null ? null : own / parseCaseId(id).len;
+      return own === null ? null : own / byId.get(id)!.len;
     },
-    peak: (id, name) => serial(name)?.memory?.[criterionId(parseCaseId(id), "serial")] ?? null,
+    peak: (id, name) => serial(name)?.memory?.[criterionId(id, "serial")] ?? null,
   });
   return {
-    primary: field([...cases.values()].filter(same)),
+    primary: field([...byId.values()].filter((input) => operationKey(input.operation) === key)),
     parameters: operationParts(chosen).values.length ? field(measured) : null,
   };
 }

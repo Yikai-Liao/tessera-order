@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { type caseParts, caseSection } from "../catalog.ts";
+import { geomean as geometricMean } from "../statistics.ts";
 
 export { caseLabel, caseParts } from "../catalog.ts";
 export { formatChange } from "../plot/annotations.ts";
@@ -122,15 +123,10 @@ export function summarizeRows(rows: Row[], identity: ReportIdentity) {
   const count = (verdict: Verdict) => rows.filter((r) => r.verdict === verdict).length;
   // The geometric mean of current/baseline weighs a 2× win on a 700 ns case
   // and on a 10 ms case equally, which an arithmetic mean of times would not.
-  const compared = rows.filter((r): r is ComparedRow => r.baseline !== null && r.value > 0);
-  const geomean = compared.length
-    ? Math.exp(
-        compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline), 0) / compared.length,
-      )
-    : null;
+  const { cases: compared, ratio: geomean } = comparedRatios(rows);
   return {
     rows,
-    compared: compared.length,
+    compared,
     geomean,
     best: rows.find((r) => r.verdict === "improvement") ?? null,
     worst: rows.find((r) => r.verdict === "regression") ?? null,
@@ -144,18 +140,19 @@ export function summarizeRows(rows: Row[], identity: ReportIdentity) {
 /** The geometric mean of current/baseline over compared cases, optionally within one
  * figure section. */
 export function geomean(summary: ReportSummary, section?: string) {
-  const compared = summary.rows.filter(
+  const { ratio, cases } = comparedRatios(summary.rows, section);
+  return ratio === null ? null : { change: ratio - 1, cases };
+}
+
+function comparedRatios(rows: Row[], section?: string) {
+  const compared = rows.filter(
     (r): r is ComparedRow =>
       r.baseline !== null &&
       r.value > 0 &&
       (section === undefined || caseSection(r.name).title === section),
   );
-  if (!compared.length) return null;
   return {
-    change:
-      Math.exp(
-        compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline), 0) / compared.length,
-      ) - 1,
+    ratio: compared.length ? geometricMean(compared.map((r) => r.value / r.baseline)) : null,
     cases: compared.length,
   };
 }

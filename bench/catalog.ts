@@ -192,6 +192,12 @@ export function operationParts(operation: Operation) {
   return { entry, values };
 }
 
+/** Identity of an operation including its parameters, independent of object property order. */
+export function operationKey(operation: Operation) {
+  const { entry, values } = operationParts(operation);
+  return [entry.id, ...values].join("/");
+}
+
 /** Each parameter with its optional label, for presentation. */
 function parameterText(operation: Operation) {
   const { entry, values } = operationParts(operation);
@@ -287,9 +293,9 @@ export function parseColumnId(id: string): Column {
   return { implementation: implementationId, execution: parseExecution(id.slice(separator + 1)) };
 }
 
-/** Format the Criterion ID `rust/<case>/<execution>`. */
-export function criterionId(input: CaseIdentity, execution: Execution) {
-  return `rust/${caseId(input)}/${execution}`;
+/** Format `rust/<case>/<execution>` from a case or its canonical ID. */
+export function criterionId(input: CaseIdentity | string, execution: Execution) {
+  return `rust/${typeof input === "string" ? input : caseId(input)}/${execution}`;
 }
 
 /** Decode a Criterion ID into its case and execution. */

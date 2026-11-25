@@ -93,6 +93,18 @@ export interface Memory {
   output_bytes?: number;
   verified: boolean;
 }
+/** Read the memory worker's journal in order; consumers select their own rows. */
+export function* memoryRows(journal: string): Generator<Memory> {
+  for (const line of journal.split("\n")) if (line) yield JSON.parse(line);
+}
+
+/** A selected tracking row must carry a verified, nonnegative byte count. */
+export function verifiedPeak(row: Memory) {
+  if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
+    throw new Error(`Invalid memory row: ${row.case_id} ${row.column}`);
+  return row.peak_extra_bytes;
+}
+
 export interface Dataset {
   host: Record<string, unknown>;
   manifest: Manifest;

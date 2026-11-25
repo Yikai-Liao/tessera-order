@@ -16,6 +16,7 @@ import {
 } from "../catalog.ts";
 import { loadPlan, type Plan, parsePlan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
+import { memoryRows, verifiedPeak } from "../report/model.ts";
 import {
   benchmarkEnvironment,
   buildBenchmark,
@@ -92,25 +93,17 @@ export function growthPeaks(journal: string, plan: Plan) {
     lengths.map((len, index) => [caseId({ ty: type, distribution, len, operation }), index]),
   );
   const peaks: Record<string, (number | null)[]> = {};
-  for (const line of journal.split("\n").filter(Boolean)) {
-    const row = JSON.parse(line) as {
-      case_id: string;
-      column: string;
-      build: string;
-      peak_extra_bytes: number;
-      verified: boolean;
-    };
+  for (const row of memoryRows(journal)) {
     const at = positions.get(caseId(parseCaseId(row.case_id)));
     const { implementation, execution } = parseColumnId(row.column);
     if (row.build !== "default" || execution !== "serial" || at === undefined) continue;
     if (!plan.implementations.includes(implementation))
       throw new Error(`Unplanned implementation: ${implementation}`);
-    if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
-      throw new Error(`Invalid memory row: ${row.case_id} ${row.column}`);
+    const peak = verifiedPeak(row);
     peaks[implementation] ??= lengths.map(() => null);
     const values = peaks[implementation];
     if (values[at] !== null) throw new Error(`Duplicate memory row: ${row.case_id} ${row.column}`);
-    values[at] = row.peak_extra_bytes;
+    values[at] = peak;
   }
   if (!peaks.tessera?.every((value) => value !== null))
     throw new Error("Tessera needs a peak at every length");

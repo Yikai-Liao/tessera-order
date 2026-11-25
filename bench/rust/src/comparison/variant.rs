@@ -424,26 +424,21 @@ impl Variant {
 
     /// Checks capabilities without starting workers for a parallel execution.
     pub fn supports(self, input: &CaseInput, execution: Execution) -> bool {
-        // Every CaseInput representation implements TesseraAdapter's parallel
-        // operations. Preparing one here would warm and discard a real pool.
-        match execution {
-            Execution::Serial => self.prepare(input, execution, 0).is_some(),
-            Execution::Threads(_) => self.parallel(input.operation()),
-        }
+        self.route(input, execution).is_some()
     }
 
-    /// The exact call a supported column makes, retained in every manifest
-    /// and printed by `list`. Naming a parallel route starts no pool.
-    pub(super) fn route(self, input: &CaseInput, execution: Execution) -> &'static str {
+    /// The exact call this column makes, or none for an unsupported combination.
+    /// A parallel capability probe never starts or warms a worker pool.
+    pub(super) fn route(self, input: &CaseInput, execution: Execution) -> Option<&'static str> {
         match execution {
             Execution::Serial => self
                 .prepare(input, execution, 0)
-                .expect("route of a supported column")
-                .description(),
+                .map(|kernel| kernel.description()),
             #[cfg(feature = "rayon")]
-            Execution::Threads(_) => input.parallel_route(self.name),
-            #[cfg(not(feature = "rayon"))]
-            Execution::Threads(_) => unreachable!("no parallel column without Rayon"),
+            Execution::Threads(_) if self.parallel(input.operation()) => {
+                Some(input.parallel_route(self.name))
+            }
+            Execution::Threads(_) => None,
         }
     }
 

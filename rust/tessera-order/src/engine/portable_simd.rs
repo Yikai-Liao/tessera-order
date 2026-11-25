@@ -524,6 +524,21 @@ mod tests {
                 assert!(!confirm_ascending(&values, larger.encode()));
             }
         }
+        for level in msd_levels() {
+            // Reuse the scan fixtures for SIMD finishing's encoded load/store,
+            // including exact float bits, scalar keys and nested Reverse.
+            let (w, supported) = msd_info::<K>(level);
+            let mut partitioned = values.clone();
+            for bucket in partitioned.chunks_mut(w + 1) {
+                bucket.reverse();
+            }
+            check_msd(
+                level,
+                partitioned,
+                w + 1,
+                supported && values.len() >= 2 * w,
+            );
+        }
         for level in [Level::baseline(), Level::new()] {
             assert_eq!(
                 dispatch!(level, simd => first_inversion_with(simd, &values)),
@@ -846,168 +861,96 @@ mod tests {
         }
     }
 
-    #[test]
-    fn finish_msd_edge_boundaries_and_encodings() {
-        fn check_type<K: RadixKey>(make: impl Fn(usize) -> K, same: impl Fn(K, K) -> bool) {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            let levels: Vec<Level> = [
-                Some(Level::baseline()),
-                Level::new().as_avx2().map(Level::Avx2),
-                Some(Level::new()),
-            ]
+    fn msd_levels() -> Vec<Level> {
+        let levels = vec![Level::baseline(), Level::new()];
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        let levels = levels
             .into_iter()
-            .flatten()
+            .chain(Level::new().as_avx2().map(Level::Avx2))
             .collect();
-            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-            let levels = [Level::baseline(), Level::new()];
-            for level in levels {
-                let (w, supported) = dispatch!(level, simd => {
-                    fn info<S: Simd, K: SimdKey>(simd: S) -> (usize, bool) {
-                        (K::lanes::<S>(), msd_supported::<S, K>(simd))
-                    }
-                    info::<_, K>(simd)
-                });
-                let lengths: Vec<usize> = if cfg!(miri) {
-                    vec![
-                        0,
-                        (2 * w.max(8)).saturating_sub(1),
-                        2 * w.max(8),
-                        8 * w.max(8) + w.max(8) + 3,
-                    ]
-                } else {
-                    vec![
-                        0,
-                        1,
-                        (2 * w).saturating_sub(1),
-                        2 * w,
-                        2 * w + 1,
-                        3 * w - 1,
-                        3 * w,
-                        8 * w - 1,
-                        8 * w,
-                        8 * w + 1,
-                        8 * w + w - 1,
-                        8 * w + w,
-                        8 * w + w + 3,
-                        8 * w + 2 * w + 3,
-                    ]
-                };
+        levels
+    }
+
+    fn msd_info<K: SimdKey>(level: Level) -> (usize, bool) {
+        dispatch!(level, simd => {
+            fn info<S: Simd, K: SimdKey>(simd: S) -> (usize, bool) {
+                (K::lanes::<S>(), msd_supported::<S, K>(simd))
+            }
+            info::<_, K>(simd)
+        })
+    }
+
+    fn check_msd<K: RadixKey>(level: Level, mut keys: Vec<K>, largest: usize, eligible: bool) {
+        use crate::engine::key::Unsigned;
+        let encoded = |keys: &[K]| {
+            keys.iter()
+                .map(|k| k.encode().to_u128())
+                .collect::<Vec<_>>()
+        };
+        let mut expected = encoded(&keys);
+        if eligible {
+            expected.sort();
+        }
+        assert_eq!(
+            dispatch!(level, simd => finish_msd_with(simd, &mut keys, largest)),
+            eligible,
+            "level={level:?} len={} largest={largest}",
+            keys.len()
+        );
+        // Scalar encoding is bijective, including NaN payloads and signed zeros.
+        assert_eq!(encoded(&keys), expected);
+    }
+
+    #[test]
+    fn finish_msd_boundaries() {
+        // Window geometry is independent of encoding; the scan fixtures above
+        // exercise the individual encodings. Keep ordinary and wide lane counts.
+        fn check<K: RadixKey>(make: impl Fn(usize) -> K) {
+            for level in msd_levels() {
+                let (w, supported) = msd_info::<K>(level);
+                let lengths = [
+                    0,
+                    2 * w - 1,
+                    2 * w,
+                    2 * w + 1,
+                    8 * w - 1,
+                    8 * w,
+                    8 * w + 1,
+                    9 * w,
+                    9 * w + 3,
+                ];
                 for len in lengths {
-                    let max_buckets: Vec<usize> = if cfg!(miri) {
-                        vec![1, 2, w + 1, w + 2]
-                    } else {
-                        (1..=w + 2).collect()
-                    };
-                    for largest in max_buckets {
-                        let mut expected: Vec<K> = (0..len).map(&make).collect();
-                        expected.sort_by_key(|k| k.encode());
-                        let mut src = expected.clone();
-                        let mut pos = 0;
-                        let mut step = 0usize;
-                        while pos < len {
-                            let size = ((step % largest) + 1).min(len - pos);
-                            src[pos..pos + size].reverse();
-                            pos += size;
-                            step += 1;
+                    for largest in [1, 2, w, w + 1, w + 2] {
+                        let mut keys: Vec<K> = (0..len).map(&make).collect();
+                        for bucket in keys.chunks_mut(largest) {
+                            bucket.reverse();
                         }
-                        // Declining must preserve the partitioned input; success
-                        // must preserve every original bit pattern in sorted order.
-                        let mut dest = src.clone();
-                        let handled = dispatch!(level, simd => {
-                            finish_msd_with(simd, &mut dest, largest)
-                        });
-                        let should_handle = supported && len >= 2 * w && largest <= w + 1;
-                        assert_eq!(
-                            handled, should_handle,
-                            "level={level:?} w={w} len={len} largest={largest}"
-                        );
-                        let want = if handled { &expected } else { &src };
-                        assert!(
-                            dest.iter().zip(want).all(|(&a, &b)| same(a, b)),
-                            "mismatch: level={level:?} handled={handled} w={w} len={len} largest={largest}"
+                        check_msd(
+                            level,
+                            keys,
+                            largest,
+                            supported && len >= 2 * w && largest <= w + 1,
                         );
                     }
                 }
-                // Place a worst-case reversed `(w + 1)`-element bucket across
-                // every stream seam and tail boundary at both even and odd start parities.
                 if supported {
-                    let len = 8 * w + w + 3;
+                    let len = 9 * w + 3;
                     let seg = (len / (4 * w)) * w;
-                    let mut expected: Vec<K> = (0..len).map(&make).collect();
-                    expected.sort_by_key(|k| k.encode());
+                    // A worst-case (w + 1)-record bucket crosses every stream
+                    // seam and tail boundary, at both starting parities.
                     for seam in [seg, 2 * seg, 3 * seg, 4 * seg, len - w] {
-                        for parity in [0usize, 1] {
+                        for parity in [0, 1] {
                             let start = seam.saturating_sub(w / 2 + parity);
-                            let end = (start + w + 1).min(len);
-                            let mut src = expected.clone();
-                            src[start..end].reverse();
-                            let mut dest = src.clone();
-                            assert!(dispatch!(level, simd => {
-                                finish_msd_with(simd, &mut dest, w + 1)
-                            }));
-                            assert!(
-                                dest.iter().zip(&expected).all(|(&a, &b)| same(a, b)),
-                                "seam mismatch: level={level:?} w={w} seam={seam} start={start}"
-                            );
+                            let mut keys: Vec<K> = (0..len).map(&make).collect();
+                            keys[start..(start + w + 1).min(len)].reverse();
+                            check_msd(level, keys, w + 1, true);
                         }
                     }
                 }
             }
         }
-
-        macro_rules! integers {
-            ($(($u:ty, $i:ty, $factor:expr)),* $(,)?) => {$(
-                check_type(|i| (i as $u).wrapping_mul($factor), |a, b| a == b);
-                check_type(|i| (i as $u).wrapping_mul($factor) as $i, |a, b| a == b);
-            )*};
-        }
-        integers!(
-            (u8, i8, 251),
-            (u16, i16, 4099),
-            (u32, i32, 2_654_435_761),
-            (u64, i64, 0x9e37_79b9_7f4a_7c15),
-            (usize, isize, 0x9e37_79b9),
-        );
-        use core::cmp::Reverse;
-        let u32_key = |i| (i as u32).wrapping_mul(2_654_435_761);
-        let i32_key = |i| u32_key(i) as i32;
-        let i64_key = |i| (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) as i64;
-        check_type(|i| Reverse(u32_key(i)), |a, b| a == b);
-        check_type(|i| Reverse(i32_key(i)), |a, b| a == b);
-        check_type(|i| Reverse(Reverse(i32_key(i))), |a, b| a == b);
-        check_type(|i| Reverse(Reverse(i64_key(i))), |a, b| a == b);
-        macro_rules! floats {
-            ($f:ty, $u:ty, $factor:expr) => {{
-                let specials = [
-                    (-<$f>::NAN).to_bits(),
-                    <$f>::NEG_INFINITY.to_bits(),
-                    (-1.0 as $f).to_bits(),
-                    (-0.0 as $f).to_bits(),
-                    (0.0 as $f).to_bits(),
-                    1,
-                    (1.0 as $f).to_bits(),
-                    <$f>::INFINITY.to_bits(),
-                    <$f>::NAN.to_bits(),
-                ];
-                check_type(
-                    |i| {
-                        <$f>::from_bits(if i < specials.len() {
-                            specials[i]
-                        } else {
-                            (i as $u).wrapping_mul($factor)
-                        })
-                    },
-                    |a, b| a.to_bits() == b.to_bits(),
-                );
-                check_type(
-                    |i| Reverse(<$f>::from_bits(specials[i % specials.len()])),
-                    |a, b| a.0.to_bits() == b.0.to_bits(),
-                );
-            }};
-        }
-        floats!(f32, u32, 2_654_435_761);
-        floats!(f64, u64, 0x9e37_79b9_7f4a_7c15);
-        // Short slices below SIMD_MIN and scalar keys (`u128`) always decline.
+        check(|i| i as u32);
+        check(|i| (i / 8) as u8);
         let mut short = [2u32; SIMD_MIN - 1];
         assert!(!finish_msd(&mut short, 2));
         assert_eq!(short, [2u32; SIMD_MIN - 1]);

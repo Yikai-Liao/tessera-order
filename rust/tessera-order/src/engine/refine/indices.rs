@@ -4,7 +4,7 @@
 
 use super::{Requirement, Sorter, bit_len, prepare, spans::SourceOrder, tile_capacity};
 use crate::engine::{
-    key::{ByKey, RadixKey, Unsigned},
+    key::{BitWidth, ByKey, RadixKey, Unsigned},
     thresholds::TILE_BYTES,
     workspace::Workspace,
 };
@@ -48,7 +48,7 @@ fn order_indices<T, K: RadixKey>(
     }
     let tile_len = tile_capacity::<usize>(TILE_BYTES);
     let mut extract = ByKey(|i: &usize| key(&values[*i]));
-    let varying = prepare(indices, &mut extract, tile_len)?;
+    let varying = prepare::<true, _, _>(indices, K::Width::MASK, &mut extract, tile_len)?;
     let mut scratch = Workspace::new();
     if len <= tile_len {
         scratch.tile.sort(indices, varying, &mut extract);

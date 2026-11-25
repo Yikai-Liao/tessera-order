@@ -39,8 +39,6 @@ use crate::engine::key::{
     self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len,
 };
 
-type KeyValue<T, E> = <E as Extract<T>>::Value;
-
 /// Positions to finish in the current slice. Movement always completes every band.
 #[derive(Clone, Copy)]
 enum Requirement {
@@ -88,6 +86,16 @@ impl Split {
         }
     }
 
+    /// The split a digit classification leaves: every child holds `digit`
+    /// constant, so those bits leave the remaining candidate mask.
+    fn digit<V: Unsigned>(digit: Digit, varying: u128) -> Self {
+        Self {
+            radix: digit.width,
+            candidate: varying & !digit.mask::<V>().to_u128(),
+            finished: None,
+        }
+    }
+
     /// Partitions all records and finishes requested tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
@@ -117,6 +125,18 @@ impl Split {
             &mut scratch.block,
             &mut visit,
         )
+    }
+}
+
+/// Consumes a prepared root after optional 128-bit half-key narrowing.
+trait RefineRoot<T, E: Extract<T>> {
+    fn refine(self, sorter: &mut Sorter<'_, T, E>, records: &mut [T], varying: u128);
+}
+
+impl<T, E: Extract<T>> RefineRoot<T, E> for Requirement {
+    #[inline(always)]
+    fn refine(self, sorter: &mut Sorter<'_, T, E>, records: &mut [T], varying: u128) {
+        sorter.sort_node(records, varying, self);
     }
 }
 
@@ -165,36 +185,54 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
     {
         return;
     }
-    let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
+    dispatch_root(records, extractor, tile_len, required);
+}
+
+/// Runs root preparation, allocates reusable scratch lazily, and narrows a
+/// 128-bit key through one `KeyHalf` when only one 64-bit half varies.
+#[inline(always)]
+fn dispatch_root<T, E: Extract<T>, R>(
+    records: &mut [T],
+    mut extractor: E,
+    tile_len: usize,
+    runner: R,
+) where
+    R: RefineRoot<T, E> + RefineRoot<T, KeyHalf<E, 0>> + RefineRoot<T, KeyHalf<E, 64>>,
+{
+    let Some(varying) = prepare::<true, _, _>(records, E::KEY_MASK, &mut extractor, tile_len)
+    else {
         return;
     };
-    let workspace = &mut Workspace::new();
+    let scratch = &mut Workspace::new();
+    // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _> {
-                scratch: workspace,
-                extractor: &mut KeyHalf::<_, 0>(extractor),
+            let mut half = KeyHalf::<_, 0>(extractor);
+            let mut sorter = Sorter {
+                scratch,
+                extractor: &mut half,
                 tile_len,
-            }
-            .sort_node(records, varying, required);
+            };
+            runner.refine(&mut sorter, records, varying);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _> {
-                scratch: workspace,
-                extractor: &mut KeyHalf::<_, 64>(extractor),
+            let mut half = KeyHalf::<_, 64>(extractor);
+            let mut sorter = Sorter {
+                scratch,
+                extractor: &mut half,
                 tile_len,
-            }
-            .sort_node(records, varying >> 64, required);
+            };
+            runner.refine(&mut sorter, records, varying >> 64);
             return;
         }
     }
-    Sorter::<T, E> {
-        scratch: workspace,
+    let mut sorter = Sorter {
+        scratch,
         extractor: &mut extractor,
         tile_len,
-    }
-    .sort_node(records, varying, required);
+    };
+    runner.refine(&mut sorter, records, varying);
 }
 
 #[cfg(test)]
@@ -202,10 +240,13 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_
     refine_with_tile_bytes(records, extractor, Requirement::All, tile_bytes);
 }
 
-/// Finishes ordered or small roots, otherwise returns their varying bits.
-/// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<T, E: Extract<T>>(
+/// Finishes ordered, constant, or (at the root) small/near-ordered slices;
+/// otherwise returns the varying bits within `candidate`. Shared by serial and
+/// parallel roots before either allocates partition scratch.
+#[inline(always)]
+fn prepare<const INSERTION_PROBE: bool, T, E: Extract<T>>(
     records: &mut [T],
+    candidate: u128,
     extractor: &mut E,
     tile_len: usize,
 ) -> Option<u128> {
@@ -213,10 +254,13 @@ fn prepare<T, E: Extract<T>>(
     if finish_ordered(records, sampled, extractor) {
         return None;
     }
-    if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
+    if INSERTION_PROBE
+        && sampled == Order::Unsorted
+        && insertion_probe::<_, _>(records, extractor, tile_len)
+    {
         return None;
     }
-    let varying = scan_varying_bits(records, E::KEY_MASK, extractor);
+    let varying = scan_varying_bits(records, candidate, extractor);
     if varying == 0 {
         return None;
     }
@@ -459,23 +503,11 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // Ordered children need only one full scan. Flat samples retain the
-        // varying-bit scan, which can finish constant children cheaply.
-        let sampled = probe_order(records, self.extractor);
-        if finish_ordered(records, sampled, self.extractor) {
-            return;
+        if let Some(varying) =
+            prepare::<false, _, _>(records, candidate, self.extractor, self.tile_len)
+        {
+            self.sort_node(records, varying, required);
         }
-        let varying = scan_varying_bits(records, candidate, self.extractor);
-        if varying == 0 {
-            return;
-        }
-        if sampled == Order::Flat {
-            let order = confirm_order(records, self.extractor);
-            if finish_ordered(records, order, self.extractor) {
-                return;
-            }
-        }
-        self.sort_node(records, varying, required);
     }
 
     /// Routes a slice whose order has already been probed.
@@ -508,78 +540,44 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         plan: NodePlan<E::Value>,
         required: Requirement,
     ) {
-        match plan {
-            NodePlan::Equal(equal) => self.partition_equal(records, equal, varying, required),
+        let (ends, split) = match plan {
             NodePlan::Runs { boundary, set } => {
-                self.split_ordered(records, boundary, set, varying, required)
+                self.split_ordered(records, boundary, set, varying, required);
+                return;
             }
-            NodePlan::Digit(digit) => self.partition_digit(records, digit, varying, required),
-        }
-    }
-
-    /// Partitions by digit, then sorts each unfinished child.
-    fn partition_digit(
-        &mut self,
-        records: &mut [T],
-        digit: Digit,
-        varying: u128,
-        required: Requirement,
-    ) {
-        // The split digit is constant inside each child, so its bits are
-        // excluded from the next scan.
-        let candidate = varying & !digit.mask::<E::Value>().to_u128();
-        // A digit covering all remaining variation leaves constant buckets;
-        // interchangeable records can be counted instead of moved.
-        if candidate == 0 && key::try_count_window::<T, E>(records, digit.shift, digit.width) {
-            return;
-        }
-        let split = Split {
-            radix: digit.width,
-            candidate,
-            finished: None,
+            NodePlan::Equal(equal) => {
+                let rank = Rank::new(&mut *self.extractor, equal, varying);
+                let split = Split::equality(&rank, varying);
+                let ends = split.partition(
+                    records,
+                    rank,
+                    |rank| &mut *rank.extractor,
+                    self.scratch,
+                    self.tile_len,
+                    required,
+                );
+                (ends, split)
+            }
+            NodePlan::Digit(digit) => {
+                let split = Split::digit::<E::Value>(digit, varying);
+                // A digit covering all remaining variation leaves constant buckets;
+                // interchangeable records can be counted instead of moved.
+                if split.candidate == 0
+                    && key::try_count_window::<T, E>(records, digit.shift, digit.width, false)
+                {
+                    return;
+                }
+                let ends = split.partition(
+                    records,
+                    KeyDigit::new(&mut *self.extractor, digit.shift),
+                    |digit| &mut *digit.extractor,
+                    self.scratch,
+                    self.tile_len,
+                    required,
+                );
+                (ends, split)
+            }
         };
-        let ends = split.partition::<_, _, _>(
-            records,
-            KeyDigit::new(&mut *self.extractor, digit.shift),
-            |digit| &mut *digit.extractor,
-            self.scratch,
-            self.tile_len,
-            required,
-        );
-        self.finish_children(records, ends, split, required);
-    }
-
-    /// Partitions below, equal to, and above a sampled key, splitting the
-    /// outer band that crosses the top varying bit. The equal band is done.
-    fn partition_equal(
-        &mut self,
-        records: &mut [T],
-        equal: KeyValue<T, E>,
-        varying: u128,
-        required: Requirement,
-    ) {
-        let rank = Rank::new(&mut *self.extractor, equal, varying);
-        let split = Split::equality(&rank, varying);
-        let ends = split.partition::<_, _, _>(
-            records,
-            rank,
-            |rank| &mut *rank.extractor,
-            self.scratch,
-            self.tile_len,
-            required,
-        );
-        self.finish_children(records, ends, split, required);
-    }
-
-    /// Continues requested large children after parent movement has retired.
-    /// Requested tiles were finished cache-hot; unrelated bands remain untouched.
-    fn finish_children(
-        &mut self,
-        records: &mut [T],
-        ends: Vec<usize>,
-        split: Split,
-        required: Requirement,
-    ) {
         let mut start = 0;
         for (bucket, &end) in ends.iter().enumerate() {
             if end - start > self.tile_len

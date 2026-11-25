@@ -11,10 +11,7 @@ const MIN_PARALLEL_BYTES: usize = 1 << 20;
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
-    records: &mut [T],
-    mut extractor: E,
-) {
+pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(records: &mut [T], extractor: E) {
     let record_bytes = core::mem::size_of::<T>();
     let bytes = records.len().saturating_mul(record_bytes);
     if records.len() < 2 || record_bytes == 0 {
@@ -24,69 +21,19 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
         super::sort::<T, E>(records, extractor);
         return;
     }
-
-    let tile_len = tile_capacity::<T>(TILE_BYTES);
-    let mut scratch = Workspace::new();
-    let required = Requirement::All;
-    let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
-        return;
-    };
-
-    let scratch = &mut scratch;
-    // Keep the existing narrow kernels when only one half of a 128-bit key varies.
-    if E::Value::BITS > 64 {
-        if varying >> 64 == 0 {
-            Sorter::<T, _> {
-                scratch,
-                extractor: &mut KeyHalf::<_, 0>(extractor),
-                tile_len,
-            }
-            .sort_root(records, varying, required);
-            return;
-        }
-        if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _> {
-                scratch,
-                extractor: &mut KeyHalf::<_, 64>(extractor),
-                tile_len,
-            }
-            .sort_root(records, varying >> 64, required);
-            return;
-        }
-    }
-    Sorter::<T, E> {
-        scratch,
-        extractor: &mut extractor,
-        tile_len,
-    }
-    .sort_root(records, varying, required);
+    dispatch_root(
+        records,
+        extractor,
+        tile_capacity::<T>(TILE_BYTES),
+        ParallelRoot,
+    );
 }
 
-/// Recycles scratch between bucket finishers without locking during user code.
-struct Pool<T> {
-    free: std::sync::Mutex<Vec<Workspace<T>>>,
-}
+struct ParallelRoot;
 
-impl<T> Pool<T> {
-    fn new() -> Self {
-        Self {
-            free: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-
-    fn take(&self) -> Workspace<T> {
-        self.free
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .pop()
-            .unwrap_or_else(Workspace::new)
-    }
-
-    fn give(&self, scratch: Workspace<T>) {
-        self.free
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .push(scratch);
+impl<T: Send, E: Extract<T> + Clone + Send + Sync> RefineRoot<T, E> for ParallelRoot {
+    fn refine(self, sorter: &mut Sorter<'_, T, E>, records: &mut [T], varying: u128) {
+        sorter.sort_root(records, varying, Requirement::All);
     }
 }
 
@@ -109,18 +56,13 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
                 self.partition_root(records, rank, split, shards, required);
             }
             NodePlan::Digit(digit) => {
-                let candidate = varying & !digit.mask::<E::Value>().to_u128();
+                let split = Split::digit::<E::Value>(digit, varying);
                 // Finished buckets need no child sorting; direct keys count them in parallel.
-                if candidate == 0
-                    && key::try_count_window_parallel::<T, E>(records, digit.shift, digit.width)
+                if split.candidate == 0
+                    && key::try_count_window::<T, E>(records, digit.shift, digit.width, true)
                 {
                     return;
                 }
-                let split = Split {
-                    radix: digit.width,
-                    candidate,
-                    finished: None,
-                };
                 self.partition_root(
                     records,
                     KeyDigit::new(self.extractor.clone(), digit.shift),
@@ -143,7 +85,12 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
         shards: usize,
         required: Requirement,
     ) {
-        let pool = Pool::new();
+        // Recycle scratch between finishers without holding the lock across user code.
+        let pool = std::sync::Mutex::new(Vec::<Workspace<T>>::new());
+        let lock = || {
+            pool.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
         let extractor = &*self.extractor;
         let tile_len = self.tile_len;
         let visit = |bucket: usize, range: core::ops::Range<usize>, child: &mut [T]| {
@@ -157,14 +104,14 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
             // this final band. Finish in that task instead of handing it to a second
             // queue. Tile storage owns whether the whole child fits one tile.
             let mut key = extractor.clone();
-            let mut scratch = pool.take();
+            let mut scratch = lock().pop().unwrap_or_else(Workspace::new);
             Sorter::<T, E> {
                 scratch: &mut scratch,
                 extractor: &mut key,
                 tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),
             }
             .sort_child(child, split.candidate, required);
-            pool.give(scratch);
+            lock().push(scratch);
         };
         block::partition_parallel(
             records,

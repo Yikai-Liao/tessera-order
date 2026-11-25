@@ -147,7 +147,9 @@ impl<T> Scratch<T> {
             TilePlan::Lsd { digits, passes } => {
                 // A terminal digit can count interchangeable keys without scratch.
                 let digit = digits[0];
-                if passes == 1 && key::try_count_window::<T, E>(records, digit.shift, digit.width) {
+                if passes == 1
+                    && key::try_count_window::<T, E>(records, digit.shift, digit.width, false)
+                {
                     return;
                 }
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();

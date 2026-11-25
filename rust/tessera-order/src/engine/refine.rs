@@ -397,21 +397,23 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     // before starting the directional scan.
     let first = extractor.key(&records[0]);
     let mut tail = records[1..].iter();
-    let Some(mut current) = tail.next().map(|record| extractor.key(record)) else {
+    let Some(current) = tail.next().map(|record| extractor.key(record)) else {
         return Order::Ascending;
     };
-    let mut ascending = first <= current;
-    let mut descending = first >= current;
-    let mut strict = first != current;
-    if let Some(after) = tail.next().map(|record| extractor.key(record)) {
-        ascending &= current <= after;
-        descending &= current >= after;
-        strict &= current != after;
-        if !ascending && !descending {
-            return Order::Unsorted;
-        }
-        current = after;
+    let Some(after) = tail.next().map(|record| extractor.key(record)) else {
+        return if first <= current {
+            Order::Ascending
+        } else {
+            Order::Descending { strict: true }
+        };
+    };
+    let mut ascending = (first <= current) & (current <= after);
+    let descending = (first >= current) & (current >= after);
+    if !ascending && !descending {
+        return Order::Unsorted;
     }
+    let mut strict = (first != current) & (current != after);
+    let mut current = after;
     if ascending
         && descending
         && let Some((last, middle)) = tail.as_slice().split_last()
@@ -421,16 +423,16 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
         let last = extractor.key(last);
         if current == last {
             let anchor = current.to_u128();
-            return if middle.chunks(64).all(|block| {
-                block
-                    .iter()
-                    .fold(0, |diff, r| diff | (extractor.key(r).to_u128() ^ anchor))
-                    == 0
-            }) {
-                Order::Ascending
-            } else {
-                Order::Unsorted
-            };
+            for block in middle.chunks(64) {
+                let mut diff = 0;
+                for record in block {
+                    diff |= extractor.key(record).to_u128() ^ anchor;
+                }
+                if diff != 0 {
+                    return Order::Unsorted;
+                }
+            }
+            return Order::Ascending;
         }
         ascending = current < last;
     }

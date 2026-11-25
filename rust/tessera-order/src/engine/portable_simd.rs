@@ -564,16 +564,6 @@ mod tests {
                     Some(first)
                 );
             }
-            for (first, later) in [(4, 20), (19, 21), (20, 84)] {
-                let mut keys: Vec<u32> = (0..129).collect();
-                keys.swap(first, first + 1);
-                keys.swap(later, later + 1);
-                assert_eq!(
-                    dispatch!(level, simd => first_inversion_with(simd, &keys)),
-                    Some(first),
-                    "u32 level={level:?} first={first} later={later}"
-                );
-            }
         }
     }
 

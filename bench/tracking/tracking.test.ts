@@ -459,6 +459,87 @@ test("missing compared cases retain shared slots, independent baselines and gaps
   assert.ok(!result.svg.includes("NaN"));
 });
 
+test("history connects reports across other executions and preserves same-execution gaps", () => {
+  const parallel = "rust/sort/u64/random/65536/s1/t4";
+  const otherSerial = "rust/sort/u64/sorted/65536/s1/serial";
+  const [serialCase, parallelCase] = trackingCases([PREVIEW_CASE, parallel]);
+  const omitted = at(4, { [otherSerial]: 90 });
+  const latestSerial = at(8, { [PREVIEW_CASE]: 115 });
+  const runs = [
+    at(0, { [PREVIEW_CASE]: 100 }),
+    { ...at(1, { [parallel]: 200 }), execution: "t4" },
+    at(2, { [PREVIEW_CASE]: 105 }),
+    { ...at(3, { [parallel]: 210 }), execution: "t4" },
+    omitted,
+    {
+      ...at(5, { [parallel]: 220 }),
+      execution: "t4",
+      hash: omitted.hash,
+      commit_time: omitted.commit_time,
+    },
+    at(6, { [PREVIEW_CASE]: 110 }),
+    { ...at(7, { [parallel]: 230 }), execution: "t4" },
+    latestSerial,
+    {
+      ...at(9, { [parallel]: 240 }),
+      execution: "t4",
+      hash: latestSerial.hash,
+      commit_time: latestSerial.commit_time,
+    },
+  ].map((report) => runSchema.parse(report));
+  const linePaths = (svg: string, selector = '[aria-label="line"] path') =>
+    Array.from(parseHTML(svg).document.querySelectorAll(selector), (path) =>
+      (path.getAttribute("d")?.match(/[ML]/g) ?? []).join(""),
+    );
+
+  for (const horizontal of ["commit", "time"] as const) {
+    const comparison = renderComparison(
+      runs,
+      [
+        { entry: serialCase, color: "violet" },
+        { entry: parallelCase, color: "magenta" },
+      ],
+      "change",
+      "interleaved",
+      0,
+      horizontal,
+    )!;
+    assert.deepEqual(linePaths(comparison.svg, ".series-violet[aria-label=line] path"), ["MLML"]);
+    assert.deepEqual(linePaths(comparison.svg, ".series-magenta[aria-label=line] path"), ["MLLLL"]);
+    assert.deepEqual(
+      comparison.runs.map((report) => report.id),
+      runs.map((report) => report.id),
+    );
+    assert.deepEqual(comparison.runs[4].values, [null, null]);
+
+    const trend = renderMainTrend(
+      runs,
+      [serialCase],
+      "interleaved",
+      undefined,
+      undefined,
+      horizontal,
+    );
+    // The case row and its call's aggregate each split at the same missing serial report.
+    assert.deepEqual([...new Set(linePaths(trend))], ["MLML"]);
+    const document = parseHTML(trend).document;
+    const points = document.querySelector('[aria-label="line"] path')!.getAttribute("d")!;
+    const positions = [...points.matchAll(/[ML]([\d.]+),/g)].map(([, x]) => Number(x));
+    const dots = Array.from(document.querySelectorAll('[aria-label="dot"] circle'), (dot) =>
+      Number(Number(dot.getAttribute("cx")).toFixed(3)),
+    );
+    // Both rows mark the first and latest serial points, even with a later t4 report.
+    const endpoints = [positions[0], positions.at(-1)];
+    assert.deepEqual(dots, [...endpoints, ...endpoints]);
+  }
+  assert.deepEqual(
+    latestValues(runs, [serialCase, parallelCase]).map((row) => row.current),
+    [true, true],
+  );
+  assert.equal(latestValues(runs.slice(0, 6), [serialCase])[0].current, false);
+  assert.equal(latestValues(runs.slice(0, 8), [serialCase])[0].current, false);
+});
+
 test("the columns of one commit form one link of the aggregate", () => {
   const serial = "rust/sort/u64/random/65536/s1/serial",
     parallel = "rust/sort/u64/random/65536/s1/t4";

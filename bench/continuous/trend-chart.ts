@@ -47,7 +47,7 @@ export function trendSvg(trend: TrendSummary, base = "main") {
     };
   };
   const sorting = (name: string) => !caseParts(name).operation;
-  const groups: TrendChart["groups"] = [
+  const groups = [
     ...trend.executions.map((execution) => ({
       title: executionSection(SORT, execution).title,
       rows: [
@@ -70,7 +70,7 @@ export function trendSvg(trend: TrendSummary, base = "main") {
         (name) => caseSection(name).title,
       ),
     ].map(([title, names]) => ({ title, rows: names.map(row) })),
-  ];
+  ] satisfies TrendChart["groups"];
   const progress = (1 + trend.overall.at(-1)!) / (1 + trend.overall[0]) - 1;
   return renderTrends({
     title: { input: "Run time during this PR", sub: "first to latest run", tag: "", strong: true },

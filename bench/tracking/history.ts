@@ -6,7 +6,7 @@ import { renderFigure } from "../plot/figure.ts";
 import { theme } from "../plot/theme.ts";
 import { renderTrends, type TrendCell, type TrendChart } from "../plot/trends.ts";
 
-import type { TrackingCase, TrackingRun } from "./result.ts";
+import { caseUsesExecution, type TrackingCase, type TrackingRun } from "./result.ts";
 
 // Display choices, not statistical tests. Bare Metal estimates of one build
 // usually agree within about 1%, so no chart magnifies a span smaller than
@@ -65,12 +65,13 @@ export function comparableRuns(runs: TrackingRun[], range?: { first: string; las
   return first < 0 || last < first ? [] : sorted.slice(first, last + 1);
 }
 
-/** One case's change against its first observation; null where a run did not measure it. */
+/** One case's change from its first observation, skipping reports from other executions. */
 function caseChanges(runs: TrackingRun[], id: string) {
   const first = runs.map((run) => estimate(run, id)).find((value) => value !== undefined);
   return runs.map((run) => {
     const value = estimate(run, id);
-    return value === undefined || first === undefined ? null : value / first - 1;
+    if (value !== undefined && first !== undefined) return value / first - 1;
+    return caseUsesExecution(id, run.execution) ? null : undefined;
   });
 }
 
@@ -101,7 +102,8 @@ function chainedChanges(runs: TrackingRun[], ids: string[]) {
       current.clear();
       logs.clear();
     }
-    if (!measured.length) return null;
+    if (!measured.length)
+      return ids.some((id) => caseUsesExecution(id, run.execution)) ? null : undefined;
     for (const id of measured) {
       const value = estimate(run, id)!;
       if (previous.has(id)) logs.set(id, Math.log(value / previous.get(id)!));
@@ -116,18 +118,20 @@ function chainedChanges(runs: TrackingRun[], ids: string[]) {
 /** Each measured case's latest comparable estimate, interval and change from its first run. */
 export function latestValues(input: TrackingRun[], cases: TrackingCase[]) {
   const runs = comparableRuns(input);
+  const latestHash = runs.at(-1)?.hash;
   return cases.flatMap((entry) => {
     const last = runs.findLast((run) => run.values[entry.id]);
     if (!last) return [];
     const [value, lower, upper] = last.values[entry.id];
-    const change = caseChanges(runs, entry.id).findLast((value) => value !== null) ?? 0;
-    // A case absent from the latest run reports its own last measurement, with its time.
-    return [{ entry, value, lower, upper, change, time: last.time, current: last === runs.at(-1) }];
+    const change = caseChanges(runs, entry.id).findLast((value) => typeof value === "number") ?? 0;
+    const latest = runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
+    const current = last.hash === latestHash && last === latest;
+    return [{ entry, value, lower, upper, change, time: last.time, current }];
   });
 }
 
-function cell(changes: (number | null)[]): TrendCell {
-  const latest = changes.findLast((value) => value !== null) ?? 0;
+function cell(changes: TrendCell["changes"]): TrendCell {
+  const latest = changes.findLast((value) => typeof value === "number") ?? 0;
   return { changes, value: formatChange(latest), major: Math.abs(latest) >= MAJOR };
 }
 
@@ -176,7 +180,7 @@ function mainTrend(
     chainedChanges(
       runs,
       measured.map((entry) => entry.id),
-    ).findLast((value) => value !== null) ?? 0;
+    ).findLast((value) => typeof value === "number") ?? 0;
   return {
     title: {
       input: "Run time on main",
@@ -321,8 +325,7 @@ export function renderComparison(
     return first ? { hash: first.hash, time: first.time, value: first.values[entry.id][0] } : null;
   });
   if (!baselines.some(Boolean)) return null;
-  // Keep every slot shared with the trend. Missing measurements break a line
-  // instead of silently bridging a commit that was not measured for this case.
+  // Keep shared report slots for the axis, readout and zoom.
   const xs = positions(runs, horizontal);
   const table: ComparisonRun[] = runs.map((run, runIndex) => ({
     position: xs[runIndex],
@@ -398,6 +401,10 @@ export function renderComparison(
     });
     const stroke = `var(--${color})`;
     const className = `series-${color}`;
+    // Skip unrelated executions. A report for this execution without the case breaks the line.
+    const line = points.filter(
+      (point, i) => point.y !== null || caseUsesExecution(entry.id, runs[i].execution),
+    );
     return [
       Plot.ruleX(points, {
         x: "x",
@@ -409,7 +416,7 @@ export function renderComparison(
         strokeLinecap: "round",
         className,
       }),
-      Plot.lineY(points, { x: "x", y: "y", stroke, strokeWidth: 2, className }),
+      Plot.lineY(line, { x: "x", y: "y", stroke, strokeWidth: 2, className }),
       Plot.dot(
         points.filter((point) => point.y !== null),
         {

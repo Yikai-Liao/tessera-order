@@ -84,7 +84,6 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             // SAFETY: the caller guarantees room for `buckets` entries.
             *cursor.add(slot) = 0;
         }
-        let mut largest = 0 as Cursor;
         for index in 0..len {
             // SAFETY: the caller guarantees `len` initialized records.
             let key = extractor.key(&*source.add(index));
@@ -95,13 +94,11 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             }
             // SAFETY: the digit mask keeps the index below `buckets`, and no bucket
             // can hold more than `len <= Cursor::MAX` records.
-            let count = *cursor.add(bucket) + 1;
-            *cursor.add(bucket) = count;
-            largest = largest.max(count);
+            *cursor.add(bucket) += 1;
         }
         // SAFETY: the caller guarantees `buckets` writable cursor slots.
         let starts = core::slice::from_raw_parts_mut(cursor, buckets);
-        crate::engine::portable_simd::prefix_sum(starts);
+        let largest = crate::engine::portable_simd::prefix_sum(starts);
         for index in 0..len {
             let record = source.add(index);
             let bucket = if E::DIRECT.is_some() {
@@ -115,14 +112,10 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             };
             let slot = *cursor.add(bucket);
             *cursor.add(bucket) = slot.wrapping_add(1);
-            let target = if E::DIRECT.is_none() {
-                slot as usize
-            } else {
-                (slot as usize).min(len - 1)
-            };
             // SAFETY: cached classifications or deterministic sealed encoders
-            // give disjoint output intervals that initialize every output slot.
-            core::ptr::write(destination.add(target), core::ptr::read(record));
+            // give disjoint output intervals that initialize every output slot
+            // strictly below `len`.
+            core::ptr::write(destination.add(slot as usize), core::ptr::read(record));
         }
         largest
     }
@@ -250,8 +243,8 @@ impl<T> Scratch<T> {
     ///
     /// The records end in the tile, also when a key function panics. `cursor`
     /// then holds each bucket's end for the first digit.
-    // Keep the result at its consumer: LSD discards the histogram maximum,
-    // so optimization can remove its per-record update without a second loop.
+    // Keep `counting_passes` inlined into its callers so single-pass MSD and
+    // two-pass LSD retain their specialized control flow without extra spills.
     // Counter and placement evidence: docs/design/evidence.md#landed-with-open-losses.
     #[inline(always)]
     fn counting_passes<E: Extract<T>>(

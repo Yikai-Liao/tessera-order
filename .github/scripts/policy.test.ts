@@ -106,6 +106,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
       { benchmark: true },
     ],
     [["bench/tracking/result.ts", "bench/tracking/history.ts"], { benchmark: true, docs: true }],
+    [["bench/report/implementation-tone.ts"], { docs: true }],
     [["docs/explain/keys.md", "conformance/semantics.md"], { docs: true }],
     [["package.json", "bun.lock"], { comparison: true, benchmark: true, docs: true }],
     [

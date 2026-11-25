@@ -82,7 +82,12 @@ test("page-wide previews and pins update SVGs and clearing restores Tessera", as
       ["rows"],
     );
     assert.equal(document.querySelectorAll('[data-implementation="rdst"].selected').length, 2);
-    assert.equal(document.querySelectorAll('[data-implementation="tessera"].dimmed').length, 2);
+    // Every other implementation dims, competitors included.
+    const others = document.querySelectorAll(
+      '[data-implementation]:not([data-implementation="rdst"])',
+    );
+    assert.equal(others.length, 4);
+    for (const mark of others) assert.ok(mark.classList.contains("dimmed"), mark.outerHTML);
   };
   await nextTick();
   readTessera();

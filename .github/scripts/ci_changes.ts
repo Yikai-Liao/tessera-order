@@ -47,6 +47,8 @@ const ROUTES: [RegExp, Lane[]][] = [
   // Tooling that renders or reads results and never builds or times a sorting implementation.
   [/^bench\/plot\//, ["docs"]],
   [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
+  // The site serializes these colours into its implementation picker at build time.
+  [/^bench\/report\/implementation-tone\.ts$/, ["docs"]],
   [
     /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],

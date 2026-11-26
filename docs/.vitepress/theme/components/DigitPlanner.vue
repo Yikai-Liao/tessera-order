@@ -33,9 +33,12 @@ const plan = computed(() =>
 );
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  return tileLeaf.value === "lsd"
-    ? "At most two flat passes finish this tile; their split minimizes table slots."
-    : "One top-digit partition exposes child variation. Eligible small direct-key buckets use SIMD finishing; other children choose their own plan.";
+  if (tileLeaf.value === "lsd") {
+    return "At most two flat passes finish this tile; their split minimizes table slots.";
+  }
+  return simdMsd.value
+    ? "One top-digit partition exposes child variation. Direct-key SIMD finishing is a whole-tile option only when every bucket fits within the overlap limit; if any bucket exceeds it, buckets finish ordinarily by insertion or nested tile plans."
+    : "One top-digit partition exposes child variation, and each bucket finishes ordinarily by insertion or nested tile plans with SIMD finishing unavailable.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {

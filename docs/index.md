@@ -51,7 +51,7 @@ tessera_order::sort_by_key(&mut rows, |row| row.0);
 assert_eq!(rows, [(10, "a"), (30, "c"), (30, "d")]);
 ```
 
-The key is an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a fixed-width tuple of supported keys up to 128 encoded bits ([key encoding](../conformance/semantics.md#key-encoding)). Records with equal keys keep their input order. The published 0.1 release names this function `stable_sort_by_key`; see [versions](guide/getting-started.md#versions).
+The key is an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a fixed-width tuple of supported keys ([key encoding](../conformance/semantics.md#key-encoding) for limits). Records with equal keys keep their input order. The published 0.1 release names this function `stable_sort_by_key` and does not support tuple keys; see [versions](guide/getting-started.md#versions).
 
 ## Is it for you?
 

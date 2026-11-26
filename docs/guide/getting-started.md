@@ -1,6 +1,6 @@
 # Getting started
 
-Tessera sorts slices by a fixed-width key: an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a tuple of supported keys up to 128 encoded bits ([key encoding](../../conformance/semantics.md#key-encoding)). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
+Tessera sorts slices by a fixed-width key: an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a tuple of supported keys ([key encoding](../../conformance/semantics.md#key-encoding) for limits). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
 
 This guide follows the main branch, which will become 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
 
@@ -93,13 +93,13 @@ assert!(values[4].is_nan());
 
 ## Sort by several fields
 
-When the fields fit within 128 encoded bits, return them as a tuple ([key encoding](../../conformance/semantics.md#key-encoding)). Tessera orders tuples lexicographically in one call, and `Reverse` works on individual fields:
+When the fields fit in a supported tuple ([key encoding](../../conformance/semantics.md#key-encoding)), return them together. Tessera orders tuples lexicographically in one call, and `Reverse` works on individual fields:
 
 ```rust
 use std::cmp::Reverse;
 
 let mut rows = [(2u32, 30u64), (1, 40), (2, 10), (1, 20)];
-// Primary: user ascending; secondary: timestamp descending (96 encoded bits).
+// Primary: user ascending; secondary: timestamp descending.
 tessera_order::sort_by_key(&mut rows, |r| (r.0, Reverse(r.1)));
 assert_eq!(rows, [(1, 40), (1, 20), (2, 30), (2, 10)]);
 let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
@@ -107,9 +107,9 @@ let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
 assert_eq!(counts, [(1, 2), (2, 2)]);
 ```
 
-After sorting, `chunk_by` walks the groups. Its equality must match the sort key.
+After sorting, `chunk_by` walks contiguous groups whenever its equality matches the sort key or a leading prefix of a tuple key. Here it compares only the primary user field (`a.0 == b.0`), not the whole tuple, so each user forms one group with its timestamps still descending.
 
-When the combined keys exceed 128 encoded bits, sort in separate calls from the least significant field to the most significant. Stability keeps the earlier order within each group:
+When the combined fields exceed the [tuple limit](../../conformance/semantics.md#key-encoding), sort in separate calls from the least significant field to the most significant. Stability keeps the earlier order within each group:
 
 ```rust
 let mut events = [(2u128, 30u64), (1, 40), (2, 10), (1, 20)];

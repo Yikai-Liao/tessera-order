@@ -129,9 +129,12 @@ pub(crate) fn argsort<T: Sync, K: RadixKey>(
 }
 
 /// Unmasks a large tie band in parallel while scanning its remaining varying
-/// bits. Each of at most `P` chunks checks a shared saturation flag at entry
-/// and at bounded batch intervals (64 growing to `MAX_SCAN_BATCH`), skipping
-/// further key reads once any chunk saturates `remaining`.
+/// bits. Each of at most `P` chunks merges observed 1-bits and 0-bits (masked
+/// to `remaining`) into shared monotonic atomics at entry and at bounded batch
+/// intervals (64 growing to `MAX_SCAN_BATCH`). Once global `(ones & zeros)`
+/// reaches `remaining`—whether within one chunk or across chunks—active
+/// workers stop reading keys at the end of their current batch (at most
+/// `MAX_SCAN_BATCH` extra key reads per peer worker) and only unmask slots.
 fn unmask_and_scan_varying<T: Sync, K: RadixKey>(
     ties: &mut [usize],
     index_mask: usize,
@@ -139,54 +142,76 @@ fn unmask_and_scan_varying<T: Sync, K: RadixKey>(
     values: &[T],
     key: &(impl Fn(&T) -> K + Sync),
 ) -> u128 {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
     const MAX_SCAN_BATCH: usize = 4096;
 
-    let saturated = AtomicBool::new(false);
+    let shared_ones = [AtomicU64::new(0), AtomicU64::new(0)];
+    let shared_zeros = [AtomicU64::new(0), AtomicU64::new(0)];
+    let load_pair = |a: &[AtomicU64; 2]| {
+        u128::from(a[0].load(Relaxed)) | (u128::from(a[1].load(Relaxed)) << 64)
+    };
+    let merge_pair = |a: &[AtomicU64; 2], new_bits: u128| {
+        let (lo, hi) = (new_bits as u64, (new_bits >> 64) as u64);
+        let rlo = if lo != 0 {
+            a[0].fetch_or(lo, Relaxed) | lo
+        } else {
+            a[0].load(Relaxed)
+        };
+        let rhi = if hi != 0 {
+            a[1].fetch_or(hi, Relaxed) | hi
+        } else {
+            a[1].load(Relaxed)
+        };
+        u128::from(rlo) | (u128::from(rhi) << 64)
+    };
+
     let chunk_len = ties.len().div_ceil(rayon::current_num_threads()).max(1);
-    let pair = ties
-        .par_chunks_mut(chunk_len)
-        .map(|chunk| {
-            if saturated.load(Ordering::Relaxed) {
-                for slot in chunk {
+    ties.par_chunks_mut(chunk_len).for_each(|chunk| {
+        if (load_pair(&shared_ones) & load_pair(&shared_zeros)) == remaining {
+            for slot in chunk {
+                *slot &= index_mask;
+            }
+            return;
+        }
+        let (first_slot, rest) = chunk.split_first_mut().unwrap();
+        *first_slot &= index_mask;
+        let first = key(&values[*first_slot]).encode();
+        let (mut union, mut intersection) = (first, first);
+        let (mut pub_ones, mut pub_zeros) = (0u128, 0u128);
+        let mut publish_and_saturated = |u: u128, inter: u128| {
+            let new_ones = (u & remaining) & !pub_ones;
+            let new_zeros = (!inter & remaining) & !pub_zeros;
+            pub_ones |= new_ones;
+            pub_zeros |= new_zeros;
+            (merge_pair(&shared_ones, new_ones) & merge_pair(&shared_zeros, new_zeros)) == remaining
+        };
+        if publish_and_saturated(first.to_u128(), first.to_u128()) {
+            for slot in rest {
+                *slot &= index_mask;
+            }
+            return;
+        }
+        let mut i = 0;
+        let mut batch = 64;
+        while i < rest.len() {
+            let end = i + batch.min(rest.len() - i);
+            for slot in &mut rest[i..end] {
+                *slot &= index_mask;
+                let k = key(&values[*slot]).encode();
+                union |= k;
+                intersection = intersection & k;
+            }
+            i = end;
+            if publish_and_saturated(union.to_u128(), intersection.to_u128()) {
+                for slot in &mut rest[i..] {
                     *slot &= index_mask;
                 }
-                return (0u128, u128::MAX);
+                break;
             }
-            let (first_slot, rest) = chunk.split_first_mut().unwrap();
-            *first_slot &= index_mask;
-            let first = key(&values[*first_slot]).encode();
-            let (mut union, mut intersection) = (first, first);
-            let mut i = 0;
-            let mut batch = 64;
-            while i < rest.len() {
-                let end = i + batch.min(rest.len() - i);
-                for slot in &mut rest[i..end] {
-                    *slot &= index_mask;
-                    let k = key(&values[*slot]).encode();
-                    union |= k;
-                    intersection = intersection & k;
-                }
-                i = end;
-                let done = (union.to_u128() ^ intersection.to_u128()) & remaining == remaining;
-                if done {
-                    saturated.store(true, Ordering::Relaxed);
-                }
-                if done || saturated.load(Ordering::Relaxed) {
-                    for slot in &mut rest[i..] {
-                        *slot &= index_mask;
-                    }
-                    break;
-                }
-                batch = batch.saturating_mul(2).min(MAX_SCAN_BATCH);
-            }
-            (union.to_u128(), intersection.to_u128())
-        })
-        .reduce_with(|(u1, i1), (u2, i2)| (u1 | u2, i1 & i2));
-    if saturated.load(Ordering::Relaxed) {
-        return remaining;
-    }
-    pair.map_or(0, |(u, i)| (u ^ i) & remaining)
+            batch = batch.saturating_mul(2).min(MAX_SCAN_BATCH);
+        }
+    });
+    load_pair(&shared_ones) & load_pair(&shared_zeros)
 }
 
 impl<T: Send, E: Extract<T> + Clone + Send + Sync> RefineRoot<T, E> for ParallelRoot {

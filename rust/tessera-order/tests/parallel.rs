@@ -641,6 +641,19 @@ fn par_argsort_matches_serial_in_caller_pool() {
     skew_late_low_bit[len - 1] = HUGE_PREFIX;
     let mut skew_cross_chunk = huge_tie(HUGE_PREFIX | 1);
     skew_cross_chunk[outliers + (len - outliers) / 2..].fill(HUGE_PREFIX);
+    // Alternating constant chunks across all 4 workers where only cross-chunk
+    // bit sharing sees variation in the sole remaining bit.
+    let mut skew_alternating_chunks = huge_tie(HUGE_PREFIX | 1);
+    let quarter = (len - outliers) / 4;
+    for (i, slot) in skew_alternating_chunks
+        .iter_mut()
+        .take(outliers)
+        .enumerate()
+    {
+        *slot = (i & 1) as u64 ^ 1; // unsorted {0, 1}, leaving only bit 0 in `remaining`
+    }
+    skew_alternating_chunks[outliers + quarter..outliers + 2 * quarter].fill(HUGE_PREFIX);
+    skew_alternating_chunks[outliers + 3 * quarter..].fill(HUGE_PREFIX);
     for case in [
         ascending,
         strict_desc,
@@ -652,6 +665,7 @@ fn par_argsort_matches_serial_in_caller_pool() {
         skew_equal_huge,
         skew_late_low_bit,
         skew_cross_chunk,
+        skew_alternating_chunks,
     ] {
         assert_eq!(
             pool.install(|| par_argsort(&case)),

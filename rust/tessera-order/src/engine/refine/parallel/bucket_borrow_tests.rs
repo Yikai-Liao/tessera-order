@@ -320,3 +320,43 @@ fn exclusive_borrows_stay_disjoint() {
         [13, 12, 11, 10, 17, 16, 15, 14]
     );
 }
+
+#[test]
+#[cfg(not(miri))]
+fn unmask_and_scan_bounds_cross_chunk_key_reads() {
+    let chunk_len = 32_768;
+    let len = 4 * chunk_len;
+    let index_mask = (1usize << 20) - 1;
+    let prefix = 5usize << 20;
+    let values: Vec<u64> = (0..len)
+        .map(|i| {
+            if (i / chunk_len) % 2 == 0 {
+                (1u64 << 62) | 1
+            } else {
+                1u64 << 62
+            }
+        })
+        .collect();
+    let mut ties: Vec<usize> = (0..len).map(|i| prefix | i).collect();
+    let calls = AtomicUsize::new(0);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let sub = pool.install(|| {
+        unmask_and_scan_varying(&mut ties, index_mask, 1, &values, &|&v| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            v
+        })
+    });
+    assert_eq!(sub, 1);
+    assert!(ties.iter().enumerate().all(|(i, &w)| w == i));
+    // Even if one chunk runs to completion before another starts, global bit
+    // sharing stops the remaining chunks within one bounded batch (<= 4,096
+    // per peer worker), far below scanning all 4 chunks.
+    let read = calls.load(Ordering::Relaxed);
+    assert!(
+        read <= chunk_len + 1 + 3 * 4096,
+        "expected cross-chunk early exit; got {read} key reads for {len} slots"
+    );
+}

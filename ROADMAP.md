@@ -37,7 +37,7 @@ Next capabilities follow the [engine capability design](docs/design/operation-ex
 
 ### Acceptance debt
 
-Complete current-head hosted acceptance for the [MSD tile finishing simplification](docs/design/evidence.md#simd), including individual short-input losses from restoring order confirmation. The local large-input screen does not establish strict equivalence or cross-machine parity.
+Investigate cross-machine parity, stream-count selection and the separate unattributed local short-input revision-level observations recorded under the [MSD tile finishing simplification](docs/design/evidence.md#simd) before claiming equivalence across architectures or isolating a short-input cause.
 
 The consolidated engine (shared root preparation, node planning and order confirmation; one half-key extractor; shared direct-key counting; bounded tile planner; single SIMD backend) has measured losses that no exception compensates for; they are listed under [landed with open losses](docs/design/evidence.md#landed-with-open-losses). Done when the shared paths are validated against the pre-consolidation baseline with A/A and placement controls, the open losses are resolved or individually accepted, and a fresh current-head Actions run passes preparation, every measurement shard, Cloud archival and publication. Raw artifacts alone do not satisfy publication acceptance. R3's ordered-finishing implementation is merged; its [short-input controls](docs/design/evidence.md#shared-ordered-finishing-controls) remain unresolved here rather than as an implementation candidate.
 

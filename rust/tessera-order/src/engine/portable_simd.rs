@@ -918,6 +918,7 @@ mod tests {
                     8 * w + 1,
                     9 * w,
                     9 * w + 3,
+                    10 * w + 3,
                 ];
                 for len in lengths {
                     for largest in [1, 2, w, w + 1, w + 2] {
@@ -934,11 +935,11 @@ mod tests {
                     }
                 }
                 if supported {
-                    let len = 9 * w + 3;
+                    let len = 10 * w + 3;
                     let seg = (len / (4 * w)) * w;
                     // A worst-case (w + 1)-record bucket crosses every stream
                     // seam and tail boundary, at both starting parities.
-                    for seam in [seg, 2 * seg, 3 * seg, 4 * seg, len - w] {
+                    for seam in [seg, 2 * seg, 3 * seg, 4 * seg, 4 * seg + w, len - w] {
                         for parity in [0, 1] {
                             let start = seam.saturating_sub(w / 2 + parity);
                             let mut keys: Vec<K> = (0..len).map(&make).collect();
@@ -946,6 +947,15 @@ mod tests {
                             check_msd(level, keys, w + 1, true);
                         }
                     }
+                    // Mixed-size tail: `[4*seg + 2 .. 4*seg + w + 1)` lies
+                    // outside both the seam repair `[4*seg - w .. 4*seg + w)`
+                    // and the shifted end `[len - 2*w .. len)`, so only the
+                    // interior aligned tail window `[4*seg .. 4*seg + 2*w)`
+                    // covers the whole reversed bucket.
+                    let mut mixed: Vec<K> = (0..len).map(&make).collect();
+                    mixed[..w + 1].reverse();
+                    mixed[4 * seg + 2..4 * seg + w + 1].reverse();
+                    check_msd(level, mixed, w + 1, true);
                 }
             }
         }

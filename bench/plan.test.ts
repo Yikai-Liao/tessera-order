@@ -170,6 +170,8 @@ test("plans place operations on rules; an override replaces them", async () => {
       { kind: "select_nth", index: 0 },
       { kind: "select_nth", index: 65535 },
       { kind: "argsort" },
+      { kind: "argsort" },
+      { kind: "argsort" },
       { kind: "select_nth", index: 4 },
       { kind: "argsort" },
       { kind: "select_nth", index: 32768 },

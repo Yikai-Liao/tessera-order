@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Complete serial operation adapters. Selection uses the in-place batch
-//! kernel. Argsort and category grouping retain their allocated outputs until
-//! verification, then discard them before the next timed batch.
+//! Complete operation adapters. Selection uses the in-place batch kernel.
+//! Argsort (serial and parallel) and category grouping retain their allocated
+//! outputs until verification, then discard them before the next timed batch.
 
 use super::{BenchmarkRecord, Kernel, PreparedRecords, TesseraAdapter, Variant, glidesort};
 use crate::plan::Operation;
@@ -14,6 +14,7 @@ struct IndexKernel<T, F> {
     outputs: Vec<Vec<usize>>,
     call: F,
     description: &'static str,
+    worker_threads: usize,
 }
 
 impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T, F> {
@@ -39,7 +40,7 @@ impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T,
         self.input.original().len() * size_of::<usize>()
     }
     fn worker_threads(&self) -> usize {
-        0
+        self.worker_threads
     }
     fn output_bytes(&self) -> usize {
         self.outputs
@@ -58,6 +59,28 @@ pub(in crate::comparison) fn indices<T: BenchmarkRecord>(
     description: &'static str,
     call: impl FnMut(&[T]) -> Vec<usize> + 'static,
 ) -> Box<dyn Kernel> {
+    indices_with_workers(variant, input, description, 0, call)
+}
+
+/// Prepares a parallel argsort kernel whose caller-owned pool runs `worker_threads` workers.
+#[cfg(feature = "rayon")]
+pub(super) fn parallel_indices<T: BenchmarkRecord>(
+    variant: Variant,
+    input: Rc<PreparedRecords<T>>,
+    description: &'static str,
+    worker_threads: usize,
+    call: impl FnMut(&[T]) -> Vec<usize> + 'static,
+) -> Box<dyn Kernel> {
+    indices_with_workers(variant, input, description, worker_threads, call)
+}
+
+fn indices_with_workers<T: BenchmarkRecord>(
+    variant: Variant,
+    input: Rc<PreparedRecords<T>>,
+    description: &'static str,
+    worker_threads: usize,
+    call: impl FnMut(&[T]) -> Vec<usize> + 'static,
+) -> Box<dyn Kernel> {
     assert!(
         variant.route_stable(input.operation()),
         "{} argsort must guarantee the stable index permutation",
@@ -71,6 +94,7 @@ pub(in crate::comparison) fn indices<T: BenchmarkRecord>(
         outputs: Vec::new(),
         call,
         description,
+        worker_threads,
     })
 }
 
@@ -483,5 +507,56 @@ mod tests {
         wrong.restore(1);
         wrong.run_batch();
         assert!(wrong.check().is_err());
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn parallel_argsort_validates_exact_stable_permutation() {
+        let len = 4097;
+        for ty in ["u64", "row_u64", "rec128_u64", "owned", "f64"] {
+            for distribution in ["random", "d16", "equal"] {
+                let input = CaseInput::new(&InputCase {
+                    ty: ty.into(),
+                    distribution: distribution.into(),
+                    len,
+                    operation: Operation::Argsort {},
+                });
+                let threads: Execution = "t2".parse().unwrap();
+                for variant in list_variants() {
+                    let expected = matches!(variant.name, "tessera" | "rayon-stable");
+                    assert_eq!(
+                        variant.supports(&input, threads),
+                        expected,
+                        "{ty}/{distribution}/{}",
+                        variant.name
+                    );
+                    let prepared = variant.prepare(&input, threads, 0);
+                    assert_eq!(
+                        prepared.is_some(),
+                        expected,
+                        "{ty}/{distribution}/{}",
+                        variant.name
+                    );
+                    if let Some(mut kernel) = prepared {
+                        assert_eq!(kernel.worker_threads(), 2);
+                        kernel.restore(2);
+                        kernel.run_batch();
+                        kernel.check().unwrap_or_else(|error| {
+                            panic!("{ty}/{distribution}/{}: {error}", variant.name)
+                        });
+                        assert_eq!(kernel.output_bytes(), len * size_of::<usize>());
+                    }
+                }
+            }
+        }
+        let select = CaseInput::new(&InputCase {
+            ty: "u64".into(),
+            distribution: "random".into(),
+            len,
+            operation: Operation::SelectNth { index: 0 },
+        });
+        for variant in list_variants() {
+            assert!(!variant.supports(&select, "t2".parse().unwrap()));
+        }
     }
 }

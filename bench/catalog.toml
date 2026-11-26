@@ -10,8 +10,9 @@ revisionSampling = [
   { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
 ]
 
-# `parallel` marks a parallel full-sort entry point, beside the serial one ("also") or
-# instead of it ("only"); other implementations and operations are serial. `routes` names,
+# `parallel` marks parallel entry points (`par_sort`, and `par_argsort` with `operations`),
+# beside the serial ones ("also") or instead of them ("only"); other implementations and
+# operations are serial. `routes` names,
 # per operation, the call a non-sort case makes when the label alone would misname it; figures
 # show its call beside the label. A route's `stable` replaces the implementation's for that operation.
 # `memory` explains a memory curve the label alone would leave puzzling; the memory figure notes it.
@@ -38,7 +39,7 @@ implementations = [
   { id = "x86simdsort", label = "x86simdsort", stable = false, family = "SIMD", adapter = "native", routes = { argsort = { call = "argsort, ties put in index order", stable = true }, select_nth = { call = "qselect" } } },
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
   { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
-  { id = "rayon-stable", label = "Rayon stable", stable = true, family = "comparison", adapter = "rayon", parallel = "only" },
+  { id = "rayon-stable", label = "Rayon stable", stable = true, family = "comparison", adapter = "rayon", parallel = "only", routes = { argsort = { call = "par_sort_by on indices" } } },
 ]
 
 types = [
@@ -110,7 +111,9 @@ comparison = { types = ["u32","u64","f64","row_u64","record128","owned","row_u32
 id = "argsort"
 label = "argsort"
 noun = "argsort"
+parallel_label = "par_argsort"
 reference = "std-stable"
+parallel_reference = "rayon-stable"
 description = "Stable argsort"
 
 [[operations]]

@@ -10,8 +10,8 @@ export const trackingImplementations = catalog.implementations.filter(
 );
 
 /**
- * Pool sizes tracked for a parallel sort: powers of two up to the tracking host's CPUs, so the
- * history shows scaling without oversubscribing the host.
+ * Pool sizes tracked for parallel entry points: powers of two up to the tracking host's CPUs,
+ * so the history shows scaling without oversubscribing the host.
  */
 const trackingWorkers = Array.from(
   { length: Math.floor(Math.log2(TRACKING_SPEC.cpus)) + 1 },

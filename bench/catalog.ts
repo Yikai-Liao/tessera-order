@@ -40,7 +40,7 @@ export const catalog = z
         stable: z.boolean(),
         family: z.string(),
         adapter: z.string(),
-        /** A parallel full-sort entry point beside the serial one, or instead of it. */
+        /** Parallel entry points beside serial ones, or instead of them. */
         parallel: z.enum(["also", "only"]).optional(),
         detail: z.string().optional(),
         description: z.string().optional(),

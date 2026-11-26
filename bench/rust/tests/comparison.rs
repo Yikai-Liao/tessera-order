@@ -320,3 +320,46 @@ fn parallel_adapters_validate_records() {
     );
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[cfg(all(feature = "operations", feature = "rayon"))]
+#[test]
+fn parallel_argsort_validates_above_cutoff() {
+    let directory = std::env::temp_dir().join(format!(
+        "tessera-par-argsort-validate-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    // 65,537 16-byte rows exceed both `4 * tile_len` (32,768) and the 1 MiB
+    // parallel cutoff, exercising the real Rayon root path and thread check.
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 3,
+            "implementations": ["tessera", "rayon-stable"],
+            "include": [{
+                "types": ["row_u64"],
+                "distributions": ["random", "d16"],
+                "lengths": [65_537],
+                "operation": { "kind": "argsort" },
+                "executions": ["t4"]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_compare"))
+        .arg("validate")
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--out")
+        .arg(&directory)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(directory).unwrap();
+}

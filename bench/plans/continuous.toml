@@ -152,11 +152,13 @@ distributions = [ "random", "sparse8" ]
 lengths = [ 1000000 ]
 
 # Random direct-key and keyed-record cases guard each admitted non-sort call.
+# 65k argsort also exercises parallel-entry overhead and serial fallback.
 [[include]]
 types = [ "u64", "row_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
 operation = { kind = "argsort" }
+executions = [ "serial", "t4" ]
 
 [[include]]
 types = [ "u64", "row_u64" ]
@@ -216,12 +218,28 @@ lengths = [ 65536 ]
 operation = { kind = "select_nth", index = 65535 }
 
 # Longer index lists pack a key prefix beside each index. One million-record
-# case guards the packed bands without doubling the long serial phase.
+# serial case guards packed bands without expanding the long serial phase;
+# t4 rules exercise parallel argsort across direct keys, keyed rows, wide
+# records and ties.
 [[include]]
 types = [ "u64" ]
 distributions = [ "random" ]
 lengths = [ 1000000 ]
 operation = { kind = "argsort" }
+
+[[include]]
+types = [ "u64", "row_u64", "rec128_u64" ]
+distributions = [ "random" ]
+lengths = [ 1000000 ]
+operation = { kind = "argsort" }
+executions = [ "t4" ]
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16" ]
+lengths = [ 1000000 ]
+operation = { kind = "argsort" }
+executions = [ "t4" ]
 
 # Ranks near an end finish from bounded cuts instead of radix passes.
 [[include]]

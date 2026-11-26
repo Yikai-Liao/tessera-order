@@ -175,11 +175,18 @@ test("revision scheduling reserves the largest selected worker count", async () 
   assert.equal(revisionThreads(local), 1);
   assert.equal(revisionThreads(await loadPlan("continuous")), 4);
   assert.equal(revisionThreads(await loadPlan("local", { executions: ["serial", "t2"] })), 2);
+  assert.equal(
+    revisionThreads({
+      ...local,
+      include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
+    }),
+    4,
+  );
   assert.throws(
     () =>
       revisionThreads({
         ...local,
-        include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
+        include: [{ operation: { kind: "select_nth", index: 0 }, executions: ["t4"] }],
       }),
     /only serial/,
   );

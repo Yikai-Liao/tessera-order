@@ -61,9 +61,6 @@ export function latestRuns(runs: Map<string, TrackingRun[]>) {
   return { spec: tessera.spec, runs: chosen };
 }
 
-/** The implementation whose columns divide parallel sorting speeds. */
-const PARALLEL_REFERENCE = referenceColumn(SORT, "t1")!.implementation;
-
 /** An operation's serial reference implementation. */
 const serialReference = (operation: Operation) =>
   referenceColumn(operation, "serial")!.implementation;
@@ -214,44 +211,57 @@ export function trackingCohort(field: Field): Cohort | null {
  * every one of them measured at their most common length. The reference in one worker is
  * the baseline: the serial reference has no runs at most parallel lengths.
  */
-export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
+export function trackingScaling(
+  runs: Map<string, TrackingRun>,
+  operation: Operation = SORT,
+): Scaling | null {
+  const referenceId = referenceColumn(operation, "t1")?.implementation;
+  if (!referenceId) return null;
   const run = (name: string, t: number) =>
     runs.get(columnId({ implementation: name, execution: `t${t}` }));
   const columns = [...runs.keys()].map(parseColumnId);
   const counts = columns
     .filter((column) => column.implementation === "tessera")
     .map((column) => executionThreads(column.execution))
-    .filter((t): t is number => t !== undefined && run(PARALLEL_REFERENCE, t) !== undefined)
+    .filter((t): t is number => t !== undefined && run(referenceId, t) !== undefined)
     .toSorted((a, b) => a - b);
   if (counts[0] !== 1) return null;
   const time = (name: string, t: number, id: string) => timed(run(name, t), id, `t${t}`)?.[0];
-  const ids = Object.keys(run(PARALLEL_REFERENCE, 1)!.values)
+  const ids = Object.keys(run(referenceId, 1)!.values)
     .map(parseCriterionId)
-    .filter((input) => input.operation.kind === SORT.kind)
+    .filter((input) => input.operation.kind === operation.kind)
     .map(caseId)
-    .filter((id) => counts.every((t) => time("tessera", t, id) && time(PARALLEL_REFERENCE, t, id)));
+    .filter((id) => counts.every((t) => time("tessera", t, id) && time(referenceId, t, id)));
   const [found] = [...Map.groupBy(ids, (id) => parseCaseId(id).len)].toSorted(
     (a, b) => b[1].length - a[1].length || b[0] - a[0],
   );
   if (!found) return null;
   const [n, inputs] = found;
-  const compositionColumn = columns.find(
-    (column) => column.execution === "serial" && isComposition(column.implementation),
-  );
+  // Parallel sorting uses the `tessera-full` serial column (which covers every parallel sort input);
+  // parallel argsort compares against Tessera's own serial argsort column.
+  const compositionColumn =
+    operation.kind === SORT.kind
+      ? columns.find(
+          (column) => column.execution === "serial" && isComposition(column.implementation),
+        )
+      : columns.find(
+          (column) => column.execution === "serial" && column.implementation === "tessera",
+        );
   const serial = compositionColumn && runs.get(columnId(compositionColumn));
   const composition = inputs.map((id) => {
     const ns = timed(serial, id, "serial")?.[0];
-    return ns === undefined ? null : time(PARALLEL_REFERENCE, 1, id)! / ns;
+    return ns === undefined ? null : time(referenceId, 1, id)! / ns;
   });
   const speed = (name: string, t: number, id: string) =>
-    time(PARALLEL_REFERENCE, 1, id)! / time(name, t, id)!;
+    time(referenceId, 1, id)! / time(name, t, id)!;
   const of = (name: string, id: string) => counts.map((t) => speed(name, t, id));
   // Pool sizes outside the continuous plan update only when dispatched, so they name their commits.
   const hashes = [...new Set(counts.map((t) => run("tessera", t)!.hash.slice(0, 7)))];
   return {
+    operation,
     n,
     threads: counts,
-    referenceId: PARALLEL_REFERENCE,
+    referenceId,
     tessera: hashes,
     ...(compositionColumn && serial && composition.every((speed) => speed !== null)
       ? {
@@ -267,7 +277,7 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
       return {
         label: `${ty} · ${distribution(distributionId).label}`,
         tessera: of("tessera", id),
-        rayon: of(PARALLEL_REFERENCE, id),
+        rayon: of(referenceId, id),
       };
     }),
   };
@@ -305,9 +315,7 @@ export function comparisonData(
     const axes = parameters ? parameterFigures(parameters) : [];
     const cohort = trackingCohort(field);
     if (!cohort && !axes.length) return [];
-    // Only full sorting has a parallel figure.
-    const sort = kind === SORT.kind;
-    const scaling = sort ? trackingScaling(latest.runs) : null;
+    const scaling = trackingScaling(latest.runs, field.operation);
     const parallel = scaling ? renderParallel(scaling) : null;
     const sweep = growth?.sweeps.find((entry) => entry.operation.kind === kind);
     // Without a sweep, the memory figure falls back to the runs' own peaks.

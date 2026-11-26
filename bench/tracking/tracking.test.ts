@@ -1276,6 +1276,43 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.equal(trackingScaling(latest), null);
 });
 
+test("argsort section adds parallel scaling with serial Tessera argsort as composition baseline", () => {
+  const tracked = (values: Record<string, number>, execution = "serial") =>
+    runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      execution,
+      values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
+    });
+  const argsort = { kind: "argsort" } as const;
+  const referenceId = referenceColumn(argsort, "t1")!.implementation;
+  const runs = new Map([
+    [
+      "tessera",
+      [
+        tracked({ "rust/argsort/u64/random/1000000/s1/serial": 50 }),
+        tracked({ "rust/argsort/u64/random/1000000/s1/t1": 50 }, "t1"),
+        tracked({ "rust/argsort/u64/random/1000000/s1/t2": 25 }, "t2"),
+      ],
+    ],
+    ["std-stable", [tracked({ "rust/argsort/u64/random/1000000/s1/serial": 200 })]],
+    [
+      referenceId,
+      [
+        tracked({ "rust/argsort/u64/random/1000000/s1/t1": 200 }, "t1"),
+        tracked({ "rust/argsort/u64/random/1000000/s1/t2": 100 }, "t2"),
+      ],
+    ],
+  ]);
+  const section = comparisonData(runs).operations.find((entry) => entry.id === "argsort")!;
+  const figure = section.figures.find((entry) => entry.name === "parallel")!;
+  assert.equal(figure.subject, "Parallel argsort");
+  assert.match(figure.table, /Serial Tessera argsort \(composition\)/);
+  assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1\.00× \| 2× \| 4× \|/);
+  const scaling = trackingScaling(latestRuns(runs)!.runs, argsort)!;
+  assert.equal(scaling.composition?.implementation, "tessera");
+});
+
 test("growth uses one serial plan per operation and its supported routes", async () => {
   const preset = await loadPlan("growth");
   const plans = growthPlans(preset);

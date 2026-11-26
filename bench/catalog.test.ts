@@ -156,5 +156,10 @@ test("each operation names the reference its speeds divide by", () => {
     "slice::sort · full sort",
   );
   assert.equal(referenceLabel(SORT, "serial"), "slice::sort");
-  assert.equal(referenceColumn({ kind: "argsort" }, "t4"), undefined);
+  assert.deepEqual(referenceColumn({ kind: "argsort" }, "t4"), {
+    implementation: "rayon-stable",
+    execution: "t4",
+  });
+  assert.equal(referenceLabel({ kind: "argsort" }, "t4"), "Rayon stable · par_sort_by on indices");
+  assert.equal(referenceColumn({ kind: "select_nth", index: 0 }, "t4"), undefined);
 });

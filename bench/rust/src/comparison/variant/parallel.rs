@@ -2,8 +2,10 @@
 
 //! Caller-owned Rayon pools prepared outside the timed and counted region.
 
+#[cfg(feature = "operations")]
+use super::operations;
 use super::{BatchKernel, CaseInput, Kernel, PreparedRecords, TesseraAdapter, Variant};
-use crate::pool::BenchmarkPool;
+use crate::{plan::Operation, pool::BenchmarkPool};
 use rayon::prelude::*;
 use std::rc::Rc;
 
@@ -13,9 +15,29 @@ fn prepare<T: TesseraAdapter>(
     variant: Variant,
     threads: usize,
 ) -> Box<dyn Kernel> {
-    let description = route::<T>(variant.name);
-    let stable = variant.route_stable(input.operation());
+    let description = route::<T>(variant.name, input.operation());
     let pool = BenchmarkPool::new(threads);
+    #[cfg(feature = "operations")]
+    if matches!(input.operation(), Operation::Argsort {}) {
+        return operations::parallel_indices(
+            variant,
+            input,
+            description,
+            threads,
+            move |source: &[T]| {
+                pool.install(|| match variant.name {
+                    "tessera" => T::par_argsort(source),
+                    "rayon-stable" => {
+                        let mut indices: Vec<_> = (0..source.len()).collect();
+                        indices.par_sort_by(|a, b| source[*a].order(&source[*b]));
+                        indices
+                    }
+                    _ => unreachable!("validated parallel implementation"),
+                })
+            },
+        );
+    }
+    let stable = variant.route_stable(input.operation());
     Box::new(BatchKernel {
         input,
         buffers: Vec::new(),
@@ -33,11 +55,17 @@ fn prepare<T: TesseraAdapter>(
 }
 
 /// The public call an implementation's parallel column makes for `T`.
-fn route<T: TesseraAdapter>(implementation: &str) -> &'static str {
-    match implementation {
-        "tessera" => T::PARALLEL_SORT_ROUTE,
-        "rayon-stable" => "rayon par_sort_by in a caller-owned pool",
-        _ => unreachable!("validated parallel implementation"),
+fn route<T: TesseraAdapter>(implementation: &str, operation: &Operation) -> &'static str {
+    match (implementation, operation) {
+        ("tessera", Operation::Sort {}) => T::PARALLEL_SORT_ROUTE,
+        ("rayon-stable", Operation::Sort {}) => "rayon par_sort_by in a caller-owned pool",
+        #[cfg(feature = "operations")]
+        ("tessera", Operation::Argsort {}) => T::PARALLEL_ARGSORT_ROUTE,
+        #[cfg(feature = "operations")]
+        ("rayon-stable", Operation::Argsort {}) => {
+            "rayon par_sort_by on indices in a caller-owned pool"
+        }
+        _ => unreachable!("validated parallel implementation and operation"),
     }
 }
 
@@ -45,20 +73,20 @@ impl CaseInput {
     /// Names a parallel column's call without starting its pool.
     pub(in crate::comparison) fn parallel_route(&self, implementation: &str) -> &'static str {
         match self {
-            Self::U32(_) => route::<u32>(implementation),
-            Self::U64(_) => route::<u64>(implementation),
-            Self::U128(_) => route::<u128>(implementation),
-            Self::F64(_) => route::<f64>(implementation),
-            Self::ReverseU64(_) => route::<std::cmp::Reverse<u64>>(implementation),
-            Self::ReverseF64(_) => route::<std::cmp::Reverse<f64>>(implementation),
-            Self::Row32(_) => route::<crate::case::Row<u32>>(implementation),
-            Self::Row64(_) => route::<crate::case::Row<u64>>(implementation),
-            Self::WideRecord(_) => route::<super::WideRecord>(implementation),
-            Self::OwnedRecord(_) => route::<super::OwnedRecord>(implementation),
+            Self::U32(v) => route::<u32>(implementation, v.operation()),
+            Self::U64(v) => route::<u64>(implementation, v.operation()),
+            Self::U128(v) => route::<u128>(implementation, v.operation()),
+            Self::F64(v) => route::<f64>(implementation, v.operation()),
+            Self::ReverseU64(v) => route::<std::cmp::Reverse<u64>>(implementation, v.operation()),
+            Self::ReverseF64(v) => route::<std::cmp::Reverse<f64>>(implementation, v.operation()),
+            Self::Row32(v) => route::<crate::case::Row<u32>>(implementation, v.operation()),
+            Self::Row64(v) => route::<crate::case::Row<u64>>(implementation, v.operation()),
+            Self::WideRecord(v) => route::<super::WideRecord>(implementation, v.operation()),
+            Self::OwnedRecord(v) => route::<super::OwnedRecord>(implementation, v.operation()),
         }
     }
 
-    /// Prepares an implementation's parallel full sort in a `threads`-worker pool.
+    /// Prepares an implementation's parallel operation in a `threads`-worker pool.
     pub(super) fn prepare_parallel(&self, variant: Variant, threads: usize) -> Box<dyn Kernel> {
         match self {
             Self::U32(v) => prepare(Rc::clone(v), variant, threads),

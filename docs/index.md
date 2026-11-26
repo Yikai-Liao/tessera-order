@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Tessera
   text: Stable radix sorting in O(√n) extra memory
-  tagline: A Rust library that sorts records of any type by an integer, float or fixed-width tuple key, keeps equal keys in input order, and needs no input-sized buffer.
+  tagline: A Rust library that sorts records of any type by a fixed-width key, keeps equal keys in input order, and needs no input-sized buffer.
   image:
     src: /logo.svg
     alt: Tessera logo, a mosaic rosette

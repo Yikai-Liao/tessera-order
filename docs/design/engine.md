@@ -88,7 +88,7 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 `sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. For argsort and wide-window cached-key sorting, `refine/indices.rs` owns the stable source permutation. Argsort requests indices and cached-key sorting applies spans or cycles to records. See [argsort](../explain/operations.md#argsort).
 
-A rank in a root larger than one tile can finish from a one-sided boundary or a bounded ordered end. A serial finisher can resolve a node with a dominant key or, in a full sort, sparse inversions as source spans instead of partitioning it; for a rank it reserves just that position. See [sparse source order](../explain/routing.md#sparse-source-order) and [selection shortcuts](../explain/operations.md#select-one-rank).
+A rank in a root larger than one tile can finish from a one-sided boundary or a bounded ordered end. A serial finisher can resolve a node with a dominant key or, in a full sort, sparse inversions as source spans instead of partitioning it. See [sparse source order](../explain/routing.md#sparse-source-order) and [selection shortcuts](../explain/operations.md#select-one-rank).
 
 `Requirement::project` keeps `All` for every nonempty band. For `Nth`, it keeps only the band containing the rank and subtracts that band's start. Projection uses final parent-relative ranges, independent of callback order; for existing runs these are the ranges after rotation. An equal-key band is already finished: its stable movement establishes ranked identity within the band.
 

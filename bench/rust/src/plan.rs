@@ -82,7 +82,7 @@ pub(crate) struct Implementation {
     pub(crate) id: String,
     stable: bool,
     pub(crate) adapter: String,
-    /// Parallel entry points (`par_sort`, and `par_argsort` with `operations`), if any.
+    /// Parallel entry points (`par_sort`, and `par_argsort` with `parallel-operations`), if any.
     pub(crate) parallel: Option<ParallelSort>,
     /// Non-sort call metadata, keyed by operation kind.
     #[serde(default)]

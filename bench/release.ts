@@ -4,7 +4,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
 import { catalog, parseColumnId, referenceColumn } from "./catalog.ts";
-import { loadPlan, type Plan, parsePlan, planExecutions, planOperations } from "./plan.ts";
+import { loadPlan, type Plan, parsePlan, planFeatures, planOperations } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
@@ -193,19 +193,7 @@ async function prepareComparison(options: ReleaseOptions) {
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = [
-      ...(planOperations(plan).some((op) => op.kind !== "sort") ? ["operations"] : []),
-      ...(native ? ["compare-native"] : []),
-      ...(planExecutions(plan).some((execution) => execution !== "serial") ? ["rayon"] : []),
-      ...(plan.include.some(
-        (rule) =>
-          rule.operation &&
-          rule.operation.kind !== "sort" &&
-          (rule.executions ?? ["serial"]).some((execution) => execution !== "serial"),
-      )
-        ? ["parallel-operations"]
-        : []),
-    ];
+    const features = [...planFeatures(plan), ...(native ? ["compare-native"] : [])];
     if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
     diagnostic("Building comparison workers");
     const { executable } = await buildBenchmark(tree, target, "compare", features);

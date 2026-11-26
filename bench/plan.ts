@@ -73,6 +73,24 @@ export function parsePlan(value: unknown): Plan {
   return plan;
 }
 
+function isExcluded(
+  exclude: Rule[],
+  ty: string,
+  distribution: string,
+  len: number | "insertion-max" | "insertion-next" | "tile-next",
+  operation: Operation,
+  execution: Execution,
+) {
+  return exclude.some(
+    (r) =>
+      (!r.types || r.types.includes(ty)) &&
+      (!r.distributions || r.distributions.includes(distribution)) &&
+      (!r.lengths || r.lengths.includes(len)) &&
+      (!r.operation || operationKey(r.operation) === operationKey(operation)) &&
+      (!r.executions || r.executions.includes(execution)),
+  );
+}
+
 /** Check operation parameters on every surviving literal count, as Rust does on its
  * expanded cases; engine-relative boundaries resolve only in Rust, for sorting. */
 function validateOperations(plan: Plan) {
@@ -86,21 +104,49 @@ function validateOperations(plan: Plan) {
       const survives = (rule.types ?? catalog.types.map((t) => t.id)).some((ty) =>
         (rule.distributions ?? catalog.distributions.map((d) => d.id)).some((distribution) =>
           executions.some(
-            (execution) =>
-              !plan.exclude.some(
-                (r) =>
-                  (!r.types || r.types.includes(ty)) &&
-                  (!r.distributions || r.distributions.includes(distribution)) &&
-                  (!r.lengths || r.lengths.includes(len)) &&
-                  (!r.operation || operationKey(r.operation) === operationKey(operation)) &&
-                  (!r.executions || r.executions.includes(execution)),
-              ),
+            (execution) => !isExcluded(plan.exclude, ty, distribution, len, operation, execution),
           ),
         ),
       );
       if (survives) validateOperation(operation, len);
     }
   }
+}
+
+/** Harness Cargo features needed to compile the cases that survive `plan.exclude`. */
+export function planFeatures(plan: Plan): string[] {
+  let rayon = false;
+  let operations = false;
+  let parallelOperations = false;
+  for (const rule of plan.include) {
+    const operation = rule.operation ?? SORT;
+    const isOp = operation.kind !== "sort";
+    const executions = rule.executions ?? ["serial"];
+    const types = rule.types ?? catalog.types.map((t) => t.id);
+    const distributions = rule.distributions ?? catalog.distributions.map((d) => d.id);
+    const lengths = rule.lengths ?? catalog.inputs.lengths;
+    for (const execution of executions) {
+      const isPar = execution !== "serial";
+      if ((!isPar || rayon) && (!isOp || operations) && (!(isPar && isOp) || parallelOperations))
+        continue;
+      const survives = types.some((ty) =>
+        distributions.some((distribution) =>
+          lengths.some(
+            (len) => !isExcluded(plan.exclude, ty, distribution, len, operation, execution),
+          ),
+        ),
+      );
+      if (!survives) continue;
+      if (isPar) rayon = true;
+      if (isOp) operations = true;
+      if (isPar && isOp) parallelOperations = true;
+    }
+  }
+  return [
+    ...(rayon ? ["rayon"] : []),
+    ...(operations ? ["operations"] : []),
+    ...(parallelOperations ? ["parallel-operations"] : []),
+  ];
 }
 
 const PRESETS = ["local", "continuous", "smoke", "release", "parallel", "growth"];

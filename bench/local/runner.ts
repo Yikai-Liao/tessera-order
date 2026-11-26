@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Execution, parseCriterionId } from "../catalog.ts";
-import { type Plan, parsePlan, planExecutions, selectCaseIds } from "../plan.ts";
+import { type Plan, parsePlan, planExecutions, planFeatures, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   benchmarkEnvironment,
@@ -33,7 +33,6 @@ import {
   type PreparedPair,
   type RevisionPair,
   readPrepared,
-  revisionFeatures,
   revisionThreads,
   shardCases,
   summarizeLocal,
@@ -439,7 +438,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        revisionFeatures(options.plan),
+        planFeatures(options.plan),
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );

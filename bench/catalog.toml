@@ -10,7 +10,7 @@ revisionSampling = [
   { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
 ]
 
-# `parallel` marks parallel entry points (`par_sort`, and `par_argsort` with `operations`),
+# `parallel` marks parallel entry points (`par_sort`, and `par_argsort` with `parallel-operations`),
 # beside the serial ones ("also") or instead of them ("only"); other implementations and
 # operations are serial. `routes` names,
 # per operation, the call a non-sort case makes when the label alone would misname it; figures

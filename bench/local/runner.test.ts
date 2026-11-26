@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { catalog, criterionId, SORT } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
-import { loadPlan } from "../plan.ts";
+import { loadPlan, planFeatures } from "../plan.ts";
 import { simdFeatures } from "../workspace.ts";
-import { revisionFeatures, revisionThreads, summarizeLocal } from "./model.ts";
+import { revisionThreads, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
 import { measureSamples, serialLanes } from "./samples.ts";
@@ -182,17 +182,29 @@ test("revision scheduling reserves the largest selected worker count", async () 
     }),
     4,
   );
-  // Mixed serial-operation and parallel-sort plans must not require `parallel-operations`,
-  // so comparisons against pre-par_argsort revisions continue to build.
+  // Mixed serial-operation and parallel-sort plans — including plans where parallel
+  // argsort is excluded — must not require `parallel-operations`, so comparisons
+  // against pre-par_argsort revisions continue to build.
   assert.deepEqual(
-    revisionFeatures({
+    planFeatures({
       ...local,
       include: [{ operation: { kind: "argsort" }, executions: ["serial"] }, { executions: ["t4"] }],
     }),
     ["rayon", "operations"],
   );
   assert.deepEqual(
-    revisionFeatures({
+    planFeatures({
+      ...local,
+      include: [
+        { operation: { kind: "argsort" }, executions: ["serial", "t4"] },
+        { executions: ["t4"] },
+      ],
+      exclude: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
+    }),
+    ["rayon", "operations"],
+  );
+  assert.deepEqual(
+    planFeatures({
       ...local,
       include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
     }),

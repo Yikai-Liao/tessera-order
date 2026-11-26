@@ -1338,7 +1338,8 @@ test("argsort section adds parallel scaling with serial Tessera argsort as compo
   assert.equal(scaling.n, 1_000_000);
   assert.equal(scaling.inputs.length, 4);
   assert.equal(scaling.composition?.implementation, "tessera");
-  assert.equal(scaling.composition?.speeds.length, 4);
+  assert.deepEqual(scaling.composition?.speeds, [4, 4, 4, 4]);
+  assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1\.00× \| 2× \| 4× \|/);
   // Sort-only `t2` remains eligible for the full-sort figure.
   const sortScaling = trackingScaling(latestRuns(runs)!.runs, SORT)!;
   assert.deepEqual(sortScaling.threads, [1, 2, 4]);

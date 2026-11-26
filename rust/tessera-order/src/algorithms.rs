@@ -78,7 +78,11 @@ pub fn sort<K: RadixKey>(values: &mut [K]) {
 /// let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
-pub fn sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+pub fn sort_by_key<T, K, F>(values: &mut [T], key: F)
+where
+    K: RadixKey,
+    F: FnMut(&T) -> K,
+{
     engine::sort::<T, _>(values, ByKey(key));
 }
 
@@ -90,7 +94,11 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 
 /// Renamed to [`sort_by_key`]; the contract is unchanged.
 #[deprecated(since = "0.2.0", note = "renamed to `sort_by_key`")]
-pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+pub fn stable_sort_by_key<T, K, F>(values: &mut [T], key: F)
+where
+    K: RadixKey,
+    F: FnMut(&T) -> K,
+{
     sort_by_key(values, key);
 }
 
@@ -105,6 +113,7 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 /// let values = [3u64, 1, 3, 2];
 /// assert_eq!(tessera_order::argsort(&values), [1, 3, 0, 2]);
 /// ```
+#[must_use]
 pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
     argsort_by_key(values, |key| *key)
 }
@@ -126,7 +135,12 @@ pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
 /// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
 /// assert_eq!(tessera_order::argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
-pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], key: F) -> Vec<usize> {
+#[must_use]
+pub fn argsort_by_key<T, K, F>(values: &[T], key: F) -> Vec<usize>
+where
+    K: RadixKey,
+    F: FnMut(&T) -> K,
+{
     engine::argsort(values, key)
 }
 
@@ -170,10 +184,14 @@ pub fn select_nth<K: RadixKey>(values: &mut [K], index: usize) -> (&mut [K], &mu
 /// after all original records are back in `values` exactly once, in an
 /// unspecified order. As with [`sort_by_key`], changes made through
 /// interior mutability remain visible, and recovery does not call `key`.
-pub fn select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+pub fn select_nth_by_key<T, K, F>(
     values: &mut [T],
     index: usize,
     key: F,
-) -> (&mut [T], &mut T, &mut [T]) {
+) -> (&mut [T], &mut T, &mut [T])
+where
+    K: RadixKey,
+    F: FnMut(&T) -> K,
+{
     engine::select_nth(values, index, ByKey(key))
 }

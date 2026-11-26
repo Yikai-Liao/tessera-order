@@ -28,7 +28,7 @@ use crate::engine::{self, ByKey, Direct, RadixKey};
 /// tessera_order::par_sort(&mut keys);
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
-pub fn par_sort<K: RadixKey + Send>(values: &mut [K]) {
+pub fn par_sort<K: RadixKey>(values: &mut [K]) {
     engine::par_sort::<K, _>(values, Direct);
 }
 
@@ -84,7 +84,7 @@ where
 
 /// Renamed to [`par_sort`]; the contract is unchanged.
 #[deprecated(since = "0.2.0", note = "renamed to `par_sort`")]
-pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
+pub fn par_stable_sort<K: RadixKey>(values: &mut [K]) {
     par_sort(values);
 }
 

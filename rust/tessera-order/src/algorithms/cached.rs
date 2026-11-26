@@ -54,7 +54,11 @@ use alloc::vec::Vec;
 /// assert_eq!(words, ["Alpha", "Bravo", "charlie", "delta"]);
 /// assert_eq!(calls, 4);
 /// ```
-pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key: F) {
+pub fn sort_by_cached_key<T, K, F>(values: &mut [T], mut key: F)
+where
+    K: RadixKey,
+    F: FnMut(&T) -> K,
+{
     // A slice of zero-sized records has one observable order, and fewer than
     // two records have no other; neither owes a key evaluation.
     if values.len() < 2 || size_of::<T>() == 0 {

@@ -34,15 +34,18 @@ impl SourceOrder {
     ) -> bool {
         let pivot = extractor.key(&records[rank]);
         let len = records.len();
-        let zero = E::Value::from_usize(0);
-        let first_high = if pivot == !zero {
+        // Bits outside `E::KEY_MASK` are constant across valid keys of `E`,
+        // so all-1 / all-0 varying bits prove no key can exceed / precede `pivot`.
+        let mask = E::Value::from_u128(E::KEY_MASK);
+        let pivot_varying = pivot & mask;
+        let first_high = if pivot_varying == mask {
             None
         } else {
             records[..rank]
                 .iter()
                 .position(|r| extractor.key(r) > pivot)
         };
-        let last_low = if pivot == zero {
+        let last_low = if pivot_varying == E::Value::from_usize(0) {
             None
         } else {
             records[rank + 1..]
@@ -259,8 +262,7 @@ impl SourceOrder {
             Vec::new()
         };
         let first = kept[0].0.to_u128();
-        let fixed = !original.iter().fold(0, |v, k| v | (k.to_u128() ^ first))
-            & (u128::MAX >> (128 - E::Value::BITS));
+        let fixed = !original.iter().fold(0, |v, k| v | (k.to_u128() ^ first)) & E::KEY_MASK;
         // Each exact lookup costs up to `count` comparisons. Common fixed
         // bits usually reject a key outright. Abandon the proof if matching
         // those bits would cost more than one comparison per input on average.
@@ -539,6 +541,66 @@ mod tests {
             order.apply(&mut indices);
             assert_eq!(indices, [6, 7, 2, 3, 4, 5, 0, 1]);
         }
+
+        // Wide padded-tuple keys exercise `fixed & E::KEY_MASK` on both ends:
+        // disjoint ends move only winners and displaced slots.
+        let disjoint_tuples: Vec<_> = keys
+            .iter()
+            .map(|&k| ((u16::from(k), k), [0u8; 32]))
+            .collect();
+        for end in [0..2, len - 2..len] {
+            let order = SourceOrder::ordered_end(
+                &disjoint_tuples,
+                end,
+                &mut ByKey(|r: &((u16, u8), [u8; 32])| r.0),
+            );
+            let mut indices: Vec<_> = (0..len).collect();
+            order.apply(&mut indices);
+            assert_eq!(indices, [6, 7, 2, 3, 4, 5, 0, 1]);
+        }
+
+        // Wide padded-tuple ends with outside peers (both with shared effective
+        // bits and with complementary all-0/all-1 keys where `fixed == 0`) must
+        // preserve equal-key order across the slice.
+        let tied_cases: [&[(u16, u8)]; 2] = [
+            &[
+                (3, 5),
+                (u16::MAX, u8::MAX),
+                (u16::MAX, u8::MAX),
+                (3, 5),
+                (3, 5),
+                (0, 0),
+                (0, 0),
+                (3, 5),
+            ],
+            &[
+                (0, 0),
+                (u16::MAX, u8::MAX),
+                (u16::MAX, u8::MAX),
+                (0, 0),
+                (0, 0),
+                (u16::MAX, u8::MAX),
+            ],
+        ];
+        for tuple_keys in tied_cases {
+            let wide_tuples: Vec<_> = tuple_keys.iter().map(|&k| (k, [0u8; 32])).collect();
+            let n = tuple_keys.len();
+            let mut expected: Vec<_> = (0..n).collect();
+            expected.sort_by_key(|&i| tuple_keys[i]);
+            for end in [0..1, 0..2, n - 2..n, n - 1..n] {
+                let order = SourceOrder::ordered_end(
+                    &wide_tuples,
+                    end.clone(),
+                    &mut ByKey(|r: &((u16, u8), [u8; 32])| r.0),
+                );
+                let mut perm: Vec<_> = (0..n).collect();
+                order.apply(&mut perm);
+                assert_eq!(perm[end.clone()], expected[end.clone()]);
+                perm[..end.start].sort_by_key(|&i| tuple_keys[i]);
+                perm[end.end..].sort_by_key(|&i| tuple_keys[i]);
+                assert_eq!(perm, expected);
+            }
+        }
     }
 
     #[test]
@@ -584,6 +646,98 @@ mod tests {
             records[..rank].sort_by_key(|r| keys[**r]);
             records[rank + 1..].sort_by_key(|r| keys[**r]);
             assert!(records.iter().map(|r| **r).eq(expected));
+        }
+
+        // Padded tuples and narrow-mask reversed keys (with nonzero constant
+        // bits outside `E::KEY_MASK`) resolve stably at both varying extremes.
+        let len = 32usize;
+        let rank = len - 5;
+        let low_rank = 4usize;
+        let tuple_max: [(u16, u8); 32] = core::array::from_fn(|i| {
+            if i >= rank {
+                (u16::MAX, u8::MAX)
+            } else {
+                (7, 3)
+            }
+        });
+        let mut ids: Vec<_> = (0..len).collect();
+        assert!(SourceOrder::finish_cut(
+            &mut ids,
+            rank,
+            &mut ByKey(|&id: &usize| tuple_max[id]),
+        ));
+        assert_eq!(ids, (0..len).collect::<Vec<_>>());
+
+        let rev_false: [core::cmp::Reverse<bool>; 32] =
+            core::array::from_fn(|i| core::cmp::Reverse(i < rank));
+        let mut ids: Vec<_> = (0..len).collect();
+        assert!(SourceOrder::finish_cut(
+            &mut ids,
+            rank,
+            &mut ByKey(|&id: &usize| rev_false[id]),
+        ));
+        assert_eq!(ids, (0..len).collect::<Vec<_>>());
+
+        let rev_bool_cut: [core::cmp::Reverse<bool>; 32] =
+            core::array::from_fn(|i| core::cmp::Reverse(i != 2));
+        let mut ids: Vec<_> = (0..len).collect();
+        let mut expected = ids.clone();
+        expected.sort_by_key(|&i| rev_bool_cut[i]);
+        assert!(SourceOrder::finish_cut(
+            &mut ids,
+            low_rank,
+            &mut ByKey(|&id: &usize| rev_bool_cut[id]),
+        ));
+        assert_eq!(ids[low_rank], expected[low_rank]);
+        ids[..low_rank].sort_by_key(|&i| rev_bool_cut[i]);
+        ids[low_rank + 1..].sort_by_key(|&i| rev_bool_cut[i]);
+        assert_eq!(ids, expected);
+
+        let rev_nul: [core::cmp::Reverse<char>; 32] =
+            core::array::from_fn(|i| core::cmp::Reverse(if i >= rank { '\0' } else { 'a' }));
+        let mut ids: Vec<_> = (0..len).collect();
+        assert!(SourceOrder::finish_cut(
+            &mut ids,
+            rank,
+            &mut ByKey(|&id: &usize| rev_nul[id]),
+        ));
+        assert_eq!(ids, (0..len).collect::<Vec<_>>());
+
+        // Padded tuple keys with a mixed non-max suffix (at the effective
+        // maximum or one below it) still resolve stably without false skips.
+        for suffix_mixed in [
+            // Max at `rank`, non-max entries after `rank` -> one-sided cut.
+            core::array::from_fn::<_, 32, _>(|i| match i {
+                25..=27 | 29 | 31 => (u16::MAX, u8::MAX),
+                _ => (7u16, 3u8),
+            }),
+            // One below max at `rank`, true max in prefix and non-max in suffix
+            // -> must scan prefix and fall back to `ordered_end`.
+            core::array::from_fn::<_, 32, _>(|i| match i {
+                5 => (u16::MAX, u8::MAX),
+                27 | 29 | 31 => (u16::MAX, u8::MAX - 1),
+                _ => (7u16, 3u8),
+            }),
+            // One below max across the whole suffix with a true max in prefix
+            // -> must scan prefix rather than treating `KEY_MASK - 1` as max.
+            core::array::from_fn::<_, 32, _>(|i| match i {
+                5 => (u16::MAX, u8::MAX),
+                27..=31 => (u16::MAX, u8::MAX - 1),
+                _ => (7u16, 3u8),
+            }),
+        ] {
+            let mut ids: Vec<_> = (0..len).collect();
+            let mut expected = ids.clone();
+            expected.sort_by_key(|&i| suffix_mixed[i]);
+            assert!(SourceOrder::finish_cut(
+                &mut ids,
+                rank,
+                &mut ByKey(|&i: &usize| suffix_mixed[i]),
+            ));
+            assert_eq!(ids[rank], expected[rank]);
+            ids[..rank].sort_by_key(|&i| suffix_mixed[i]);
+            ids[rank + 1..].sort_by_key(|&i| suffix_mixed[i]);
+            assert_eq!(ids, expected);
         }
     }
 

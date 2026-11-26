@@ -191,6 +191,24 @@ fn boundary_selection_does_not_allocate() {
         assert_eq!(selected.0, over_budget_rank as u64);
     });
     assert_eq!((allocations, net), (0, 0));
+
+    // Padded tuple maximum certifies the boundary without allocating scratch.
+    let rank = len - 5;
+    let mut tuples: Vec<_> = (0..len)
+        .map(|id| {
+            let key = if id >= rank {
+                (u16::MAX, u8::MAX)
+            } else {
+                (7, 3)
+            };
+            (id, key)
+        })
+        .collect();
+    let (allocations, net) = measure(|| {
+        let (_, selected, _) = tessera_order::select_nth_by_key(&mut tuples, rank, |r| r.1);
+        assert_eq!(selected.0, rank);
+    });
+    assert_eq!((allocations, net), (0, 0));
 }
 
 #[test]

@@ -113,7 +113,9 @@ function validateOperations(plan: Plan) {
   }
 }
 
-/** Harness Cargo features needed to compile the cases that survive `plan.exclude`. */
+/** Harness Cargo features needed to compile the cases that survive `plan.exclude`.
+ * Matches literal counts in TypeScript (like `validateOperations`); engine-relative
+ * length boundaries resolve only in Rust. */
 export function planFeatures(plan: Plan): string[] {
   let rayon = false;
   let operations = false;

@@ -87,61 +87,32 @@ const BLOCK_SCALE: usize = 2;
 /// handful of records per block.
 const BLOCK_RECORDS_FLOOR: usize = 32;
 
-/// Block size in records for a digit partition into `radix`-bit digits.
+/// Block size in records for `buckets` scratch buckets and `directory_bytes`
+/// of live metadata per full input block.
 ///
-/// The partition fills its buckets block by block, so it holds the records it
-/// moves in blocks of `b` records: `2 * R` of those blocks for `R` buckets, one
-/// output block per bucket and as many in reserve, because an input block may
-/// only be recycled as an output block once every record in it has been read.
-/// The tables are indexed by block position and cost
-/// [`finish::serial_descriptor_bytes`] bytes per position; records move by
-/// exchanging blocks, not by copying into a second buffer. For `n` records of
-/// `s` bytes, a block size `b` therefore costs
+/// The partition fills its buckets block by block, holding `2 * buckets`
+/// scratch blocks (one output block per bucket plus as many in reserve, because
+/// an input block may only be recycled once every record in it has been read).
+/// For `n` records of `s` bytes, a block size `b` costs
 ///
 /// ```text
-/// 2 R b s + d n / b
+/// 2 * buckets * b * s + directory_bytes * n / b
 /// ```
 ///
-/// bytes of auxiliary memory, and the two terms are equal at
-/// `b = sqrt(d n / (2 R s))`. That root minimizes the sum: writing `b = c b*`
-/// turns the total into `(c + 1 / c) / 2` times the minimum, which grows in
-/// both directions. The engine takes [`BLOCK_SCALE`] times the root to amortise
-/// the per-block work, and the floors below bound the small inputs where the
-/// root alone would buy nothing.
-///
-/// # Memory
-///
-/// Two floors keep the per-block work amortised: a block holds at least
-/// [`BLOCK_BYTES_FLOOR`] bytes of records, and at least
-/// [`BLOCK_RECORDS_FLOOR`] records whatever their width. Their own cost does not
-/// depend on `n` — together they reserve at most `2 R max(1024, 32 s)` bytes of
-/// scratch and `O(R)` table entries — so the auxiliary memory stays
-/// `O(sqrt(n))` in `n` for a fixed record size and digit width.
-pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    scaled_block_size(
-        balanced_block_size(len, record_bytes, radix),
-        record_bytes,
-        BLOCK_SCALE,
-    )
-}
-
-/// Applies a balanced-size multiple and the per-block amortization floors.
-/// Serial and parallel partitions share these floors with their own balance.
-fn scaled_block_size(balanced: usize, record_bytes: usize, scale: usize) -> usize {
+/// bytes of auxiliary memory, minimized at `b* = sqrt(d n / (2 B s))`.
+/// Scaling `b*` by [`BLOCK_SCALE`] amortises per-block work at `(c + 1/c) / 2`
+/// times minimum memory, and the two floors ([`BLOCK_BYTES_FLOOR`] bytes and
+/// [`BLOCK_RECORDS_FLOOR`] records) bound small inputs without depending on `n`,
+/// keeping auxiliary memory `O(sqrt(n))`.
+pub(super) fn block_size(
+    len: usize,
+    record_bytes: usize,
+    buckets: usize,
+    directory_bytes: usize,
+) -> usize {
+    let balanced = balanced_size(len, record_bytes, buckets, directory_bytes);
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
-    balanced.saturating_mul(scale).max(floors).max(1)
-}
-
-/// The balanced block size, rounded up.
-///
-/// Evaluates `ceil(sqrt(d n / (2 R s)))`; tests compare against an integer solve.
-fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    balanced_size(
-        len,
-        record_bytes,
-        1 << radix,
-        finish::serial_descriptor_bytes(),
-    )
+    balanced.saturating_mul(BLOCK_SCALE).max(floors).max(1)
 }
 
 /// Solves `ceil(sqrt(d n / (2 B s)))` for `B` scratch buckets and `d` directory
@@ -220,8 +191,13 @@ pub(crate) fn partition<'records, T, C: Classify<T>>(
         return Vec::new();
     }
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
-    let block_size = default_block_size(records.len(), record_bytes, radix);
-    partition_in_blocks(records, radix, block_size, classifier, buffers, visit)
+    let size = block_size(
+        records.len(),
+        record_bytes,
+        1 << radix,
+        finish::serial_descriptor_bytes(),
+    );
+    partition_in_blocks(records, radix, size, classifier, buffers, visit)
 }
 
 /// [`partition`] with an explicit block size of `block_size` records.
@@ -325,12 +301,6 @@ impl<T> Buffers<T> {
             #[cfg(debug_assertions)]
             seen: Vec::new(),
         }
-    }
-}
-
-impl<T> Default for Buffers<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -769,7 +739,7 @@ mod tests {
     }
 
     /// `(len, block_size)` pairs. The short pair has a one-record tail over
-    /// tiny blocks, which Miri can afford; the floors in `default_block_size`
+    /// tiny blocks, which Miri can afford; the floors in `block_size`
     /// make a production block longer than the whole short input, so the short
     /// case sets one. The long pairs are a production block with and without a
     /// tail, and a longer input where the root formula picks the block size.
@@ -779,10 +749,11 @@ mod tests {
         if cfg!(miri) {
             return configs;
         }
+        let descriptor = finish::serial_descriptor_bytes();
         let long = [
-            (4093, default_block_size(4093, record_bytes, 2)),
-            (4096, default_block_size(4096, record_bytes, 2)),
-            (8193, default_block_size(8193, record_bytes, 2)),
+            (4093, block_size(4093, record_bytes, 4, descriptor)),
+            (4096, block_size(4096, record_bytes, 4, descriptor)),
+            (8193, block_size(8193, record_bytes, 4, descriptor)),
         ];
         // The recovery offset depends on consumed input blocks, so every long
         // input must stay many blocks wide if the block size constant changes.
@@ -888,7 +859,12 @@ mod tests {
             for record_bytes in [1, 2, 4, 8, 16, 24, 32, 64, 128] {
                 for radix in 1..=MAX_RADIX_BITS {
                     assert_eq!(
-                        balanced_block_size(len, record_bytes, radix),
+                        balanced_size(
+                            len,
+                            record_bytes,
+                            1 << radix,
+                            finish::serial_descriptor_bytes()
+                        ),
                         balanced_block_size_integer(len, record_bytes, radix),
                         "len {len}, {record_bytes}-byte records, {radix} bits"
                     );

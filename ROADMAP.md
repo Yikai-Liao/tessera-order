@@ -69,7 +69,6 @@ Smaller candidates remain available; none waits for P1's acceptance:
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| P2 | Residual partition configuration | One description consumed by the block layer | `BucketFinish` and `BoundedFinish` are gone; reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | `engine::Scratch` now pairs the first two per sort; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 
 

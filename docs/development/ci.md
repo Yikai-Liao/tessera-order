@@ -38,7 +38,7 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Implementation harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
-Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. PR benchmark preparation saves its own [aligned-build dependency cache](continuous-benchmarks.md#capacity-and-recovery).
+Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. PR benchmark preparation shares the [aligned-build dependency cache](continuous-benchmarks.md#capacity-and-recovery) with main static Rust tracking, saving from PRs only while automatic main tracking is disabled.
 
 ### Rust architecture policies
 

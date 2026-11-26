@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-test("PR alignment has its own dependency cache and both tracking builds retain their flags", () => {
+test("PR and main static tracking share alignment flags and cache while native stays separate", () => {
   // Bun owns YAML parsing; the subprocess keeps Bun-only APIs out of tooling's Node types.
   const configurations = JSON.parse(
     execFileSync(
@@ -28,6 +28,7 @@ function configuration(job, native) {
       .map(([key, value]) => [key, resolve(value)])),
     workspace: cache.workspaces,
     key: resolve(cache["shared-key"]),
+    saveIf: cache["save-if"] ?? null,
   };
 }
 console.log(JSON.stringify([
@@ -38,17 +39,26 @@ console.log(JSON.stringify([
       ],
       { cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8" },
     ),
-  ) as { environment: Record<string, string>; workspace: string; key: string }[];
+  ) as {
+    environment: Record<string, string>;
+    workspace: string;
+    key: string;
+    saveIf: string | boolean | null;
+  }[];
   const [pr, main, native] = configurations;
   assert.equal(pr.workspace, main.workspace);
-  assert.notEqual(pr.key, main.key);
+  assert.equal(pr.key, main.key);
+  assert.deepEqual(pr.environment, main.environment);
   assert.match(pr.environment.RUSTFLAGS, /-x86-branches-within-32B-boundaries/);
   assert.match(pr.environment.RUSTFLAGS, /-align-all-functions=6/);
-  assert.equal(main.environment.RUSTFLAGS, "-C target-feature=+crt-static");
   assert.equal(pr.environment.CARGO_PROFILE_BENCH_DEBUG, "0");
   assert.equal(pr.environment.CARGO_BUILD_TARGET, "x86_64-unknown-linux-gnu");
   assert.match(pr.environment.RUSTFLAGS, /target-feature=\+crt-static/);
+  assert.equal(pr.saveIf, "${{ env.PUBLISH == 'true' && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}");
+  assert.ok(
+    main.saveIf === null || main.saveIf === true || main.saveIf === "true",
+    `main static tracking must allow cache saves, got ${JSON.stringify(main.saveIf)}`,
+  );
   assert.equal(native.environment.RUSTFLAGS, "");
   assert.notEqual(main.key, native.key);
-  assert.notEqual(native.key, pr.key);
 });

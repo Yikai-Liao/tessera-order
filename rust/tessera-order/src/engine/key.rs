@@ -935,6 +935,10 @@ mod tests {
         assert_eq!(<bool as RadixKey>::Width::BITS, 8);
         assert_eq!(<char as RadixKey>::Width::BITS, 32);
         assert_eq!(<([u8; 12], char) as RadixKey>::Width::BITS, 128);
+        assert_eq!(false.encode(), 0u8);
+        assert_eq!(true.encode(), 1u8);
+        assert_eq!('A'.encode(), 0x41u32);
+        assert_eq!(char::MAX.encode(), 0x10_ffffu32);
         check_ordered(&[false, true]);
         check_ordered(&['\0', 'A', '\u{d7ff}', '\u{e000}', '🦀', char::MAX]);
 
@@ -952,6 +956,10 @@ mod tests {
         macro_rules! check_bytes {
             ($($n:literal),*) => {$(
                 assert_eq!(<[u8; $n] as RadixKey>::Width::BITS, $n * 8);
+                assert_eq!(
+                    size_of::<<[u8; $n] as RadixKey>::Encoded>(),
+                    usize::next_power_of_two($n)
+                );
                 let (mut lo, mut hi) = ([0u8; $n], [0u8; $n]);
                 (lo[$n - 1], hi[0]) = (1, 0x11);
                 let mid = core::array::from_fn(|i| (0x10 + i) as u8);

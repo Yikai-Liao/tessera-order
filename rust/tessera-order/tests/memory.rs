@@ -153,3 +153,63 @@ fn wide_serial_partition_avoids_per_bucket_free_cache_allocations() {
         "expected O(1) allocations for 4096-bucket serial distribution, got {allocations}"
     );
 }
+
+#[test]
+fn boundary_selection_does_not_allocate() {
+    let len = 65_536usize;
+    let mut constant: Vec<_> = (0..len).map(|id| (id, 7u64)).collect();
+    let (allocations, net) = measure(|| {
+        let (_, selected, _) = tessera_order::select_nth_by_key(&mut constant, 4, |r| r.1);
+        assert_eq!(selected.0, 4);
+    });
+    assert_eq!((allocations, net), (0, 0));
+
+    // Over-budget all-minimum prefix on 128-byte records: `rank + 1` exceeds
+    // the sparse-order budget on both 32-bit and 64-bit targets, yet the zero
+    // pivot skips scanning the suffix.
+    let over_budget_rank = 4_000usize;
+    assert_eq!(core::mem::size_of::<(u64, u64, [u8; 112])>(), 128);
+    let mut wide: Vec<_> = (0..len as u64)
+        .map(|id| {
+            let key = if id <= over_budget_rank as u64 {
+                0
+            } else {
+                1 + (id % 97)
+            };
+            (id, key, [0u8; 112])
+        })
+        .collect();
+    let (allocations, net) = measure(|| {
+        let (_, selected, _) = tessera_order::select_nth_by_key(&mut wide, over_budget_rank, |r| {
+            assert!(
+                r.0 <= over_budget_rank as u64,
+                "all-minimum prefix scanned suffix at {}",
+                r.0
+            );
+            r.1
+        });
+        assert_eq!(selected.0, over_budget_rank as u64);
+    });
+    assert_eq!((allocations, net), (0, 0));
+}
+
+#[test]
+fn one_sided_cut_reads_only_prefix_and_outlier() {
+    let len = 65_536usize;
+    let mut skewed: Vec<_> = (0..len)
+        .map(|id| (id, if id == 2 { 7u64 } else { 0 }))
+        .collect();
+    let ((_, net), peak) = measure_peak(|| {
+        let (before, selected, after) = tessera_order::select_nth_by_key(&mut skewed, 4, |r| {
+            assert!(r.0 <= 5, "one-sided cut scanned past outlier at {}", r.0);
+            r.1
+        });
+        assert_eq!(selected.0, 5);
+        assert!(before.iter().map(|r| r.0).eq([0, 1, 3, 4]));
+        assert_eq!(after.len(), len - 5);
+        assert_eq!(after.iter().filter(|r| *r == &(2, 7)).count(), 1);
+        assert!(after.iter().filter(|r| r.1 == 0).map(|r| r.0).eq(6..len));
+    });
+    assert_eq!(net, 0);
+    assert!(peak <= 1024, "peak scratch {peak}");
+}

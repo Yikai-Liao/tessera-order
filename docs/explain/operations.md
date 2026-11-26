@@ -28,7 +28,7 @@ Before partitioning an input larger than a tile, selection tries shortcuts that 
 - **First or last rank.** Find the first minimum (or last maximum). If the displaced record has no equal key elsewhere, swap the two; otherwise rotate the winner into place so the records in between keep their order.
 - **A short end.** If the rank lies close to one end, collect that end's candidates in a batch. Whenever the batch fills, keep its better half. The batch stays within the [sparse-order budget](routing.md#sparse-source-order), and the end is placed with the same run-and-exception movement.
 
-With one dominant key, a rank inside the dominant key's band needs only that position reserved; a rank outside it is a short end among the other keys.
+With one dominant key, a rank inside the dominant key's band needs only that position reserved; a rank outside it sorts only the bounded exceptions.
 
 ## Sort by a cached key
 

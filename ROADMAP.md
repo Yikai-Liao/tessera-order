@@ -14,7 +14,7 @@ The [0.2 scope decision](docs/design/operation-extensions-proposal.md#release-su
 
 Remaining 0.2 benchmark integration and post-0.2 capabilities (new capabilities require a concrete consumer and per-PR acceptance):
 
-- **Parallel argsort benchmarking:** wire `par_argsort` and `par_argsort_by_key` into the maintained benchmark pipeline and continuous plan, and add the parallel argsort composition baseline under the [comparison model](docs/design/comparison-model-proposal.md#plan).
+- **Parallel argsort benchmarking:** wire `par_argsort` and `par_argsort_by_key` into the maintained benchmark pipeline, continuous plan and parallel argsort composition baseline under the [comparison model](docs/design/comparison-model-proposal.md#plan), and complete the maintained whole-call 1M and 10M comparisons against serial `argsort` and `par_sort` (including output allocation and checks for serial `argsort` regressions; 10M stays in a focused local plan rather than expanding hosted CI).
 - Remove the revision benchmarks' use of the deprecated 0.1 `stable_*` names once no compared baseline needs them.
 - **Exact cached-key facts:** reuse order/variation facts produced during `sort_by_cached_key` collection without regressing `sort`'s root codegen (closure-routed reuse was [closed](docs/design/evidence.md#rejected-or-on-hold)) while preserving descending/near-order completion and the exactly-once contract.
 - **Full-key counts:** let complete-key histograms support unique/count outputs without refilling duplicate keys first, preserving outside-bit proofs and float encoding semantics.
@@ -31,7 +31,7 @@ Remaining 0.2 benchmark integration and post-0.2 capabilities (new capabilities 
 
 ### Simplification candidates
 
-Candidates replace specialized mechanisms with more general operations; they are not promises to remove every listed path. The [structure analysis](docs/design/evidence.md#structure-analysis) and [post-ledger summary](docs/design/evidence.md#post-ledger-simplification-proposal) own the rationale and historical studies (S1, P1, N1/N3/N4, N6, X1/X2, P4 are merged and shipped; A/B and T2 are rejected). A new candidate lands when one mechanism replaces at least two without regressing the hosted PR benchmark verdict (or with each local loss up to 10% listed and accepted individually, never as a standing budget). Preserve ordering, stability, ownership, panic recovery, changing-key progress and the public memory bound.
+Candidates replace specialized mechanisms with more general operations; they are not promises to remove every listed path. The [structure analysis](docs/design/evidence.md#structure-analysis) and [post-ledger summary](docs/design/evidence.md#post-ledger-simplification-proposal) own the rationale and historical studies (S1, P1, N1/N3/N4, N6, X1/X2, P4 are merged and shipped; A/B and T2 are rejected). A new candidate lands when one mechanism replaces at least two, satisfies the [hosted performance rule](CONTRIBUTING.md#performance-changes) for every hosted alert, and lists and accepts any additional local loss up to 10% individually (never as a standing budget and never in place of hosted alert acceptance). Preserve ordering, stability, ownership, panic recovery, changing-key progress and the public memory bound.
 
 | ID | Scope | Status / Done when |
 |---|---|---|

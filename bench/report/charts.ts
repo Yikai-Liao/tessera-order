@@ -13,6 +13,7 @@ import {
   operationDescription,
   operationNoun,
   operationParts,
+  operationTitle,
   recordType,
   referenceColumn,
   referenceLabel,
@@ -996,21 +997,24 @@ export function renderGrowth(growth: Growth): Figure | null {
 }
 
 /**
- * Tessera's parallel entry point and Rayon's stable sort at each thread count, as speed
- * relative to Rayon's stable sort on one thread, on each input every thread count measured.
+ * Tessera's parallel entry point and Rayon's stable route at each thread count, as speed
+ * relative to Rayon's route on one thread, on each input every thread count measured.
  */
 export interface Scaling {
+  /** The operation measured; defaults to full sorting. */
+  operation?: Operation;
   n: number;
   threads: number[];
   referenceId: string;
   /** Short commits of the Tessera runs, which may predate its latest serial run. */
   tessera: string[];
   inputs: { label: string; tessera: number[]; rayon: number[] }[];
-  /** Serial full-sort speeds over the same inputs, in input order. */
+  /** Serial Tessera speeds over the same inputs, in input order. */
   composition?: { implementation: string; hash: string; speeds: number[] };
 }
 
 export function renderParallel({
+  operation = SORT,
   n,
   threads,
   referenceId,
@@ -1019,6 +1023,8 @@ export function renderParallel({
   inputs,
 }: Scaling): Figure | null {
   if (!inputs.length || !threads.length) return null;
+  const isSort = operation.kind === SORT.kind;
+  const opLabel = operationTitle(operation);
   const named = (t: number) => `${t} thread${t === 1 ? "" : "s"}`;
   const mean = (pick: (input: Scaling["inputs"][number]) => number[], at: number) =>
     geomean(inputs.map((input) => pick(input)[at]));
@@ -1030,7 +1036,9 @@ export function renderParallel({
   const widest = rows.at(-1)!;
   const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${named(widest.threads)}`;
   const serialSpeed = composition ? geomean(composition.speeds) : null;
-  const compositionLabel = "Serial Tessera (composition)";
+  const serialName = isSort ? "Serial Tessera" : `Serial Tessera ${opLabel}`;
+  const compositionLabel = `${serialName} (composition)`;
+  const rayonCall = route(referenceId, operation);
   const scale = speedScale(
     [
       ...rows.flatMap((row) => [row.tessera, row.rayon]),
@@ -1044,9 +1052,10 @@ export function renderParallel({
   const cells = (values: number[]) => values.map(times);
   return {
     name: "parallel",
-    subject: "Parallel sorting",
-    summary:
-      "Tessera's Rayon entry point against Rayon's own stable par_sort at each thread count, both as speed relative to Rayon on one thread.",
+    subject: isSort ? "Parallel sorting" : `Parallel ${opLabel}`,
+    summary: isSort
+      ? "Tessera's Rayon entry point against Rayon's own stable par_sort at each thread count, both as speed relative to Rayon on one thread."
+      : `Tessera's parallel ${opLabel} against Rayon's stable ${rayonCall ?? opLabel} at each thread count, both as speed relative to Rayon on one thread.`,
     title,
     ...rendered({
       title,
@@ -1072,7 +1081,7 @@ export function renderParallel({
                 title: "Composition",
                 rows: [
                   {
-                    name: { input: "Serial Tessera", sub: composition.hash, tag: "" },
+                    name: { input: serialName, sub: composition.hash, tag: "" },
                     marks: [
                       {
                         value: serialSpeed,
@@ -1091,7 +1100,7 @@ export function renderParallel({
       axis: SPEED_AXIS,
       legend: [
         [["primary"], "Tessera"],
-        [["comparison"], "Rayon stable sort"],
+        [["comparison"], isSort ? "Rayon stable sort" : `Rayon stable ${opLabel}`],
       ],
     }),
     table: markdownTable(

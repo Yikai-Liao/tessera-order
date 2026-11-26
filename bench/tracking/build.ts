@@ -48,16 +48,24 @@ export type TrackingBuild = {
  * The continuous plan's inputs for one column: a serial column takes the serial rules, including
  * every operation's, and a parallel column the parallel rules at its own pool size. An
  * implementation lists only the cases its adapter supports. A composition column also sorts the
- * parallel rules' inputs serially, once for every pool size, as the parallel figure's baseline.
+ * parallel sort inputs serially, once for every pool size, as the parallel sort figure's baseline;
+ * `tessera/serial` does the same for parallel argsort inputs so the parallel argsort figure has a
+ * matching serial Tessera argsort baseline.
  */
 export function columnPlan(plan: Plan, column: Column): Plan {
   const parallel = column.execution !== "serial";
   const composition = isComposition(column.implementation);
   const include = plan.include
     .filter((rule) => {
-      const serialSortForParallel = composition && (rule.operation ?? SORT).kind === SORT.kind;
-      return (rule.executions ?? ["serial"]).some(
-        (e) => (e !== "serial") === (parallel || serialSortForParallel),
+      const kind = (rule.operation ?? SORT).kind;
+      const serialSortForParallel = composition && kind === SORT.kind;
+      const serialArgsortForParallel =
+        column.implementation === "tessera" && !parallel && kind === "argsort";
+      return (
+        serialArgsortForParallel ||
+        (rule.executions ?? ["serial"]).some(
+          (e) => (e !== "serial") === (parallel || serialSortForParallel),
+        )
       );
     })
     .map((rule) => ({ ...rule, executions: [column.execution] }));

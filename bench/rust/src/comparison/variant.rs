@@ -24,11 +24,17 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     /// The public call [`Self::tessera_parallel`] makes.
     #[cfg(feature = "rayon")]
     const PARALLEL_SORT_ROUTE: &'static str;
+    /// The public call [`Self::par_argsort`] makes.
+    #[cfg(feature = "parallel-operations")]
+    const PARALLEL_ARGSORT_ROUTE: &'static str;
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
     /// Current serial slice operations; historical sorting adapters omit these APIs.
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
+    /// Current parallel argsort entry points.
+    #[cfg(feature = "parallel-operations")]
+    fn par_argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
     fn sort_index_rows(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
@@ -82,9 +88,13 @@ macro_rules! revision_sorts {
 /// Supplies only the direct/by-key API distinction; operation behavior stays
 /// in the library and kernel preparation owns the operation and output layout.
 macro_rules! slice_operations {
-    ($argsort:ident, $select:ident $(, $key:expr)?) => {
+    ($argsort:ident, $par_argsort:ident, $select:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
+        #[cfg(feature = "parallel-operations")]
+        fn par_argsort(records: &[Self]) -> Vec<usize> {
+            tessera_order::$par_argsort(records $(, $key)?)
+        }
         #[cfg(feature = "operations")]
         fn select_nth(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
     };
@@ -102,12 +112,15 @@ macro_rules! tessera_keys {
             const SORT_ROUTE: &'static str = "tessera_order::stable_sort";
             #[cfg(feature = "rayon")]
             const PARALLEL_SORT_ROUTE: &'static str = "tessera_order::par_stable_sort in a caller-owned pool";
+            #[cfg(feature = "parallel-operations")]
+            const PARALLEL_ARGSORT_ROUTE: &'static str =
+                "tessera_order::par_argsort in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort(records);
             }
 
-            slice_operations!(argsort, select_nth);
+            slice_operations!(argsort, par_argsort, select_nth);
             #[cfg(feature = "operations")]
             fn sort_index_rows(records: &[Self]) -> Vec<usize> {
                 operations::sort_index_rows(records, |r| *r)
@@ -134,12 +147,15 @@ macro_rules! tessera_records {
             #[cfg(feature = "rayon")]
             const PARALLEL_SORT_ROUTE: &'static str =
                 "tessera_order::par_stable_sort_by_key in a caller-owned pool";
+            #[cfg(feature = "parallel-operations")]
+            const PARALLEL_ARGSORT_ROUTE: &'static str =
+                "tessera_order::par_argsort_by_key in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort_by_key(records, |r| r.key);
             }
 
-            slice_operations!(argsort_by_key, select_nth_by_key, |r| r.key);
+            slice_operations!(argsort_by_key, par_argsort_by_key, select_nth_by_key, |r| r.key);
             #[cfg(feature = "operations")]
             fn sort_index_rows(records: &[Self]) -> Vec<usize> {
                 operations::sort_index_rows(records, |r| r.key)
@@ -317,7 +333,7 @@ pub struct Variant {
     implementation: &'static crate::plan::Implementation,
     /// Catalog adapter family.
     pub adapter: &'static str,
-    /// The catalog's parallel full-sort entry point, if any.
+    /// The catalog's parallel entry-point mode, if any.
     pub parallel_sort: Option<crate::plan::ParallelSort>,
 }
 /// Lists the adapters measured in the selected executable configuration.
@@ -417,9 +433,13 @@ impl Variant {
     }
 
     /// Whether this adapter calls a parallel entry point for the operation.
-    /// The catalog lists which implementations have a parallel full sort.
+    /// The catalog lists which implementations have parallel entry points.
     fn parallel(self, operation: &Operation) -> bool {
-        cfg!(feature = "rayon") && operation.is_sort() && self.parallel_sort.is_some()
+        cfg!(feature = "rayon")
+            && self.parallel_sort.is_some()
+            && (operation.is_sort()
+                || (cfg!(feature = "parallel-operations")
+                    && matches!(operation, Operation::Argsort {})))
     }
 
     /// Checks capabilities without starting workers for a parallel execution.
@@ -626,18 +646,23 @@ mod tests {
             .into_iter()
             .filter(|v| !v.name.starts_with("tessera"))
         {
+            if !cfg!(feature = "parallel-operations")
+                && variant.parallel_sort == Some(crate::plan::ParallelSort::Only)
+            {
+                continue;
+            }
             for operation in &operations {
                 let kind = operation.kind();
                 let supported = crate::plan::catalog().types.iter().any(|ty| {
-                    variant.supports(
-                        &CaseInput::new(&InputCase {
-                            ty: ty.id.clone(),
-                            distribution: "random".into(),
-                            len: 32,
-                            operation: operation.clone(),
-                        }),
-                        Execution::Serial,
-                    )
+                    let input = CaseInput::new(&InputCase {
+                        ty: ty.id.clone(),
+                        distribution: "random".into(),
+                        len: 32,
+                        operation: operation.clone(),
+                    });
+                    variant.supports(&input, Execution::Serial)
+                        || (cfg!(feature = "rayon")
+                            && variant.supports(&input, "t2".parse().unwrap()))
                 });
                 assert_eq!(
                     variant.implementation.routes.contains_key(kind),

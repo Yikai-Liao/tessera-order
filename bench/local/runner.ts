@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Execution, parseCriterionId } from "../catalog.ts";
-import { type Plan, parsePlan, planExecutions, selectCaseIds } from "../plan.ts";
+import { type Plan, parsePlan, planExecutions, planFeatures, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   benchmarkEnvironment,
@@ -29,8 +29,6 @@ import {
   validateLayoutBuilds,
 } from "./layout.ts";
 import {
-  isOperation,
-  isParallel,
   type LocalRun,
   type PreparedPair,
   type RevisionPair,
@@ -404,7 +402,6 @@ export async function compareLocal(options: LocalOptions) {
     throw new Error("Preparation requires a complete non-layout revision pair");
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const parallel = isParallel(options.plan);
   const cpu = await comparisonCpus(revisionThreads(options.plan), options.cpu);
   options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
@@ -441,7 +438,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        [...(parallel ? ["rayon"] : []), ...(isOperation(options.plan) ? ["operations"] : [])],
+        planFeatures(options.plan),
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );

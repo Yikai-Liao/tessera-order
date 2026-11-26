@@ -82,7 +82,7 @@ pub(crate) struct Implementation {
     pub(crate) id: String,
     stable: bool,
     pub(crate) adapter: String,
-    /// A parallel full-sort entry point, if the implementation has one.
+    /// Parallel entry points (`par_sort`, and `par_argsort` with `parallel-operations`), if any.
     pub(crate) parallel: Option<ParallelSort>,
     /// Non-sort call metadata, keyed by operation kind.
     #[serde(default)]
@@ -106,7 +106,7 @@ pub(crate) struct Route {
     _call: String,
     stable: Option<bool>,
 }
-/// Where a parallel full-sort entry point stands beside the serial entry points.
+/// Where parallel entry points stand beside the serial entry points.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ParallelSort {
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, cases, measured) in [
-            (include_str!("../../plans/continuous.toml"), 108, 119),
+            (include_str!("../../plans/continuous.toml"), 111, 125),
             (include_str!("../../plans/smoke.toml"), 125, 125),
             (include_str!("../../plans/release.toml"), 381, 381),
             (include_str!("../../plans/parallel.toml"), 16, 32),
@@ -887,12 +887,41 @@ mod tests {
                 && case.len >= 1_000_000
         }));
 
-        assert_eq!(parallel.len(), 36);
-        assert!(parallel.iter().all(|case| case.operation.is_sort()));
+        assert_eq!(parallel.len(), 42);
+        assert!(parallel.iter().all(|case| {
+            case.operation.is_sort() || matches!(case.operation, Operation::Argsort {})
+        }));
         assert_eq!(
             parallel.iter().filter(|case| case.len == 1_000_000).count(),
-            32
+            36
         );
+        for (ty, distribution, len) in [
+            ("u64", "random", 65_536),
+            ("row_u64", "random", 65_536),
+            ("u64", "random", 1_000_000),
+            ("row_u64", "random", 1_000_000),
+            ("rec128_u64", "random", 1_000_000),
+            ("row_u64", "d16", 1_000_000),
+        ] {
+            let found = parallel.iter().find(|case| {
+                matches!(case.operation, Operation::Argsort {})
+                    && case.ty == ty
+                    && case.distribution == distribution
+                    && case.len == len
+            });
+            assert!(
+                found.is_some(),
+                "missing required continuous parallel argsort: argsort/{ty}/{distribution}/{len}/s1"
+            );
+            #[cfg(feature = "parallel-operations")]
+            assert!(
+                tessera.supports(
+                    &crate::CaseInput::new(&found.unwrap().probe()),
+                    "t4".parse().unwrap()
+                ),
+                "unsupported continuous parallel argsort: {ty}/{distribution}/{len}"
+            );
+        }
         assert!(cases.iter().all(|case| case.len <= 1_000_000));
         assert!(parallel.iter().all(|case| case.len <= 1_000_000));
         for ty in ["u32", "row_u32", "u64", "row_u64"] {

@@ -320,3 +320,61 @@ fn parallel_adapters_validate_records() {
     );
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[cfg(feature = "parallel-operations")]
+#[test]
+fn parallel_argsort_validates_above_cutoff() {
+    let directory = std::env::temp_dir().join(format!(
+        "tessera-par-argsort-validate-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    // 65,537 16-byte rows exceed both `4 * tile_len` (32,768) and the 1 MiB
+    // parallel cutoff, exercising the real Rayon root path and thread check.
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 3,
+            "implementations": ["tessera", "rayon-stable"],
+            "include": [{
+                "types": ["row_u64"],
+                "distributions": ["random", "d16"],
+                "lengths": [65_537],
+                "operation": { "kind": "argsort" },
+                "executions": ["t4"]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_memory"))
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--out")
+        .arg(&directory)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let journal = fs::read_to_string(directory.join("memory.jsonl")).unwrap();
+    let rows: Vec<serde_json::Value> = journal
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for column in ["tessera/t4", "rayon-stable/t4"] {
+        for distribution in ["random", "d16"] {
+            let expected = format!("argsort/row_u64/{distribution}/65537/s1");
+            assert!(
+                rows.iter().any(|row| {
+                    row["case_id"] == expected && row["column"] == column && row["verified"] == true
+                }),
+                "missing verified memory row for {column} on {expected}"
+            );
+        }
+    }
+    fs::remove_dir_all(directory).unwrap();
+}

@@ -2,15 +2,20 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { executionThreads, parseCriterionId, revisionSampling } from "../catalog.ts";
+import {
+  executionThreads,
+  parseCriterionId,
+  referenceColumn,
+  revisionSampling,
+} from "../catalog.ts";
 import { type Plan, parsePlan, planExecutions, planOperations } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
 /** Revision builds replace only the Tessera library, so a revision comparison measures only
  * Tessera, at the plan's executions; any other implementation would be identical code in both
- * builds. Parallel executions measure sorting only. Returns the CPUs the scheduler must reserve:
- * the largest planned worker count, or one for serial-only plans. */
+ * builds. Parallel executions require an operation with a parallel entry point. Returns the CPUs
+ * the scheduler must reserve: the largest planned worker count, or one for serial-only plans. */
 export function revisionThreads(plan: Plan): number {
   if (plan.implementations.join() !== "tessera")
     throw new Error("Revision comparisons measure only tessera; select executions instead");
@@ -18,11 +23,13 @@ export function revisionThreads(plan: Plan): number {
     plan.include.some(
       (rule) =>
         rule.operation &&
-        rule.operation.kind !== "sort" &&
+        !referenceColumn(rule.operation, "t1") &&
         rule.executions?.some((execution) => execution !== "serial"),
     )
   )
-    throw new Error("Revision comparisons of an operation measure only serial executions");
+    throw new Error(
+      "Revision comparisons of a serial-only operation measure only serial executions",
+    );
   return Math.max(1, ...planExecutions(plan).map((execution) => executionThreads(execution) ?? 1));
 }
 

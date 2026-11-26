@@ -47,7 +47,7 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// let mut keys = [(0u128, 0u8)];
 /// tessera_order::sort(&mut keys);
 /// ```
-pub trait RadixKey: crate::engine::portable_simd::SimdKey + Copy + Send + Sync {
+pub trait RadixKey: sealed::Sealed + Copy + Send + Sync {
     #[doc(hidden)]
     type Encoded: Unsigned;
     #[doc(hidden)]
@@ -57,6 +57,12 @@ pub trait RadixKey: crate::engine::portable_simd::SimdKey + Copy + Send + Sync {
     /// Inverts [`Self::encode`] bit for bit, including NaN payloads.
     #[doc(hidden)]
     fn decode(encoded: Self::Encoded) -> Self;
+}
+
+mod sealed {
+    /// Seals [`super::RadixKey`] so external crates cannot implement it.
+    pub trait Sealed: crate::engine::portable_simd::SimdKey {}
+    impl<T: crate::engine::portable_simd::SimdKey> Sealed for T {}
 }
 
 /// Sealed type-level encoded bit width (multiples of 8 up to 128) for packing

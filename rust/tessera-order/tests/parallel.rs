@@ -10,9 +10,7 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-#[cfg(not(miri))]
-use tessera_order::par_sort;
-use tessera_order::par_sort_by_key;
+use tessera_order::{RadixKey, par_sort, par_sort_by_key};
 
 #[test]
 #[cfg(not(miri))]
@@ -400,4 +398,24 @@ fn panic_keeps_borrowed_records() {
         *record += 1;
     }
     assert_eq!(values, (1..=1024).collect::<Vec<_>>());
+}
+
+#[test]
+fn generic_radix_key_calls_par_sort_without_send_bound() {
+    fn sort_generic<K: RadixKey>(values: &mut [K]) {
+        par_sort(values);
+    }
+
+    #[allow(deprecated)]
+    fn stable_sort_generic<K: RadixKey>(values: &mut [K]) {
+        tessera_order::par_stable_sort(values);
+    }
+
+    let mut values = [3u64, 1, 2, 1];
+    sort_generic(&mut values);
+    assert_eq!(values, [1, 1, 2, 3]);
+
+    let mut legacy = [4i32, -2, 0, -2];
+    stable_sort_generic(&mut legacy);
+    assert_eq!(legacy, [-2, -2, 0, 4]);
 }

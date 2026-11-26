@@ -31,11 +31,13 @@ const PEEL: usize = 4;
 const MSD_MIN_LANES: usize = 8;
 
 /// Native adjacent-pair comparison and encoded-order vector load/store for
-/// direct keys; also seals [`RadixKey`].
+/// direct keys.
 ///
-/// The kernels own traversal, mask aggregation and sorting networks. Each key
-/// owns only the backend's lane count and its total-order vector encoding. One
-/// lane denotes a scalar fallback, used by wide and tuple keys.
+/// `key::sealed::Sealed` seals [`RadixKey`] over this trait rather than
+/// exposing `SimdKey` directly as a supertrait. The kernels own traversal,
+/// mask aggregation and sorting networks. Each key owns only the backend's
+/// lane count and its total-order vector encoding. One lane denotes a scalar
+/// fallback, used by wide and tuple keys.
 pub trait SimdKey: Copy {
     /// Native integer vector holding encoded keys in total order; unused when
     /// [`Self::lanes`] is 1.

@@ -152,7 +152,7 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       not the unknown child work. Windows may contain constant gaps, but their endpoints vary.
     </p>
     <p class="tsr-note">
-      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, the planner selects
+      For 8,192 <code>u32</code> keys with the selected {{ width }}-bit table limit, the planner selects
       <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
       {{ tileLeafReason }}
     </p>

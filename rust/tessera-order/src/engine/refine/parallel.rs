@@ -115,8 +115,7 @@ pub(crate) fn argsort<T: Sync, K: RadixKey>(
     });
     let (mut scratch, mut extract) = (Workspace::new(), indexed);
     for ties in huge {
-        ties.par_iter_mut().for_each(|w| *w &= index_mask);
-        let sub = scan_varying_bits(ties, remaining, &mut extract);
+        let sub = unmask_and_scan_varying(ties, index_mask, remaining, values, &key);
         if sub != 0 {
             Sorter {
                 scratch: &mut scratch,
@@ -127,6 +126,75 @@ pub(crate) fn argsort<T: Sync, K: RadixKey>(
         }
     }
     words
+}
+
+/// Unmasks a large tie band in parallel while scanning its remaining varying
+/// bits. After a 64-element serial probe (matching serial `scan_varying_bits`),
+/// it scans in parallel waves of `P * WAVE_CHUNK` slots; once cumulative
+/// `(union ^ intersection) & remaining` reaches `remaining`, the tail is only
+/// unmasked. Under any input and thread schedule, at most `P * WAVE_CHUNK - 1`
+/// extra keys are read past the serial early exit.
+fn unmask_and_scan_varying<T: Sync, K: RadixKey>(
+    ties: &mut [usize],
+    index_mask: usize,
+    remaining: u128,
+    values: &[T],
+    key: &(impl Fn(&T) -> K + Sync),
+) -> u128 {
+    const PROBE_LEN: usize = 64;
+    const WAVE_CHUNK: usize = 8192;
+
+    let Some((first_slot, rest)) = ties.split_first_mut() else {
+        return 0;
+    };
+    *first_slot &= index_mask;
+    let first = key(&values[*first_slot]).encode().to_u128();
+    let (mut union, mut intersection) = (first, first);
+    let probe_end = (PROBE_LEN - 1).min(rest.len());
+    for slot in &mut rest[..probe_end] {
+        *slot &= index_mask;
+        let k = key(&values[*slot]).encode().to_u128();
+        union |= k;
+        intersection &= k;
+    }
+    let mut tail = &mut rest[probe_end..];
+    if (union ^ intersection) & remaining == remaining {
+        tail.par_iter_mut().for_each(|slot| *slot &= index_mask);
+        return remaining;
+    }
+
+    let wave_len = WAVE_CHUNK.saturating_mul(rayon::current_num_threads().max(1));
+    while !tail.is_empty() {
+        let split = wave_len.min(tail.len());
+        let (wave, next) = tail.split_at_mut(split);
+        let (wave_u, wave_i) = wave
+            .par_chunks_mut(WAVE_CHUNK)
+            .map(|chunk| {
+                let (head, body) = chunk.split_first_mut().unwrap();
+                *head &= index_mask;
+                let k0 = key(&values[*head]).encode();
+                let (mut u, mut i) = (k0, k0);
+                for slot in body {
+                    *slot &= index_mask;
+                    let k = key(&values[*slot]).encode();
+                    u |= k;
+                    i = i & k;
+                }
+                (u.to_u128(), i.to_u128())
+            })
+            .reduce(
+                || (0u128, u128::MAX),
+                |(u1, i1), (u2, i2)| (u1 | u2, i1 & i2),
+            );
+        union |= wave_u;
+        intersection &= wave_i;
+        tail = next;
+        if (union ^ intersection) & remaining == remaining {
+            tail.par_iter_mut().for_each(|slot| *slot &= index_mask);
+            return remaining;
+        }
+    }
+    (union ^ intersection) & remaining
 }
 
 impl<T: Send, E: Extract<T> + Clone + Send + Sync> RefineRoot<T, E> for ParallelRoot {

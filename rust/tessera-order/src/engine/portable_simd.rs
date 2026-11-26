@@ -461,13 +461,17 @@ macro_rules! float_key {
 float_key!((f32, u32), (f64, u64));
 
 macro_rules! scalar_key {
+    (NonZero: $($ty:ty),* $(,)?) => { $(scalar_key!(core::num::NonZero<$ty>);)* };
+    (bytes: $($n:literal),* $(,)?) => { $(scalar_key!([u8; $n]);)* };
     ($($ty:ty),* $(,)?) => {$(
         impl SimdKey for $ty {
             type Vec<S: Simd> = S::u64s;
         }
     )*};
 }
-scalar_key!(u128, i128);
+scalar_key!(bool, char, u128, i128);
+scalar_key!(NonZero: u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+scalar_key!(bytes: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 #[cfg(not(any(
     target_pointer_width = "16",
     target_pointer_width = "32",

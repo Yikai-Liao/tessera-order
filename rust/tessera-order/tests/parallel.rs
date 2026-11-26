@@ -625,10 +625,15 @@ fn par_argsort_matches_serial_in_caller_pool() {
     // Huge-tie bands with a nonzero packed prefix (so `sub == 0` requires real
     // unmasking) and unsorted prefix-0 outliers (`i ^ 1`) supplying nonzero
     // `remaining` bits without tripping the ascending fast path:
-    // (1) all-equal huge band, (2) inverted late witness, (3) cross-chunk
-    // constant halves where only cross-chunk `(u1 | u2, i1 & i2)` sees variation.
+    // (1) all-equal huge band, (2) inverted late witness, (3) cross-wave
+    // constant halves aligned after the 64-slot probe + 4 * 8,192 wave,
+    // (4) alternating constant 8,192-slot chunks aligned after the 64-slot probe
+    // so every probe and chunk is locally constant and only cross-chunk
+    // `(u1 | u2, i1 & i2)` detects variation.
     const HUGE_PREFIX: u64 = 1u64 << 62;
-    let outliers = 128; // keeps huge-band length (len - outliers) divisible by 4
+    const PROBE_LEN: usize = 64;
+    const WAVE_CHUNK: usize = 8192;
+    let outliers = 128;
     let huge_tie = |fill: u64| {
         let mut data = vec![fill; len];
         for (i, slot) in data.iter_mut().take(outliers).enumerate() {
@@ -640,11 +645,8 @@ fn par_argsort_matches_serial_in_caller_pool() {
     let mut skew_late_low_bit = huge_tie(HUGE_PREFIX | 1);
     skew_late_low_bit[len - 1] = HUGE_PREFIX;
     let mut skew_cross_chunk = huge_tie(HUGE_PREFIX | 1);
-    skew_cross_chunk[outliers + (len - outliers) / 2..].fill(HUGE_PREFIX);
-    // Alternating constant chunks across all 4 workers where only cross-chunk
-    // bit sharing sees variation in the sole remaining bit.
+    skew_cross_chunk[outliers + PROBE_LEN + 4 * WAVE_CHUNK..].fill(HUGE_PREFIX);
     let mut skew_alternating_chunks = huge_tie(HUGE_PREFIX | 1);
-    let quarter = (len - outliers) / 4;
     for (i, slot) in skew_alternating_chunks
         .iter_mut()
         .take(outliers)
@@ -652,8 +654,14 @@ fn par_argsort_matches_serial_in_caller_pool() {
     {
         *slot = (i & 1) as u64 ^ 1; // unsorted {0, 1}, leaving only bit 0 in `remaining`
     }
-    skew_alternating_chunks[outliers + quarter..outliers + 2 * quarter].fill(HUGE_PREFIX);
-    skew_alternating_chunks[outliers + 3 * quarter..].fill(HUGE_PREFIX);
+    for (idx, chunk) in skew_alternating_chunks[outliers + PROBE_LEN..]
+        .chunks_mut(WAVE_CHUNK)
+        .enumerate()
+    {
+        if idx % 2 == 1 {
+            chunk.fill(HUGE_PREFIX);
+        }
+    }
     for case in [
         ascending,
         strict_desc,

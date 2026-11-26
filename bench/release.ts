@@ -53,7 +53,12 @@ export async function checkImplementations(root: string, out: string, native: bo
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["rayon", "operations", ...(native ? ["compare-native"] : [])];
+    const features = [
+      "rayon",
+      "operations",
+      "parallel-operations",
+      ...(native ? ["compare-native"] : []),
+    ];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await withBuildCache(target, async () => {
       const env = await benchmarkEnvironment(tree);
@@ -192,6 +197,14 @@ async function prepareComparison(options: ReleaseOptions) {
       ...(planOperations(plan).some((op) => op.kind !== "sort") ? ["operations"] : []),
       ...(native ? ["compare-native"] : []),
       ...(planExecutions(plan).some((execution) => execution !== "serial") ? ["rayon"] : []),
+      ...(plan.include.some(
+        (rule) =>
+          rule.operation &&
+          rule.operation.kind !== "sort" &&
+          (rule.executions ?? ["serial"]).some((execution) => execution !== "serial"),
+      )
+        ? ["parallel-operations"]
+        : []),
     ];
     if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
     diagnostic("Building comparison workers");

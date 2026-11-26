@@ -2,7 +2,7 @@
 
 //! Caller-owned Rayon pools prepared outside the timed and counted region.
 
-#[cfg(feature = "operations")]
+#[cfg(feature = "parallel-operations")]
 use super::operations;
 use super::{BatchKernel, CaseInput, Kernel, PreparedRecords, TesseraAdapter, Variant};
 use crate::{plan::Operation, pool::BenchmarkPool};
@@ -17,7 +17,7 @@ fn prepare<T: TesseraAdapter>(
 ) -> Box<dyn Kernel> {
     let description = route::<T>(variant.name, input.operation());
     let pool = BenchmarkPool::new(threads);
-    #[cfg(feature = "operations")]
+    #[cfg(feature = "parallel-operations")]
     if matches!(input.operation(), Operation::Argsort {}) {
         return operations::parallel_indices(
             variant,
@@ -59,9 +59,9 @@ fn route<T: TesseraAdapter>(implementation: &str, operation: &Operation) -> &'st
     match (implementation, operation) {
         ("tessera", Operation::Sort {}) => T::PARALLEL_SORT_ROUTE,
         ("rayon-stable", Operation::Sort {}) => "rayon par_sort_by in a caller-owned pool",
-        #[cfg(feature = "operations")]
+        #[cfg(feature = "parallel-operations")]
         ("tessera", Operation::Argsort {}) => T::PARALLEL_ARGSORT_ROUTE,
-        #[cfg(feature = "operations")]
+        #[cfg(feature = "parallel-operations")]
         ("rayon-stable", Operation::Argsort {}) => {
             "rayon par_sort_by on indices in a caller-owned pool"
         }

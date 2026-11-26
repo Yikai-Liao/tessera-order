@@ -83,7 +83,7 @@ distributions = [
 # One required SIMD backend; Cloud history lives under this Testbed.
 testbed = "ci"
 # The continuous plan's parallel and operation cases select these harness features.
-features = ["operations", "rayon"]
+features = ["operations", "rayon", "parallel-operations"]
 
 [inputs]
 lengths = [1000,65536,1000000,10000000]

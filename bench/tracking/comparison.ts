@@ -220,10 +220,16 @@ export function trackingScaling(
   const run = (name: string, t: number) =>
     runs.get(columnId({ implementation: name, execution: `t${t}` }));
   const columns = [...runs.keys()].map(parseColumnId);
+  const hasOperation = (entry: TrackingRun | undefined) =>
+    entry !== undefined &&
+    Object.keys(entry.values).some((id) => parseCriterionId(id).operation.kind === operation.kind);
   const counts = columns
     .filter((column) => column.implementation === "tessera")
     .map((column) => executionThreads(column.execution))
-    .filter((t): t is number => t !== undefined && run(referenceId, t) !== undefined)
+    .filter(
+      (t): t is number =>
+        t !== undefined && hasOperation(run("tessera", t)) && hasOperation(run(referenceId, t)),
+    )
     .toSorted((a, b) => a - b);
   if (counts[0] !== 1) return null;
   const time = (name: string, t: number, id: string) => timed(run(name, t), id, `t${t}`)?.[0];

@@ -29,12 +29,11 @@ import {
   validateLayoutBuilds,
 } from "./layout.ts";
 import {
-  isOperation,
-  isParallel,
   type LocalRun,
   type PreparedPair,
   type RevisionPair,
   readPrepared,
+  revisionFeatures,
   revisionThreads,
   shardCases,
   summarizeLocal,
@@ -404,7 +403,6 @@ export async function compareLocal(options: LocalOptions) {
     throw new Error("Preparation requires a complete non-layout revision pair");
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const parallel = isParallel(options.plan);
   const cpu = await comparisonCpus(revisionThreads(options.plan), options.cpu);
   options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
@@ -441,7 +439,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        [...(parallel ? ["rayon"] : []), ...(isOperation(options.plan) ? ["operations"] : [])],
+        revisionFeatures(options.plan),
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );

@@ -9,7 +9,7 @@ import { catalog, criterionId, SORT } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
 import { loadPlan } from "../plan.ts";
 import { simdFeatures } from "../workspace.ts";
-import { revisionThreads, summarizeLocal } from "./model.ts";
+import { revisionFeatures, revisionThreads, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
 import { measureSamples, serialLanes } from "./samples.ts";
@@ -181,6 +181,22 @@ test("revision scheduling reserves the largest selected worker count", async () 
       include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
     }),
     4,
+  );
+  // Mixed serial-operation and parallel-sort plans must not require `parallel-operations`,
+  // so comparisons against pre-par_argsort revisions continue to build.
+  assert.deepEqual(
+    revisionFeatures({
+      ...local,
+      include: [{ operation: { kind: "argsort" }, executions: ["serial"] }, { executions: ["t4"] }],
+    }),
+    ["rayon", "operations"],
+  );
+  assert.deepEqual(
+    revisionFeatures({
+      ...local,
+      include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
+    }),
+    ["rayon", "operations", "parallel-operations"],
   );
   assert.throws(
     () =>

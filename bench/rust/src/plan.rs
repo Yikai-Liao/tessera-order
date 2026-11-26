@@ -913,7 +913,7 @@ mod tests {
                 found.is_some(),
                 "missing required continuous parallel argsort: argsort/{ty}/{distribution}/{len}/s1"
             );
-            #[cfg(all(feature = "operations", feature = "rayon"))]
+            #[cfg(feature = "parallel-operations")]
             assert!(
                 tessera.supports(
                     &crate::CaseInput::new(&found.unwrap().probe()),

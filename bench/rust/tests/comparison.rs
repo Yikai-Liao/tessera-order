@@ -321,7 +321,7 @@ fn parallel_adapters_validate_records() {
     fs::remove_dir_all(directory).unwrap();
 }
 
-#[cfg(all(feature = "operations", feature = "rayon"))]
+#[cfg(feature = "parallel-operations")]
 #[test]
 fn parallel_argsort_validates_above_cutoff() {
     let directory = std::env::temp_dir().join(format!(
@@ -348,8 +348,7 @@ fn parallel_argsort_validates_above_cutoff() {
         .unwrap(),
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_compare"))
-        .arg("validate")
+    let output = Command::new(env!("CARGO_BIN_EXE_memory"))
         .arg("--plan")
         .arg(&plan)
         .arg("--out")
@@ -361,5 +360,21 @@ fn parallel_argsort_validates_above_cutoff() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let journal = fs::read_to_string(directory.join("memory.jsonl")).unwrap();
+    let rows: Vec<serde_json::Value> = journal
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for column in ["tessera/t4", "rayon-stable/t4"] {
+        for distribution in ["random", "d16"] {
+            let expected = format!("argsort/row_u64/{distribution}/65537/s1");
+            assert!(
+                rows.iter().any(|row| {
+                    row["case_id"] == expected && row["column"] == column && row["verified"] == true
+                }),
+                "missing verified memory row for {column} on {expected}"
+            );
+        }
+    }
     fs::remove_dir_all(directory).unwrap();
 }

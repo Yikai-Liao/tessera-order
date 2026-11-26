@@ -63,7 +63,7 @@ pub(in crate::comparison) fn indices<T: BenchmarkRecord>(
 }
 
 /// Prepares a parallel argsort kernel whose caller-owned pool runs `worker_threads` workers.
-#[cfg(feature = "rayon")]
+#[cfg(feature = "parallel-operations")]
 pub(super) fn parallel_indices<T: BenchmarkRecord>(
     variant: Variant,
     input: Rc<PreparedRecords<T>>,
@@ -509,7 +509,7 @@ mod tests {
         assert!(wrong.check().is_err());
     }
 
-    #[cfg(feature = "rayon")]
+    #[cfg(feature = "parallel-operations")]
     #[test]
     fn parallel_argsort_validates_exact_stable_permutation() {
         let len = 4097;

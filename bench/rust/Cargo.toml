@@ -13,6 +13,8 @@ rayon = ["tessera-order/rayon"]
 compare-native = []
 # Current serial operation adapters; historical full-sort builds leave this off.
 operations = []
+# Parallel operation adapters beyond full sorting; left off for pre-par_argsort revisions.
+parallel-operations = ["operations", "rayon"]
 
 [dependencies]
 rayon = "1.12"

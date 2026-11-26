@@ -10,6 +10,7 @@ import { z } from "zod";
 import {
   caseId,
   columnId,
+  criterionId,
   executionThreads,
   implementation,
   type Operation,
@@ -1276,7 +1277,7 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.equal(trackingScaling(latest), null);
 });
 
-test("argsort section adds parallel scaling with serial Tessera argsort as composition baseline", () => {
+test("argsort section adds parallel scaling with serial Tessera argsort as composition baseline", async () => {
   const tracked = (values: Record<string, number>, execution = "serial") =>
     runSchema.parse({
       ...run,
@@ -1286,21 +1287,45 @@ test("argsort section adds parallel scaling with serial Tessera argsort as compo
     });
   const argsort = { kind: "argsort" } as const;
   const referenceId = referenceColumn(argsort, "t1")!.implementation;
+  // Derive 1M argsort cases from the actual continuous plan so `tessera/serial` must cover
+  // every parallel 1M argsort input; also include sort-only `t2` runs to verify stale sort-only
+  // pools do not suppress a valid argsort scaling figure on `t1` and `t4`.
+  const plan = await loadPlan("continuous");
+  const expand = (derived: typeof plan, execution: string, ns: number) =>
+    Object.fromEntries(
+      derived.include.flatMap((rule) =>
+        (rule.types ?? []).flatMap((ty) =>
+          (rule.distributions ?? []).flatMap((distribution) =>
+            (rule.lengths ?? [])
+              .filter((len): len is number => typeof len === "number")
+              .map((len) => [
+                criterionId(
+                  { ty, distribution, len, operation: rule.operation ?? SORT },
+                  execution as "serial" | "t1" | "t4",
+                ),
+                ns,
+              ]),
+          ),
+        ),
+      ),
+    );
   const runs = new Map([
     [
       "tessera",
       [
-        tracked({ "rust/argsort/u64/random/1000000/s1/serial": 50 }),
-        tracked({ "rust/argsort/u64/random/1000000/s1/t1": 50 }, "t1"),
-        tracked({ "rust/argsort/u64/random/1000000/s1/t2": 25 }, "t2"),
+        tracked(expand(columnPlan(plan, trackingColumn("tessera/serial")), "serial", 50)),
+        tracked(expand(columnPlan(plan, trackingColumn("tessera/t1")), "t1", 50), "t1"),
+        tracked({ "rust/sort/u64/random/1000000/s1/t2": 25 }, "t2"),
+        tracked(expand(columnPlan(plan, trackingColumn("tessera/t4")), "t4", 25), "t4"),
       ],
     ],
     ["std-stable", [tracked({ "rust/argsort/u64/random/1000000/s1/serial": 200 })]],
     [
       referenceId,
       [
-        tracked({ "rust/argsort/u64/random/1000000/s1/t1": 200 }, "t1"),
-        tracked({ "rust/argsort/u64/random/1000000/s1/t2": 100 }, "t2"),
+        tracked(expand(columnPlan(plan, trackingColumn(`${referenceId}/t1`)), "t1", 200), "t1"),
+        tracked({ "rust/sort/u64/random/1000000/s1/t2": 100 }, "t2"),
+        tracked(expand(columnPlan(plan, trackingColumn(`${referenceId}/t4`)), "t4", 100), "t4"),
       ],
     ],
   ]);
@@ -1308,9 +1333,15 @@ test("argsort section adds parallel scaling with serial Tessera argsort as compo
   const figure = section.figures.find((entry) => entry.name === "parallel")!;
   assert.equal(figure.subject, "Parallel argsort");
   assert.match(figure.table, /Serial Tessera argsort \(composition\)/);
-  assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1\.00× \| 2× \| 4× \|/);
   const scaling = trackingScaling(latestRuns(runs)!.runs, argsort)!;
+  assert.deepEqual(scaling.threads, [1, 4]);
+  assert.equal(scaling.n, 1_000_000);
+  assert.equal(scaling.inputs.length, 4);
   assert.equal(scaling.composition?.implementation, "tessera");
+  assert.equal(scaling.composition?.speeds.length, 4);
+  // Sort-only `t2` remains eligible for the full-sort figure.
+  const sortScaling = trackingScaling(latestRuns(runs)!.runs, SORT)!;
+  assert.deepEqual(sortScaling.threads, [1, 2, 4]);
 });
 
 test("growth uses one serial plan per operation and its supported routes", async () => {

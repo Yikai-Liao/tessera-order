@@ -25,7 +25,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "rayon")]
     const PARALLEL_SORT_ROUTE: &'static str;
     /// The public call [`Self::par_argsort`] makes.
-    #[cfg(all(feature = "operations", feature = "rayon"))]
+    #[cfg(feature = "parallel-operations")]
     const PARALLEL_ARGSORT_ROUTE: &'static str;
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
@@ -33,7 +33,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
     /// Current parallel argsort entry points.
-    #[cfg(all(feature = "operations", feature = "rayon"))]
+    #[cfg(feature = "parallel-operations")]
     fn par_argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
     fn sort_index_rows(records: &[Self]) -> Vec<usize>;
@@ -91,7 +91,7 @@ macro_rules! slice_operations {
     ($argsort:ident, $par_argsort:ident, $select:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
-        #[cfg(all(feature = "operations", feature = "rayon"))]
+        #[cfg(feature = "parallel-operations")]
         fn par_argsort(records: &[Self]) -> Vec<usize> {
             tessera_order::$par_argsort(records $(, $key)?)
         }
@@ -112,7 +112,7 @@ macro_rules! tessera_keys {
             const SORT_ROUTE: &'static str = "tessera_order::stable_sort";
             #[cfg(feature = "rayon")]
             const PARALLEL_SORT_ROUTE: &'static str = "tessera_order::par_stable_sort in a caller-owned pool";
-            #[cfg(all(feature = "operations", feature = "rayon"))]
+            #[cfg(feature = "parallel-operations")]
             const PARALLEL_ARGSORT_ROUTE: &'static str =
                 "tessera_order::par_argsort in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
@@ -147,7 +147,7 @@ macro_rules! tessera_records {
             #[cfg(feature = "rayon")]
             const PARALLEL_SORT_ROUTE: &'static str =
                 "tessera_order::par_stable_sort_by_key in a caller-owned pool";
-            #[cfg(all(feature = "operations", feature = "rayon"))]
+            #[cfg(feature = "parallel-operations")]
             const PARALLEL_ARGSORT_ROUTE: &'static str =
                 "tessera_order::par_argsort_by_key in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
@@ -438,7 +438,8 @@ impl Variant {
         cfg!(feature = "rayon")
             && self.parallel_sort.is_some()
             && (operation.is_sort()
-                || (cfg!(feature = "operations") && matches!(operation, Operation::Argsort {})))
+                || (cfg!(feature = "parallel-operations")
+                    && matches!(operation, Operation::Argsort {})))
     }
 
     /// Checks capabilities without starting workers for a parallel execution.
@@ -645,6 +646,11 @@ mod tests {
             .into_iter()
             .filter(|v| !v.name.starts_with("tessera"))
         {
+            if !cfg!(feature = "parallel-operations")
+                && variant.parallel_sort == Some(crate::plan::ParallelSort::Only)
+            {
+                continue;
+            }
             for operation in &operations {
                 let kind = operation.kind();
                 let supported = crate::plan::catalog().types.iter().any(|ty| {

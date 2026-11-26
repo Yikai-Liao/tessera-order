@@ -44,6 +44,25 @@ export function isParallel(plan: Plan) {
   return planExecutions(plan).some((execution) => execution !== "serial");
 }
 
+/** Whether a plan measures a parallel non-sort operation, which needs `parallel-operations`. */
+export function isParallelOperation(plan: Plan) {
+  return plan.include.some(
+    (rule) =>
+      rule.operation &&
+      rule.operation.kind !== "sort" &&
+      (rule.executions ?? ["serial"]).some((execution) => execution !== "serial"),
+  );
+}
+
+/** Harness Cargo features needed to compile the calls a plan selects. */
+export function revisionFeatures(plan: Plan): string[] {
+  return [
+    ...(isParallel(plan) ? ["rayon"] : []),
+    ...(isOperation(plan) ? ["operations"] : []),
+    ...(isParallelOperation(plan) ? ["parallel-operations"] : []),
+  ];
+}
+
 /** One deterministic partition of a complete timed-ID listing. */
 export interface Shard {
   index: number;

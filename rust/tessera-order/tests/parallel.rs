@@ -622,6 +622,25 @@ fn par_argsort_matches_serial_in_caller_pool() {
     flat_ascending[50..].fill(9);
     let mut flat_descending = vec![9u64; len];
     flat_descending[50..].fill(7);
+    // Huge-tie bands with a nonzero packed prefix (so `sub == 0` requires real
+    // unmasking) and unsorted prefix-0 outliers (`i ^ 1`) supplying nonzero
+    // `remaining` bits without tripping the ascending fast path:
+    // (1) all-equal huge band, (2) inverted late witness, (3) cross-chunk
+    // constant halves where only cross-chunk `(u1 | u2, i1 & i2)` sees variation.
+    const HUGE_PREFIX: u64 = 1u64 << 62;
+    let outliers = 128; // keeps huge-band length (len - outliers) divisible by 4
+    let huge_tie = |fill: u64| {
+        let mut data = vec![fill; len];
+        for (i, slot) in data.iter_mut().take(outliers).enumerate() {
+            *slot = (i ^ 1) as u64;
+        }
+        data
+    };
+    let skew_equal_huge = huge_tie(HUGE_PREFIX);
+    let mut skew_late_low_bit = huge_tie(HUGE_PREFIX | 1);
+    skew_late_low_bit[len - 1] = HUGE_PREFIX;
+    let mut skew_cross_chunk = huge_tie(HUGE_PREFIX | 1);
+    skew_cross_chunk[outliers + (len - outliers) / 2..].fill(HUGE_PREFIX);
     for case in [
         ascending,
         strict_desc,
@@ -630,6 +649,9 @@ fn par_argsort_matches_serial_in_caller_pool() {
         flat_unsorted,
         flat_ascending,
         flat_descending,
+        skew_equal_huge,
+        skew_late_low_bit,
+        skew_cross_chunk,
     ] {
         assert_eq!(
             pool.install(|| par_argsort(&case)),

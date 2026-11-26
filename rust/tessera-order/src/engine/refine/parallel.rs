@@ -115,8 +115,7 @@ pub(crate) fn argsort<T: Sync, K: RadixKey>(
     });
     let (mut scratch, mut extract) = (Workspace::new(), indexed);
     for ties in huge {
-        ties.par_iter_mut().for_each(|w| *w &= index_mask);
-        let sub = scan_varying_bits(ties, remaining, &mut extract);
+        let sub = unmask_and_scan_varying(ties, index_mask, remaining, values, &key);
         if sub != 0 {
             Sorter {
                 scratch: &mut scratch,
@@ -127,6 +126,67 @@ pub(crate) fn argsort<T: Sync, K: RadixKey>(
         }
     }
     words
+}
+
+/// Unmasks a large tie band in parallel while scanning its remaining varying
+/// bits. Each of at most `P` chunks checks a shared saturation flag at entry
+/// and at bounded batch intervals (64 growing to `MAX_SCAN_BATCH`), skipping
+/// further key reads once any chunk saturates `remaining`.
+fn unmask_and_scan_varying<T: Sync, K: RadixKey>(
+    ties: &mut [usize],
+    index_mask: usize,
+    remaining: u128,
+    values: &[T],
+    key: &(impl Fn(&T) -> K + Sync),
+) -> u128 {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const MAX_SCAN_BATCH: usize = 4096;
+
+    let saturated = AtomicBool::new(false);
+    let chunk_len = ties.len().div_ceil(rayon::current_num_threads()).max(1);
+    let pair = ties
+        .par_chunks_mut(chunk_len)
+        .map(|chunk| {
+            if saturated.load(Ordering::Relaxed) {
+                for slot in chunk {
+                    *slot &= index_mask;
+                }
+                return (0u128, u128::MAX);
+            }
+            let (first_slot, rest) = chunk.split_first_mut().unwrap();
+            *first_slot &= index_mask;
+            let first = key(&values[*first_slot]).encode();
+            let (mut union, mut intersection) = (first, first);
+            let mut i = 0;
+            let mut batch = 64;
+            while i < rest.len() {
+                let end = i + batch.min(rest.len() - i);
+                for slot in &mut rest[i..end] {
+                    *slot &= index_mask;
+                    let k = key(&values[*slot]).encode();
+                    union |= k;
+                    intersection = intersection & k;
+                }
+                i = end;
+                let done = (union.to_u128() ^ intersection.to_u128()) & remaining == remaining;
+                if done {
+                    saturated.store(true, Ordering::Relaxed);
+                }
+                if done || saturated.load(Ordering::Relaxed) {
+                    for slot in &mut rest[i..] {
+                        *slot &= index_mask;
+                    }
+                    break;
+                }
+                batch = batch.saturating_mul(2).min(MAX_SCAN_BATCH);
+            }
+            (union.to_u128(), intersection.to_u128())
+        })
+        .reduce_with(|(u1, i1), (u2, i2)| (u1 | u2, i1 & i2));
+    if saturated.load(Ordering::Relaxed) {
+        return remaining;
+    }
+    pair.map_or(0, |(u, i)| (u ^ i) & remaining)
 }
 
 impl<T: Send, E: Extract<T> + Clone + Send + Sync> RefineRoot<T, E> for ParallelRoot {

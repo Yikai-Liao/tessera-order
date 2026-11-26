@@ -31,7 +31,7 @@ The same engine sorts records, sorts index payloads for `argsort`, and can skip 
 - **O(√n) sorting scratch**, through a stable in-place block partition and a bounded tile buffer. Cached keys and argsort's index output use O(n) space; parallel sorting uses O(P√n) scratch for P participating threads.
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
-- **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
+- **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`. Unreleased 0.2 adds fixed-width tuples of supported keys (requires a [development checkout](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#try-the-development-api)); see [key encoding](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#key-encoding) for supported types and limits.
 - **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start
@@ -71,7 +71,7 @@ The following additions are new in 0.2 and **unreleased**. They require a [devel
 | `select_nth` / `_by_key` | Place one ranked record and partition around it |
 | `argsort` / `_by_key` | Return sorted indices without moving source records |
 
-See the [guide](docs/guide/getting-started.md#select-one-rank) for examples and [migration from earlier development snapshots](docs/guide/getting-started.md#migrate-from-earlier-development-snapshots).
+Fixed-width tuple keys are also new in 0.2 and unreleased ([multi-field sorting](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#sort-by-several-fields)). See the [guide](docs/guide/getting-started.md#select-one-rank) for examples and [migration from earlier development snapshots](docs/guide/getting-started.md#migrate-from-earlier-development-snapshots).
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 

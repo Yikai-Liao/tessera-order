@@ -155,8 +155,14 @@ pub(super) fn partition_for_test<'records, T: Send, C: Classify<T> + Clone + Sen
     } else {
         tasks.into_iter().map(scatter_shard).collect()
     };
-    // SAFETY: completed shard guards cover `records` consecutively from `input`.
-    unsafe { finish::complete_for_test(input, input_len, &mut partitions, parallel, visit) }
+    if parallel {
+        let noop = |_: usize, _: Range<usize>, _: &mut [T]| {};
+        // SAFETY: completed shard guards cover `records` consecutively from `input`.
+        unsafe { finish::complete(input, input_len, &mut partitions, visit.unwrap_or(&noop)) }
+    } else {
+        // SAFETY: completed shard guards cover `records` consecutively from `input`.
+        unsafe { finish::complete_serial_for_test(input, input_len, &mut partitions, visit) }
+    }
 }
 
 #[cfg(test)]

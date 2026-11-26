@@ -537,28 +537,23 @@ pub(super) unsafe fn complete<'records, T: Send>(
     core::mem::take(&mut completion.ends)
 }
 
-/// Completes scattered partitions for tests that select serial execution under
-/// Miri or omit a band callback.
+/// Completes scattered partitions sequentially for Miri tests that exercise
+/// the parallel ledger without spawning Rayon workers.
 ///
 /// # Safety
 ///
 /// The [`build_completion`] requirements hold.
 #[cfg(all(test, feature = "rayon"))]
-pub(super) unsafe fn complete_for_test<'records, T: Send>(
+pub(super) unsafe fn complete_serial_for_test<'records, T: Send>(
     input: *mut T,
     input_len: usize,
     partitions: &mut [Partition<'records, '_, T>],
-    parallel: bool,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
-    use rayon::prelude::*;
     // SAFETY: forwarded from the caller.
     let mut completion = unsafe { build_completion::<T, Parallel>(input, input_len, partitions) };
-    let run = |bucket: &mut Bucket| bucket.finish(&completion.storage, visit);
-    if parallel {
-        completion.buckets.par_iter_mut().for_each(run);
-    } else {
-        completion.buckets.iter_mut().for_each(run);
+    for bucket in &mut completion.buckets {
+        bucket.finish(&completion.storage, visit);
     }
     core::mem::take(&mut completion.ends)
 }

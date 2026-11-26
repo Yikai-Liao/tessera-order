@@ -9,29 +9,46 @@
 
 use crate::engine::block::Classify;
 use core::cmp::Reverse;
+use core::num::NonZero;
 use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 
 /// A key type that Tessera can sort by.
 ///
-/// Implemented for every primitive integer from `u8`/`i8` to `u128`/`i128`
-/// (including `usize` and `isize`), for `f32` and `f64`, for
-/// [`Reverse<K>`](Reverse) of any supported key, and for tuples of 2 to 16
-/// supported keys whose encoded widths sum to at most 128 bits. The trait is
-/// sealed: other types, 1-tuples, and tuples wider than 128 bits cannot
-/// implement it, so an unsupported key is a compile error.
+/// Implemented for `bool`, `char`, every primitive integer from `u8`/`i8` to
+/// `u128`/`i128` (including `usize` and `isize`), [`NonZero<T>`](NonZero) for
+/// every primitive integer `T`, `f32` and `f64`, fixed-size byte arrays
+/// `[u8; 1]` through `[u8; 16]`, [`Reverse<K>`](Reverse) of any supported key,
+/// and tuples of 2 to 16 supported keys whose encoded widths sum to at most
+/// 128 bits. The trait is sealed: other types, empty or over-wide byte arrays,
+/// 1-tuples, and tuples wider than 128 bits cannot implement it, so an
+/// unsupported key is a compile error.
 ///
-/// Each key is encoded as an unsigned integer whose integer order is the key
-/// order:
+/// Integers, `bool`, `char`, [`NonZero<T>`](NonZero) and byte arrays sort in
+/// their standard [`Ord`] order, `f32` and `f64` follow [`f64::total_cmp`],
+/// [`Reverse<K>`](Reverse) reverses the order of `K` while preserving stability
+/// for equal keys, and tuples compare lexicographically by each field's Tessera
+/// key order (so floats inside tuples follow `total_cmp`, e.g. `(false, -0.0)`
+/// sorts before `(false, +0.0)`). See
+/// [`conformance/semantics.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#key-encoding)
+/// for the normative bit-level encoding and padding rules.
 ///
-/// | Key | Encoding |
-/// |---|---|
-/// | Unsigned integers | Unchanged |
-/// | Signed integers | Sign bit flipped |
-/// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
-/// | `Reverse<K>` | All effective bits of the encoding of `K` inverted |
-/// | Tuples (2 to 16 fields, up to 128 encoded bits) | Fields concatenated in order into the narrowest covering unsigned integer, first field in the highest bits |
+/// Unsupported byte-array lengths, one-field tuples, and tuples whose fields
+/// exceed 128 encoded bits fail to compile:
 ///
-/// One-field tuples and tuples whose fields exceed 128 encoded bits fail to compile:
+/// ```compile_fail
+/// let mut keys = [[0u8; 0]];
+/// tessera_order::sort(&mut keys);
+/// ```
+///
+/// ```compile_fail
+/// let mut keys = [[0u8; 17]];
+/// tessera_order::sort(&mut keys);
+/// ```
+///
+/// ```compile_fail
+/// let mut keys = [([0u8; 13], 'a')];
+/// tessera_order::sort(&mut keys);
+/// ```
 ///
 /// ```compile_fail
 /// let mut keys = [(0u8,)];
@@ -54,6 +71,10 @@ pub trait RadixKey: sealed::Sealed + Copy + Send + Sync {
     type Width: BitWidth;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
+    /// Mask of encoded bits that can take both 0 and 1 across valid values
+    /// of this key, used by root variation scans to stop early.
+    #[doc(hidden)]
+    const VARYING_MASK: u128 = Self::Width::MASK;
     /// Inverts [`Self::encode`] bit for bit, including NaN payloads.
     #[doc(hidden)]
     fn decode(encoded: Self::Encoded) -> Self;
@@ -202,6 +223,7 @@ float!((f32, u32), (f64, u64));
 impl<K: RadixKey> RadixKey for Reverse<K> {
     type Encoded = K::Encoded;
     type Width = K::Width;
+    const VARYING_MASK: u128 = K::VARYING_MASK;
     #[inline]
     fn encode(self) -> Self::Encoded {
         !self.0.encode() & K::Encoded::from_u128(K::Width::MASK)
@@ -218,6 +240,7 @@ where
 {
     type Width = <A::Width as SumWidth<B::Width>>::Sum;
     type Encoded = <Self::Width as BitWidth>::Encoded;
+    const VARYING_MASK: u128 = (A::VARYING_MASK << B::Width::BITS) | B::VARYING_MASK;
 
     #[inline]
     fn encode(self) -> Self::Encoded {
@@ -244,6 +267,7 @@ macro_rules! tuple_keys {
         {
             type Width = <<($($head,)+) as RadixKey>::Width as SumWidth<$last::Width>>::Sum;
             type Encoded = <Self::Width as BitWidth>::Encoded;
+            const VARYING_MASK: u128 = <(($($head,)+), $last) as RadixKey>::VARYING_MASK;
 
             #[inline]
             fn encode(self) -> Self::Encoded {
@@ -264,6 +288,86 @@ macro_rules! tuple_keys {
     (@step [$($head:ident),+];) => {};
 }
 tuple_keys!(@step [A, B]; C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+
+impl RadixKey for bool {
+    type Encoded = u8;
+    type Width = Width<8>;
+    const VARYING_MASK: u128 = 1;
+
+    #[inline]
+    fn encode(self) -> u8 {
+        u8::from(self)
+    }
+
+    #[inline]
+    fn decode(encoded: u8) -> bool {
+        debug_assert!(encoded <= 1);
+        encoded != 0
+    }
+}
+
+impl RadixKey for char {
+    type Encoded = u32;
+    type Width = Width<32>;
+    const VARYING_MASK: u128 = 0x001f_ffff;
+
+    #[inline]
+    fn encode(self) -> u32 {
+        u32::from(self)
+    }
+
+    #[inline]
+    fn decode(encoded: u32) -> char {
+        char::from_u32(encoded).expect("valid encoded char")
+    }
+}
+
+macro_rules! non_zero {
+    ($($ty:ty),* $(,)?) => {$(
+        impl RadixKey for NonZero<$ty> {
+            type Encoded = <$ty as RadixKey>::Encoded;
+            type Width = <$ty as RadixKey>::Width;
+
+            #[inline]
+            fn encode(self) -> Self::Encoded {
+                self.get().encode()
+            }
+
+            #[inline]
+            fn decode(encoded: Self::Encoded) -> Self {
+                NonZero::new(<$ty>::decode(encoded)).expect("valid encoded non-zero integer")
+            }
+        }
+    )*};
+}
+non_zero!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+);
+
+macro_rules! byte_arrays {
+    ($($n:literal),* $(,)?) => {$(
+        impl RadixKey for [u8; $n] {
+            type Width = Width<{ $n * 8 }>;
+            type Encoded = <Self::Width as BitWidth>::Encoded;
+
+            #[inline]
+            fn encode(self) -> Self::Encoded {
+                let mut buf = [0u8; 16];
+                buf[16 - $n..].copy_from_slice(&self);
+                Self::Encoded::from_u128(u128::from_be_bytes(buf))
+            }
+
+            #[inline]
+            fn decode(encoded: Self::Encoded) -> Self {
+                let bytes = encoded.to_u128().to_be_bytes();
+                let mut out = [0u8; $n];
+                out.copy_from_slice(&bytes[16 - $n..]);
+                out
+            }
+        }
+    )*};
+}
+byte_arrays!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
 /// Widest key window that [`try_count_window`] counts and fills, in bits.
 const SMALL_WINDOW_BITS: usize = 8;
@@ -296,8 +400,9 @@ pub(crate) unsafe trait Extract<T> {
     type Value: Unsigned;
 
     /// Mask of bits that may vary in keys produced by this extractor.
-    /// Padded tuple keys exclude their guaranteed-zero high bits so the root
-    /// variation scan still stops early once every effective bit has varied.
+    /// Padded keys (tuples, byte arrays) and narrow-range keys (`bool`, `char`)
+    /// exclude their guaranteed-constant bits so the root variation scan still
+    /// stops early once every varying bit has taken both states.
     const KEY_MASK: u128 = u128::MAX >> (128 - Self::Value::BITS);
 
     /// Returns the encoded key of `record`.
@@ -467,7 +572,7 @@ pub(crate) struct ByKey<F>(pub F);
 // SAFETY: user callbacks retain cached classifications, even if they panic or change keys.
 unsafe impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
     type Value = K::Encoded;
-    const KEY_MASK: u128 = K::Width::MASK;
+    const KEY_MASK: u128 = K::VARYING_MASK;
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
         (self.0)(record).encode()
@@ -488,7 +593,7 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
         finish_msd: crate::engine::portable_simd::finish_msd::<K>,
     });
     type Value = K::Encoded;
-    const KEY_MASK: u128 = K::Width::MASK;
+    const KEY_MASK: u128 = K::VARYING_MASK;
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
@@ -810,6 +915,89 @@ mod tests {
             });
             round_trip(Reverse(Reverse(value as i32)), |a, b| a == b);
         }
+
+        fn check_ordered<K: RadixKey + Eq>(sorted: &[K]) {
+            let (mut prev, mut prev_rev) = (None, None);
+            for &key in sorted {
+                let enc = key.encode();
+                assert_eq!(enc.to_u128() & !K::Width::MASK, 0);
+                assert!(K::decode(enc) == key);
+                assert!(prev.replace(enc).is_none_or(|p| p < enc));
+
+                let rev = Reverse(key);
+                let rev_enc = rev.encode();
+                assert_eq!(rev_enc.to_u128() & !K::Width::MASK, 0);
+                assert!(Reverse::<K>::decode(rev_enc) == rev);
+                assert!(prev_rev.replace(rev_enc).is_none_or(|p| p > rev_enc));
+            }
+        }
+
+        assert_eq!(<bool as RadixKey>::Width::BITS, 8);
+        assert_eq!(<char as RadixKey>::Width::BITS, 32);
+        assert_eq!(<([u8; 12], char) as RadixKey>::Width::BITS, 128);
+        assert_eq!(false.encode(), 0u8);
+        assert_eq!(true.encode(), 1u8);
+        assert_eq!('A'.encode(), 0x41u32);
+        assert_eq!(char::MAX.encode(), 0x10_ffffu32);
+        check_ordered(&[false, true]);
+        check_ordered(&['\0', 'A', '\u{d7ff}', '\u{e000}', '🦀', char::MAX]);
+
+        macro_rules! check_nz {
+            ($($ty:ty: [$($mid:expr),*]),* $(,)?) => {$(
+                assert_eq!(<NonZero<$ty> as RadixKey>::Width::BITS, <$ty as RadixKey>::Width::BITS);
+                check_ordered(&[NonZero::<$ty>::MIN, $(NonZero::new($mid as $ty).unwrap(),)* NonZero::<$ty>::MAX]);
+            )*};
+        }
+        check_nz!(
+            u8: [2], u16: [2], u32: [2], u64: [2], u128: [2], usize: [2],
+            i8: [-1, 1], i16: [-1, 1], i32: [-1, 1], i64: [-1, 1], i128: [-1, 1], isize: [-1, 1],
+        );
+
+        macro_rules! check_bytes {
+            ($($n:literal),*) => {$(
+                assert_eq!(<[u8; $n] as RadixKey>::Width::BITS, $n * 8);
+                assert_eq!(
+                    size_of::<<[u8; $n] as RadixKey>::Encoded>(),
+                    usize::next_power_of_two($n)
+                );
+                let (mut lo, mut hi) = ([0u8; $n], [0u8; $n]);
+                (lo[$n - 1], hi[0]) = (1, 0x11);
+                let mid = core::array::from_fn(|i| (0x10 + i) as u8);
+                check_ordered(&[[0u8; $n], lo, mid, hi, [0xffu8; $n]]);
+            )*};
+        }
+        check_bytes!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+
+        let z = [0u8; 12];
+        check_ordered(&[(z, '\0'), (z, char::MAX), ([0xff; 12], 'a')]);
+        let nz = |v| NonZero::new(v).unwrap();
+        check_ordered(&[
+            (false, NonZero::<i16>::MIN, [0; 3], Reverse(char::MAX)),
+            (false, nz(-1i16), [0x12, 0x34, 0x56], Reverse('\u{e000}')),
+            (false, nz(1i16), [0x12, 0x34, 0x57], Reverse('\u{d7ff}')),
+            (true, NonZero::<i16>::MAX, [0xff; 3], Reverse('\0')),
+        ]);
+    }
+
+    #[test]
+    fn counted_primitive_windows_skip_empty_and_keep_outside_bits() {
+        fn check<K: RadixKey + Ord + core::fmt::Debug>(input: &[K], low: usize, width: usize) {
+            let (mut actual, mut expected) = (input.to_vec(), input.to_vec());
+            expected.sort();
+            assert!(count(&Direct, &mut actual, low, width));
+            assert_eq!(actual, expected);
+
+            let mut rev: Vec<_> = input.iter().copied().map(Reverse).collect();
+            let mut expected_rev = rev.clone();
+            expected_rev.sort();
+            assert!(count(&Direct, &mut rev, low, width));
+            assert_eq!(rev, expected_rev);
+        }
+        check(&[true, false, true, false], 0, 1);
+        check(&['\u{e1ff}', '\u{d7ff}', '\u{e0ff}', '\u{d6ff}'], 8, 6);
+        check(&[3u8, 1, 2].map(|v| NonZero::new(v).unwrap()), 0, 2);
+        check(&[-2i8, 2, -1, 1].map(|v| NonZero::new(v).unwrap()), 0, 8);
+        check(&[0x35, 0x02, 0x3f, 0x00].map(|b| [0xab, b, 0xef]), 8, 6);
     }
 
     #[test]

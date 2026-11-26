@@ -32,10 +32,14 @@ Each supported key maps to an unsigned integer that covers its encoded bits. Rec
 
 | Key type | Encoding |
 |---|---|
+| `bool` | `0u8` for `false`, `1u8` for `true` |
+| `char` | Unicode scalar value as `u32` |
 | Unsigned integers | Unchanged |
 | Signed integers | The sign bit is flipped |
+| `NonZero<T>` (primitive integers) | Same encoding as `T` |
 | `f32`, `f64` | If the sign bit is set, all bits are inverted; otherwise only the sign bit is flipped. This matches Rust's `total_cmp`. |
 | 128-bit integers | Compared as a high 64-bit half, then a low 64-bit half. Signed 128-bit keys flip the sign bit of the high half. |
+| `[u8; 1]` … `[u8; 16]` | Big-endian bytes in the narrowest covering unsigned integer, with any unused high bits zeroed |
 | `Reverse<K>` | All effective bits of the encoding of `K` are inverted |
 | Tuples of 2 to 16 fields (up to 128 encoded bits) | Fields are concatenated in order into the narrowest covering unsigned integer, with the first field in the highest bits and any unused high bits zeroed |
 

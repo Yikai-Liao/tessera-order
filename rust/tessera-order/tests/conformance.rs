@@ -5,7 +5,8 @@
 //! the standard library's stable sort.
 
 use std::cmp::Reverse;
-use tessera_order::{sort, sort_by_key};
+use std::num::NonZero;
+use tessera_order::{RadixKey, sort, sort_by_cached_key, sort_by_key};
 
 fn next(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e3779b97f4a7c15);
@@ -58,6 +59,109 @@ fn integer_encodings() {
     check!(
         u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
     );
+}
+
+fn check_sort<K: RadixKey + Ord + core::fmt::Debug>(unsorted: &[K]) {
+    let (mut actual, mut expected) = (unsorted.to_vec(), unsorted.to_vec());
+    expected.sort();
+    sort(&mut actual);
+    assert_eq!(actual, expected);
+    let mut rev: Vec<_> = unsorted.iter().copied().map(Reverse).collect();
+    let mut expected_rev = rev.clone();
+    expected_rev.sort();
+    sort(&mut rev);
+    assert_eq!(rev, expected_rev);
+}
+
+#[test]
+fn primitive_extension_keys() {
+    let mut state = 211;
+    let len = if cfg!(miri) { 80 } else { 2048 };
+
+    // `bool`: direct sort, `Reverse`, and stable predicate partitioning.
+    let bools: Vec<_> = (0..len).map(|_| next(&mut state) & 1 != 0).collect();
+    check_sort(&bools);
+    let mut pred: Vec<_> = (0..len).map(|id| (next(&mut state), id)).collect();
+    let mut exp = pred.clone();
+    exp.sort_by_key(|r| r.0 % 3 == 0);
+    sort_by_cached_key(&mut pred, |r| r.0 % 3 == 0);
+    assert_eq!(pred, exp);
+
+    // `char`: ASCII, BMP, surrogate-adjacent scalars, supplementary plane, `char::MAX`.
+    let special = ['\0', 'A', '\u{d7ff}', '\u{e000}', '🦀', char::MAX];
+    let mut chars: Vec<char> = (0..len)
+        .map(|_| {
+            loop {
+                let raw = (next(&mut state) as u32) % (char::MAX as u32 + 1);
+                if let Some(ch) = char::from_u32(raw) {
+                    break ch;
+                }
+            }
+        })
+        .collect();
+    chars.extend(special);
+    check_sort(&chars);
+
+    // All 12 `NonZero<T>` primitive integer types.
+    macro_rules! check_nz {
+        ($($ty:ty: [$($extra:expr),*]),* $(,)?) => {$(
+            let mut v: Vec<NonZero<$ty>> = (0..len)
+                .map(|_| {
+                    let r = next(&mut state) as $ty;
+                    NonZero::new(if r == 0 { 1 } else { r }).unwrap()
+                })
+                .collect();
+            v.extend([NonZero::<$ty>::MIN, NonZero::<$ty>::MAX $(, NonZero::new($extra as $ty).unwrap())*]);
+            check_sort(&v);
+        )*};
+    }
+    check_nz!(
+        u8: [], u16: [], u32: [], u64: [], u128: [], usize: [],
+        i8: [-1, 1], i16: [-1, 1], i32: [-1, 1], i64: [-1, 1], i128: [-1, 1], isize: [-1, 1],
+    );
+
+    // Representative `[u8; N]` widths (1, padded 3, word 8, full 16 bytes).
+    macro_rules! check_bytes {
+        ($($n:literal),*) => {$(
+            let mut v: Vec<[u8; $n]> = (0..len)
+                .map(|_| {
+                    let b = ((u128::from(next(&mut state)) << 64) | u128::from(next(&mut state)))
+                        .to_le_bytes();
+                    core::array::from_fn(|i| b[i])
+                })
+                .collect();
+            v.extend([[0u8; $n], [0xffu8; $n]]);
+            check_sort(&v);
+        )*};
+    }
+    check_bytes!(1, 3, 8, 16);
+
+    // Mixed tuple, keyed stability, and 128-bit `([u8; 12], char)` boundary.
+    let tuples: Vec<_> = (0..len)
+        .map(|_| {
+            let r = (next(&mut state) % 9) as i16 - 4;
+            let b = next(&mut state).to_le_bytes();
+            (
+                next(&mut state) & 1 != 0,
+                NonZero::new(if r == 0 { -1 } else { r }).unwrap(),
+                [b[0] % 4, b[1] % 5, b[2] % 7],
+                Reverse(special[next(&mut state) as usize % special.len()]),
+            )
+        })
+        .collect();
+    check_sort(&tuples);
+    let mut rows: Vec<_> = tuples.into_iter().enumerate().collect();
+    let mut exp = rows.clone();
+    exp.sort_by_key(|r| r.1);
+    sort_by_key(&mut rows, |r| r.1);
+    assert_eq!(rows, exp);
+    let z = [0u8; 12];
+    check_sort(&[
+        (z, char::MAX),
+        (z, '\0'),
+        ([0xff; 12], 'a'),
+        (z, '\u{e000}'),
+    ]);
 }
 
 #[test]

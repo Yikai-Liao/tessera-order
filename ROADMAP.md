@@ -29,6 +29,8 @@ Close the [short insertion leaf losses](docs/design/evidence.md#short-insertion-
 
 Resolve short-input placement sensitivity for [shared order confirmation](docs/design/evidence.md#shared-order-confirmation-for-serial-operations) before claiming a gain across input sizes.
 
+Evaluate direct-entry forwarding for `NonZero<T>` through transparent integer views separately from SIMD support for restricted-validity key types. Forwarding must preserve the nonzero invariant and does not require changing `SimdKey::store_decoded` into an unsafe method. SIMD pair scans and MSD tile finishing should be evaluated independently, with whole-operation benchmark evidence justifying any additional safety obligations.
+
 Next capabilities follow the [engine capability design](docs/design/operation-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:
 
 - Reuse cached order/variation facts while preserving descending and near-order completion; keep the exactly-once caller-key contract.

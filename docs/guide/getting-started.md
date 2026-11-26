@@ -1,6 +1,6 @@
 # Getting started
 
-Tessera sorts slices by a fixed-width key: an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a tuple of supported keys ([key encoding](../../conformance/semantics.md#key-encoding) for limits). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
+Tessera sorts slices by a fixed-width key (see [key encoding](../../conformance/semantics.md#key-encoding) for supported types and limits). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
 
 This guide follows the main branch, which will become 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
 
@@ -184,7 +184,7 @@ Records need `Send`, and the key function needs `Fn + Sync` because calls overla
 
 ## Versions
 
-The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`. Main renames them and keeps the old names as deprecated aliases. Cached-key sorting, argsort, selection and tuple keys are new and unreleased. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. Main renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples) as unreleased 0.2 changes. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 <a id="try-the-development-api"></a>
 
@@ -201,7 +201,7 @@ These functions appeared only in unreleased checkouts. For `_by_key` variants, u
 
 | Earlier API | Replacement |
 |---|---|
-| `partition` | `sort_by_cached_key(&mut records, \|r\| u8::from(!predicate(r)))` puts matches first and preserves order on both sides. Count matches during extraction to find the split. If the predicate must run for every record, handle slices shorter than two and zero-sized records separately. Cached sorting stores one key per record. |
+| `partition` | `sort_by_cached_key(&mut records, \|r\| !predicate(r))` puts matches first and preserves order on both sides. Count matches during extraction to find the split. If the predicate must run for every record, handle slices shorter than two and zero-sized records separately. Cached sorting stores one key per record. |
 | `k_smallest`, `k_largest` | Sort and take `[..k]`, sorting by `Reverse` for the largest. When `0 < k < len`, you can instead select rank `k` and sort the returned `before` slice, using the reversed order in both calls for the largest. |
 | `partial_sort`, `select_nth_many` | Sort once, then take the range or read the positions. For one position, use `select_nth`. |
 | `sort_chunks` | Sort each of `records.chunks_mut(chunk_len)`, including a short final chunk. Pass `&mut key` to each call if the extractor is stateful. |

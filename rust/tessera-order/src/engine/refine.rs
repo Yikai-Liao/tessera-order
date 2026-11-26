@@ -955,5 +955,36 @@ mod tests {
             <Direct as Extract<core::cmp::Reverse<(u16, u8)>>>::KEY_MASK,
             (1u128 << 24) - 1
         );
+
+        use crate::engine::key::RadixKey;
+        use core::cmp::Reverse;
+        assert_eq!(<Direct as Extract<bool>>::KEY_MASK, 1);
+        assert_eq!(<Direct as Extract<Reverse<bool>>>::KEY_MASK, 1);
+        assert_eq!(<Direct as Extract<char>>::KEY_MASK, 0x001f_ffff);
+        assert_eq!(<Direct as Extract<Reverse<char>>>::KEY_MASK, 0x001f_ffff);
+        assert_eq!(<Direct as Extract<[u8; 3]>>::KEY_MASK, (1u128 << 24) - 1);
+        type Mixed = (bool, Reverse<char>, u8);
+        type MixedExt = ByKey<fn(&u8) -> Mixed>;
+        let mixed = (1u128 << 40) | (0x001f_ffffu128 << 8) | 0xff;
+        assert_eq!(<Direct as Extract<Mixed>>::KEY_MASK, mixed);
+        assert_eq!(<MixedExt as Extract<u8>>::KEY_MASK, mixed);
+
+        fn assert_early_stop<K: RadixKey>(base: K, flipped: &[K]) {
+            let mut keys = vec![base; 512];
+            keys[1..1 + flipped.len()].copy_from_slice(flipped);
+            let (mut calls, mask) = (0, <Direct as Extract<K>>::KEY_MASK);
+            let mut ext = ByKey(|k: &K| {
+                calls += 1;
+                *k
+            });
+            assert_eq!(scan_varying_bits(&keys, mask, &mut ext), mask);
+            assert!(calls < keys.len(), "read all {calls} records");
+        }
+        assert_early_stop(false, &[true]);
+        assert_early_stop(
+            Reverse('\0'),
+            &[Reverse('\u{0f_ffff}'), Reverse('\u{10_ffff}')],
+        );
+        assert_early_stop((false, 0u64), &[(true, u64::MAX)]);
     }
 }

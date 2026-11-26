@@ -478,8 +478,6 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     const DIRECT: Option<DirectKeys<K>> = Some(DirectKeys {
         shift: 0,
         count: count_keys::<K>,
-        #[cfg(feature = "rayon")]
-        count_parallel: count_keys_parallel::<K>,
     });
     type Value = K::Encoded;
     const KEY_MASK: u128 = K::Width::MASK;
@@ -515,10 +513,8 @@ pub(crate) struct DirectKeys<T> {
     /// Position of the extractor's key bit 0 in the record's encoded key.
     shift: usize,
     /// Counts/fills a window in the full encoding, whose outside bits agree.
-    count: fn(&mut [T], usize, usize),
-    /// The same full-encoding operation with parallel counting and filling.
-    #[cfg(feature = "rayon")]
-    count_parallel: fn(&mut [T], usize, usize),
+    /// The final flag selects parallel execution when the `rayon` feature is on.
+    count: fn(&mut [T], usize, usize, bool),
 }
 
 /// Finishes a slice by counting a small encoded-key window and decoding its runs.
@@ -536,11 +532,12 @@ pub(crate) fn try_count_window<T, E: Extract<T>>(
     records: &mut [T],
     low: usize,
     width: usize,
+    parallel: bool,
 ) -> bool {
     match E::DIRECT {
         Some(direct) if (1..=SMALL_WINDOW_BITS).contains(&width) => {
             if !records.is_empty() {
-                (direct.count)(records, low + direct.shift, width);
+                (direct.count)(records, low + direct.shift, width, parallel);
             }
             true
         }
@@ -548,47 +545,30 @@ pub(crate) fn try_count_window<T, E: Extract<T>>(
     }
 }
 
-/// [`try_count_window`] with the same full-encoding precondition and parallel
-/// counting and filling.
-#[cfg(feature = "rayon")]
-pub(crate) fn try_count_window_parallel<T, E: Extract<T>>(
-    records: &mut [T],
-    low: usize,
-    width: usize,
-) -> bool {
-    match E::DIRECT {
-        Some(direct) if (1..=SMALL_WINDOW_BITS).contains(&width) => {
-            if !records.is_empty() {
-                (direct.count_parallel)(records, low + direct.shift, width);
-            }
-            true
-        }
-        _ => false,
-    }
-}
+fn count_keys<K: RadixKey>(records: &mut [K], low: usize, width: usize, parallel: bool) {
+    #[cfg(feature = "rayon")]
+    if parallel {
+        use rayon::prelude::*;
 
-fn count_keys<K: RadixKey>(records: &mut [K], low: usize, width: usize) {
+        let shard_len = records.len().div_ceil(rayon::current_num_threads());
+        // Mutable shards need only Send; no shared record borrow crosses tasks.
+        let counts = records
+            .par_chunks_mut(shard_len)
+            .map(|records| KeyCounts::count(records, low, width))
+            .reduce_with(KeyCounts::merge)
+            .unwrap();
+        counts
+            .runs(records)
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|(run, key)| run.fill(key));
+        return;
+    }
+    #[cfg(not(feature = "rayon"))]
+    let _ = parallel;
     for (run, key) in KeyCounts::count(records, low, width).runs(records) {
         run.fill(key);
     }
-}
-
-#[cfg(feature = "rayon")]
-fn count_keys_parallel<K: RadixKey>(records: &mut [K], low: usize, width: usize) {
-    use rayon::prelude::*;
-
-    let shard_len = records.len().div_ceil(rayon::current_num_threads());
-    // Mutable shards need only Send; no shared record borrow crosses tasks.
-    let counts = records
-        .par_chunks_mut(shard_len)
-        .map(|records| KeyCounts::count(records, low, width))
-        .reduce_with(KeyCounts::merge)
-        .unwrap();
-    counts
-        .runs(records)
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .for_each(|(run, key)| run.fill(key));
 }
 
 /// A histogram of one encoded-key window, with the bits outside it.
@@ -639,22 +619,20 @@ impl<K: RadixKey> KeyCounts<K> {
 
     /// Pairs each nonempty destination run with its decoded key.
     /// The slice must contain exactly the records summarized by this histogram.
-    fn runs<'a>(&self, records: &'a mut [K]) -> impl Iterator<Item = (&'a mut [K], K)> {
+    fn runs<'a>(&self, mut records: &'a mut [K]) -> impl Iterator<Item = (&'a mut [K], K)> {
         let (outside, shift) = (self.outside, K::Encoded::from_usize(self.low));
         self.counts[..self.buckets]
             .iter()
             .copied()
             .enumerate()
-            .scan(records, move |remaining, (bucket, count)| {
-                let (run, rest) = core::mem::take(remaining).split_at_mut(count);
-                *remaining = rest;
-                Some((run, bucket))
-            })
-            .filter(|(run, _)| !run.is_empty())
-            .map(move |(run, bucket)| {
-                let mut key = outside;
-                key |= K::Encoded::from_usize(bucket) << shift;
-                (run, K::decode(key))
+            .filter_map(move |(bucket, count)| {
+                let (run, rest) = core::mem::take(&mut records).split_at_mut(count);
+                records = rest;
+                (count != 0).then(|| {
+                    let mut key = outside;
+                    key |= K::Encoded::from_usize(bucket) << shift;
+                    (run, K::decode(key))
+                })
             })
     }
 }
@@ -733,7 +711,7 @@ mod tests {
     }
 
     fn count<T, E: Extract<T>>(_: &E, records: &mut [T], low: usize, width: usize) -> bool {
-        try_count_window::<T, E>(records, low, width)
+        try_count_window::<T, E>(records, low, width, false)
     }
 
     #[cfg(all(feature = "rayon", not(miri)))]
@@ -743,7 +721,7 @@ mod tests {
         low: usize,
         width: usize,
     ) -> bool {
-        try_count_window_parallel::<T, E>(records, low, width)
+        try_count_window::<T, E>(records, low, width, true)
     }
 
     /// Checks shared window and decline rules against independently sorted keys.
@@ -830,7 +808,7 @@ mod tests {
             .collect();
         let mut expected: Vec<_> = negative.iter().map(|key| key.to_bits()).collect();
         expected.sort_by_key(|&bits| f32::from_bits(bits).encode());
-        assert!(try_count_window::<_, Direct>(&mut negative, 0, 8));
+        assert!(try_count_window::<_, Direct>(&mut negative, 0, 8, false));
         assert_eq!(
             negative.iter().map(|key| key.to_bits()).collect::<Vec<_>>(),
             expected

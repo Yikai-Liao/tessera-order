@@ -128,7 +128,7 @@ fn equality_roots_match_serial_policy() {
             extractor: &mut extractor,
             tile_len: 1,
         }
-        .partition_equal(&mut serial, equal, u128::MAX, required);
+        .execute_node(&mut serial, u128::MAX, NodePlan::Equal(equal), required);
         pool.install(|| {
             Sorter {
                 scratch: &mut Workspace::new(),

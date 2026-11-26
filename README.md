@@ -31,7 +31,7 @@ The same engine sorts records, sorts index payloads for `argsort`, and can skip 
 - **O(√n) sorting scratch**, through a stable in-place block partition and a bounded tile buffer. Cached keys and argsort's index output use O(n) space; parallel sorting uses O(P√n) scratch for P participating threads.
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
-- **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
+- **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, `Reverse<K>`, and fixed-width tuples of 2 to 16 supported keys up to 128 encoded bits ([key encoding](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#key-encoding)).
 - **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start

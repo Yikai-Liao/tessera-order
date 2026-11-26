@@ -1,6 +1,6 @@
 # Getting started
 
-Tessera sorts slices by a numeric key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
+Tessera sorts slices by a fixed-width key: an integer up to 128 bits, an `f32` or `f64`, `Reverse` of a supported key, or a tuple of supported keys up to 128 encoded bits ([key encoding](../../conformance/semantics.md#key-encoding)). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
 
 This guide follows the main branch, which will become 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
 
@@ -93,19 +93,30 @@ assert!(values[4].is_nan());
 
 ## Sort by several fields
 
-Sort by the least significant field first, then by the more significant ones. Stability keeps the earlier order within each group:
+When the fields fit within 128 encoded bits, return them as a tuple ([key encoding](../../conformance/semantics.md#key-encoding)). Tessera orders tuples lexicographically in one call, and `Reverse` works on individual fields:
 
 ```rust
+use std::cmp::Reverse;
+
 let mut rows = [(2u32, 30u64), (1, 40), (2, 10), (1, 20)];
-tessera_order::sort_by_key(&mut rows, |r| r.1); // Secondary: timestamp.
-tessera_order::sort_by_key(&mut rows, |r| r.0); // Primary: user.
-assert_eq!(rows, [(1, 20), (1, 40), (2, 10), (2, 30)]);
+// Primary: user ascending; secondary: timestamp descending (96 encoded bits).
+tessera_order::sort_by_key(&mut rows, |r| (r.0, Reverse(r.1)));
+assert_eq!(rows, [(1, 40), (1, 20), (2, 30), (2, 10)]);
 let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
     .map(|group| (group[0].0, group.len())).collect();
 assert_eq!(counts, [(1, 2), (2, 2)]);
 ```
 
 After sorting, `chunk_by` walks the groups. Its equality must match the sort key.
+
+When the combined keys exceed 128 encoded bits, sort in separate calls from the least significant field to the most significant. Stability keeps the earlier order within each group:
+
+```rust
+let mut events = [(2u128, 30u64), (1, 40), (2, 10), (1, 20)];
+tessera_order::sort_by_key(&mut events, |e| e.1); // Secondary: timestamp.
+tessera_order::sort_by_key(&mut events, |e| e.0); // Primary: 128-bit ID.
+assert_eq!(events, [(1, 20), (1, 40), (2, 10), (2, 30)]);
+```
 
 <a id="index-output-and-chunks"></a>
 
@@ -173,7 +184,7 @@ Records need `Send`, and the key function needs `Fn + Sync` because calls overla
 
 ## Versions
 
-The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`. Main renames them and keeps the old names as deprecated aliases. Cached-key sorting, argsort and selection are new and unreleased. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`. Main renames them and keeps the old names as deprecated aliases. Cached-key sorting, argsort, selection and tuple keys are new and unreleased. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 <a id="try-the-development-api"></a>
 

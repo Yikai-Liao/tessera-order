@@ -5,14 +5,19 @@ import { bucketColor } from "../palette";
 import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
 
 const BITS = 32;
+const RECORDS = 8192;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
-const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, BITS));
+const simdMsd = ref(true);
+const tileLeaf = computed(() =>
+  chooseTileLeaf(RECORDS, varying.value, width.value, BITS, 4, simdMsd.value),
+);
 const tileLeafLabel = computed(() =>
   ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
 );
 const presets: [string, bigint][] = [
   ["all 32 bits", (1n << 32n) - 1n],
+  ["low 25 bits", (1n << 25n) - 1n],
   ["low 20 bits", (1n << 20n) - 1n],
   ["two bytes with a gap", 0xff00ffn],
   ["scattered", 0x80f0_0f01n],
@@ -23,12 +28,17 @@ function toggle(bit: number) {
 }
 const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
-const plan = computed(() => planDigits(varying.value, width.value, BITS));
+const plan = computed(() =>
+  planDigits(varying.value, width.value, BITS, RECORDS, simdMsd.value),
+);
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  return tileLeaf.value === "lsd"
-    ? "At most two flat passes finish this tile; their split minimizes table slots."
-    : "One top-digit partition exposes actual child variation. Each child chooses its own finishing plan.";
+  if (tileLeaf.value === "lsd") {
+    return "At most two flat passes finish this tile; their split minimizes table slots.";
+  }
+  return simdMsd.value
+    ? "One top-digit partition exposes child variation. Direct-key SIMD finishing is a whole-tile option only when every bucket fits within the overlap limit; if any bucket exceeds it, buckets finish ordinarily by insertion or nested tile plans."
+    : "One top-digit partition exposes child variation, and each bucket finishes ordinarily by insertion or nested tile plans with SIMD finishing unavailable.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {
@@ -56,6 +66,10 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       <label>
         Widest digit (cursor table): {{ width }} bits
         <input v-model.number="width" type="range" min="6" max="14" />
+      </label>
+      <label>
+        <input v-model="simdMsd" type="checkbox" />
+        Direct-key SIMD MSD (8+ lanes)
       </label>
       <span>Presets:</span>
       <button v-for="[name, mask] in presets" :key="name" type="button" class="preset" @click="varying = mask">
@@ -141,7 +155,7 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       not the unknown child work. Windows may contain constant gaps, but their endpoints vary.
     </p>
     <p class="tsr-note">
-      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, the planner selects
+      For 8,192 <code>u32</code> keys with the selected {{ width }}-bit table limit, the planner selects
       <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
       {{ tileLeafReason }}
     </p>

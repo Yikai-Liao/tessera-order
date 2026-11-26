@@ -139,7 +139,9 @@ impl<T> Scratch<T> {
         if len < 2 || varying == 0 {
             return;
         }
-        match plan_tile::<T>(len, varying) {
+        let simd_msd = len >= crate::engine::portable_simd::SIMD_MIN
+            && E::DIRECT.is_some_and(|direct| (direct.can_finish_msd)());
+        match plan_tile::<T>(len, varying, simd_msd) {
             TilePlan::Insertion => extractor.finish_insertion(records),
             TilePlan::Msd(digit) => {
                 self.partition_tile::<_>(records, digit, varying, extractor);
@@ -301,6 +303,11 @@ impl<T> Scratch<T> {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
         let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
+        if largest <= 1
+            || E::DIRECT.is_some_and(|direct| (direct.finish_msd)(records, largest as usize))
+        {
+            return;
+        }
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= insertion_limit::<T>() {

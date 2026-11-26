@@ -43,7 +43,13 @@ export function topWindow(
 }
 
 /** One or two flat digits, or one MSD digit when flat completion needs more. */
-export function planDigits(varying: bigint, width: number, bits: number): Digit[] {
+export function planDigits(
+  varying: bigint,
+  width: number,
+  bits: number,
+  records = Number.POSITIVE_INFINITY,
+  simdMsd = false,
+): Digit[] {
   if (varying === 0n) return [];
   const { digit: high, window } = topWindow(varying, width, bits);
   const remaining = varying & ~window;
@@ -61,6 +67,8 @@ export function planDigits(varying: bigint, width: number, bits: number): Digit[
       slots = cost;
     }
   }
+  const msdSlots = 2 ** high.width;
+  if (simdMsd && records >= 64 && msdSlots >= records && slots > msdSlots) return [high];
   return digits;
 }
 
@@ -73,12 +81,15 @@ export function chooseTileLeaf(
   tableWidth: number,
   bits: number,
   recordBytes = bits / 8,
+  simdMsd = false,
 ): TileLeaf {
   if (records < 2 || varying === 0n) return "done";
   const insertionLimit = Math.max(16, Math.floor((48 * 16) / (16 + recordBytes)));
   if (records <= insertionLimit) return "insertion";
-  const remaining = varying & ~topWindow(varying, tableWidth, bits).window;
-  return remaining === 0n || topWindow(remaining, bits, bits).digit.width <= tableWidth
-    ? "lsd"
-    : "msd";
+  const digits = planDigits(varying, tableWidth, bits, records, simdMsd);
+  const covered = digits.reduce(
+    (mask, digit) => mask | (((1n << BigInt(digit.width)) - 1n) << BigInt(digit.shift)),
+    0n,
+  );
+  return (varying & ~covered) === 0n ? "lsd" : "msd";
 }

@@ -199,8 +199,7 @@ fn dispatch_root<T, E: Extract<T>, R>(
 ) where
     R: RefineRoot<T, E> + RefineRoot<T, KeyHalf<E, 0>> + RefineRoot<T, KeyHalf<E, 64>>,
 {
-    let Some(varying) = prepare::<true, _, _>(records, E::KEY_MASK, &mut extractor, tile_len)
-    else {
+    let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
     let scratch = &mut Workspace::new();
@@ -240,11 +239,20 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_
     refine_with_tile_bytes(records, extractor, Requirement::All, tile_bytes);
 }
 
+/// Finishes ordered or small roots, otherwise returns their varying bits.
+/// Shared by serial, parallel and index roots before allocating partition scratch.
+fn prepare<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    tile_len: usize,
+) -> Option<u128> {
+    prepare_slice::<true, _, _>(records, E::KEY_MASK, extractor, tile_len)
+}
+
 /// Finishes ordered, constant, or (at the root) small/near-ordered slices;
-/// otherwise returns the varying bits within `candidate`. Shared by serial and
-/// parallel roots before either allocates partition scratch.
+/// otherwise returns the varying bits within `candidate`.
 #[inline(always)]
-fn prepare<const INSERTION_PROBE: bool, T, E: Extract<T>>(
+fn prepare_slice<const INSERTION_PROBE: bool, T, E: Extract<T>>(
     records: &mut [T],
     candidate: u128,
     extractor: &mut E,
@@ -504,7 +512,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             return;
         }
         if let Some(varying) =
-            prepare::<false, _, _>(records, candidate, self.extractor, self.tile_len)
+            prepare_slice::<false, _, _>(records, candidate, self.extractor, self.tile_len)
         {
             self.sort_node(records, varying, required);
         }

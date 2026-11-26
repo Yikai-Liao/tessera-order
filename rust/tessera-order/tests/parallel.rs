@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use tessera_order::{RadixKey, par_sort, par_sort_by_key};
+use tessera_order::{RadixKey, par_argsort, par_argsort_by_key, par_sort, par_sort_by_key};
 
 #[test]
 #[cfg(not(miri))]
@@ -410,16 +410,348 @@ fn generic_radix_key_calls_par_sort_without_send_bound() {
         par_sort(values);
     }
 
+    fn argsort_generic<K: RadixKey>(values: &[K]) -> Vec<usize> {
+        par_argsort(values)
+    }
+
     #[allow(deprecated)]
     fn stable_sort_generic<K: RadixKey>(values: &mut [K]) {
         tessera_order::par_stable_sort(values);
     }
 
     let mut values = [3u64, 1, 2, 1];
+    assert_eq!(argsort_generic(&values), [1, 3, 2, 0]);
     sort_generic(&mut values);
     assert_eq!(values, [1, 1, 2, 3]);
 
     let mut legacy = [4i32, -2, 0, -2];
     stable_sort_generic(&mut legacy);
     assert_eq!(legacy, [-2, -2, 0, 4]);
+}
+
+#[test]
+fn par_argsort_sync_only_records_and_small_fallback() {
+    // MutexGuard makes both records and the key closure Sync but not Send.
+    struct SyncOnly<'a>(
+        u32,
+        core::marker::PhantomData<std::sync::MutexGuard<'a, ()>>,
+    );
+    let lock = Mutex::new(());
+    let guard = lock.lock().unwrap();
+    let offset = Mutex::new(1u32);
+    let offset_guard = offset.lock().unwrap();
+    let rows = [
+        SyncOnly(2, core::marker::PhantomData),
+        SyncOnly(1, core::marker::PhantomData),
+        SyncOnly(2, core::marker::PhantomData),
+    ];
+    let _ = &guard;
+    let key = move |row: &SyncOnly<'_>| Reverse(row.0 + *offset_guard);
+    assert_eq!(par_argsort_by_key(&rows, key), [0, 2, 1]);
+    assert_eq!(tessera_order::par_argsort::<u32>(&[]), Vec::<usize>::new());
+    assert_eq!(tessera_order::par_argsort(&[42u64]), [0]);
+
+    let floats = [
+        f64::from_bits(0x7ff8_0000_0000_0002),
+        0.0,
+        -0.0,
+        f64::from_bits(0xfff8_0000_0000_0001),
+        f64::from_bits(0x7ff8_0000_0000_0001),
+        -0.0,
+    ];
+    assert_eq!(
+        tessera_order::par_argsort(&floats),
+        tessera_order::argsort(&floats)
+    );
+    let one = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    let tuples: Vec<_> = (0..128u32).map(|i| (i % 7, Reverse(i / 7))).collect();
+    let got = one.install(|| tessera_order::par_argsort(&tuples));
+    assert_eq!(got, tessera_order::argsort(&tuples));
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "131k-record Rayon stress fixture; par_argsort adds no unsafe code and Miri covers its serial fallback plus shared block::parallel and bucket_borrow_tests"
+)]
+fn par_argsort_matches_serial_in_caller_pool() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let len = 1usize << 17;
+
+    // Narrow keys (remaining == 0): verifies stability and that every callback
+    // runs inside the caller's Rayon pool rather than a private pool.
+    let narrow: Vec<u32> = (0..len).map(|i| (mix(i as u64) & 0xfff) as u32).collect();
+    let in_pool = AtomicUsize::new(0);
+    let outside_pool = AtomicBool::new(false);
+    let got = pool.install(|| {
+        par_argsort_by_key(&narrow, |&v| {
+            if pool.current_thread_index().is_some() {
+                in_pool.fetch_add(1, Ordering::Relaxed);
+            } else {
+                outside_pool.store(true, Ordering::Relaxed);
+            }
+            v
+        })
+    });
+    assert_eq!(got, tessera_order::argsort(&narrow));
+    assert!(in_pool.load(Ordering::Relaxed) >= len);
+    assert!(
+        !outside_pool.load(Ordering::Relaxed),
+        "par_argsort_by_key ran a callback outside the caller's Rayon pool"
+    );
+
+    // Wide u64 keys (remaining != 0): random, moderate prefix ties, and one huge prefix tie.
+    let wide_random: Vec<u64> = (0..len).map(|i| mix(i as u64)).collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&wide_random)),
+        tessera_order::argsort(&wide_random)
+    );
+
+    let prefix_ties: Vec<u64> = (0..len)
+        .map(|i| {
+            // High bits at 60..63 leave low varying bits below prefix_shift (16),
+            // exercising both `bands` (~4k ties) and `huge` (~98k tie > chunk).
+            let hi = if i % 4 == 0 {
+                (mix(i as u64) & 7) << 60
+            } else {
+                3u64 << 60
+            };
+            hi | (mix(i as u64) & 0xffff)
+        })
+        .collect();
+    let tie_outside = AtomicBool::new(false);
+    let tie_got = pool.install(|| {
+        par_argsort_by_key(&prefix_ties, |&v| {
+            if pool.current_thread_index().is_none() {
+                tie_outside.store(true, Ordering::Relaxed);
+            }
+            v
+        })
+    });
+    assert_eq!(tie_got, tessera_order::argsort(&prefix_ties));
+    assert!(
+        !tie_outside.load(Ordering::Relaxed),
+        "tie refinement ran a callback outside the caller's Rayon pool"
+    );
+
+    // 1-thread pool fallback on a large input and ZST records on a multi-thread pool.
+    let one = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    assert_eq!(
+        one.install(|| par_argsort(&prefix_ties)),
+        tessera_order::argsort(&prefix_ties)
+    );
+    let zsts = vec![(); len];
+    assert_eq!(
+        pool.install(|| par_argsort_by_key(&zsts, |()| 0u32)),
+        (0..len).collect::<Vec<_>>()
+    );
+
+    // 128-bit keys, tuple keys, and narrow-mask reversed/primitive keys.
+    let wide128: Vec<u128> = (0..len)
+        .map(|i| (u128::from(mix(i as u64) & 0xff) << 96) | u128::from(mix((i ^ 0x55aa) as u64)))
+        .collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&wide128)),
+        tessera_order::argsort(&wide128)
+    );
+    let tuples: Vec<(u32, Reverse<u64>)> = (0..len)
+        .map(|i| ((i % 16) as u32, Reverse(mix(i as u64))))
+        .collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&tuples)),
+        tessera_order::argsort(&tuples)
+    );
+    let rev_chars: Vec<Reverse<char>> = (0..len)
+        .map(|i| {
+            let cp = (mix(i as u64) as u32) % 0x10_0000;
+            Reverse(
+                char::from_u32(if (0xd800..=0xdfff).contains(&cp) {
+                    0x41
+                } else {
+                    cp
+                })
+                .unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&rev_chars)),
+        tessera_order::argsort(&rev_chars)
+    );
+    let rev_bools: Vec<Reverse<bool>> = (0..len).map(|i| Reverse(mix(i as u64) & 1 != 0)).collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&rev_bools)),
+        tessera_order::argsort(&rev_bools)
+    );
+
+    // Floats including signed zeros and distinct NaN payloads.
+    let floats: Vec<f64> = (0..len)
+        .map(|i| match i % 8 {
+            0 => -0.0,
+            1 => 0.0,
+            2 => f64::from_bits(0x7ff8_0000_0000_0000 | (i as u64 & 0xff)),
+            3 => f64::from_bits(0xfff8_0000_0000_0000 | (i as u64 & 0xff)),
+            4 => f64::NEG_INFINITY,
+            5 => f64::INFINITY,
+            _ => (mix(i as u64) as i64) as f64,
+        })
+        .collect();
+    assert_eq!(
+        pool.install(|| par_argsort(&floats)),
+        tessera_order::argsort(&floats)
+    );
+
+    // Ordered, descending (strict and with ties), constant, and flat-with-gap inputs.
+    let ascending: Vec<u64> = (0..len as u64).collect();
+    let strict_desc: Vec<u64> = (0..len as u64).rev().collect();
+    let tied_desc: Vec<u64> = (0..len as u64).rev().map(|x| x / 4).collect();
+    let constant = vec![7u64; len];
+    let mut flat_unsorted = vec![7u64; len];
+    flat_unsorted[50] = 9;
+    flat_unsorted[51] = 3;
+    let mut flat_ascending = vec![7u64; len];
+    flat_ascending[50..].fill(9);
+    let mut flat_descending = vec![9u64; len];
+    flat_descending[50..].fill(7);
+    for case in [
+        ascending,
+        strict_desc,
+        tied_desc,
+        constant,
+        flat_unsorted,
+        flat_ascending,
+        flat_descending,
+    ] {
+        assert_eq!(
+            pool.install(|| par_argsort(&case)),
+            tessera_order::argsort(&case)
+        );
+    }
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "131k-record Rayon panic/inconsistent-key stress fixture; par_argsort adds no unsafe code and Miri covers shared parallel recovery in block::parallel and bucket_borrow_tests"
+)]
+fn par_argsort_recovers_panics_and_inconsistent_keys() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let len = 1usize << 17;
+
+    // Split 131,072 rows across three small-tie prefixes (24,576 + 24,576 +
+    // 16,384, forming two non-empty `bands` under 4 threads where chunk = 32,768)
+    // and one huge-tie prefix `4 << 60` (65,536 > chunk, refined via parallel
+    // `Sorter::sort_root`). Bit 62 keeps all 16 low bits outside the packed prefix.
+    struct Row {
+        id: usize,
+        key: u64,
+        calls: AtomicUsize,
+        edit: AtomicUsize,
+    }
+    let rows: Vec<Row> = (0..len)
+        .map(|id| {
+            let hi = match id % 16 {
+                0..3 => 0u64 << 60,
+                3..6 => 1u64 << 60,
+                6..8 => 2u64 << 60,
+                _ => 4u64 << 60,
+            };
+            Row {
+                id,
+                key: hi | (mix(id as u64) & 0xffff),
+                calls: AtomicUsize::new(0),
+                edit: AtomicUsize::new(0),
+            }
+        })
+        .collect();
+
+    // Observe baseline per-row call counts dynamically so panic injection does
+    // not pin internal pass counts or sampling strides.
+    let baseline = pool.install(|| {
+        par_argsort_by_key(&rows, |row| {
+            row.calls.fetch_add(1, Ordering::Relaxed);
+            row.key
+        })
+    });
+    assert!(
+        baseline
+            .windows(2)
+            .all(|pair| (rows[pair[0]].key, pair[0]) < (rows[pair[1]].key, pair[1]))
+    );
+    let small_id = (len / 2..len).find(|&id| id % 16 == 6).unwrap();
+    let huge_id = (len / 2..len).find(|&id| id % 16 == 8).unwrap();
+    let small_calls = rows[small_id].calls.load(Ordering::Relaxed).max(1);
+    let huge_calls = rows[huge_id].calls.load(Ordering::Relaxed).max(1);
+
+    // Inject distinct panics at observed early, mid, small-tie, and huge-tie
+    // call positions; each must propagate with its interior edit intact.
+    for (tag, target_id, target_call, sentinel) in [
+        ("early-panic", huge_id, 1usize, 101usize),
+        ("mid-panic", huge_id, 2usize.min(huge_calls), 202usize),
+        ("small-tie-panic", small_id, small_calls, 303usize),
+        ("huge-tie-panic", huge_id, huge_calls, 404usize),
+    ] {
+        for row in &rows {
+            row.calls.store(0, Ordering::Relaxed);
+            row.edit.store(0, Ordering::Relaxed);
+        }
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            pool.install(|| {
+                par_argsort_by_key(&rows, |row| {
+                    let row_call = row.calls.fetch_add(1, Ordering::Relaxed) + 1;
+                    if row.id == target_id && row_call == target_call {
+                        row.edit.store(sentinel, Ordering::Release);
+                        std::panic::panic_any(tag);
+                    }
+                    row.key
+                })
+            })
+        }));
+        let err = result.expect_err("key panic must propagate");
+        assert_eq!(err.downcast_ref::<&str>(), Some(&tag));
+        assert_eq!(rows[target_id].edit.load(Ordering::Acquire), sentinel);
+    }
+
+    // Inconsistent keys may panic or return a valid permutation of `0..len`.
+    let source: Vec<usize> = (0..len).collect();
+    for mode in 0..3 {
+        let counter = AtomicUsize::new(0);
+        let limit = 100 * len;
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            pool.install(|| {
+                par_argsort_by_key(&source, |_| {
+                    let c = counter.fetch_add(1, Ordering::Relaxed);
+                    assert!(c < limit, "inconsistent par_argsort made no progress");
+                    match mode {
+                        0 => (c.wrapping_mul(7919) & 0xffff) as u64,
+                        1 => mix(c as u64),
+                        _ => {
+                            if c.is_multiple_of(16) {
+                                u64::MAX
+                            } else {
+                                (c & 0xff) as u64
+                            }
+                        }
+                    }
+                })
+            })
+        }));
+        assert!(counter.load(Ordering::Relaxed) <= limit);
+        if let Ok(mut perm) = outcome {
+            perm.sort_unstable();
+            assert_eq!(perm, (0..len).collect::<Vec<_>>());
+        }
+    }
 }

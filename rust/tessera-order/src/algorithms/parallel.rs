@@ -3,6 +3,7 @@
 //! Rayon sorting entry points and their record and extractor bounds.
 
 use crate::engine::{self, ByKey, Direct, RadixKey};
+use alloc::vec::Vec;
 
 /// Sorts keys stably through the Rayon entry point.
 ///
@@ -80,6 +81,70 @@ where
     F: Fn(&T) -> K + Sync,
 {
     engine::par_sort::<T, _>(values, ByKey(&key));
+}
+
+/// Returns the indices that would sort `values` in ascending order, using
+/// Rayon's current pool without moving `values`.
+///
+/// Available with the `rayon` feature. Result order and tie resolution match
+/// [`crate::argsort`]: equal keys keep ascending source-index order. Small
+/// inputs and one-thread pools use the serial engine.
+///
+/// # Memory
+///
+/// Allocates the O(n) index output plus the same O(P√n) auxiliary workspace
+/// bound as [`par_sort`]. No second n-record staging buffer is allocated.
+///
+/// # Examples
+///
+/// ```
+/// let values = [3u64, 1, 3, 2];
+/// assert_eq!(tessera_order::par_argsort(&values), [1, 3, 0, 2]);
+/// ```
+#[must_use]
+pub fn par_argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
+    par_argsort_by_key(values, |key| *key)
+}
+
+/// Returns the indices that would sort `values` by a key function, using
+/// Rayon's current pool without moving `values`.
+///
+/// Available with the `rayon` feature. Result order and tie resolution match
+/// [`crate::argsort_by_key`]. Source records are shared across workers and need
+/// `Sync`, not `Send`, `Copy`, `Clone`, `Default` or `Ord`.
+///
+/// # Key function
+///
+/// `key` must implement `Fn + Sync` and may run concurrently, any number of
+/// times per record and in any order. Consistent keys produce the exact stable
+/// permutation; inconsistent keys may cause a panic or return a permutation of
+/// `0..values.len()` in an unspecified order.
+///
+/// # Panics
+///
+/// If `key` unwinds, all tasks join, the partial index output is discarded and
+/// the panic propagates. Source records are never moved, and changes made
+/// through interior mutability remain visible in `values`.
+///
+/// # Memory
+///
+/// Allocates the O(n) index output plus the same O(P√n) auxiliary workspace
+/// bound as [`par_sort_by_key`].
+///
+/// # Examples
+///
+/// ```
+/// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
+/// assert_eq!(tessera_order::par_argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
+/// ```
+#[must_use]
+pub fn par_argsort_by_key<T, K, F>(values: &[T], key: F) -> Vec<usize>
+where
+    T: Sync,
+    K: RadixKey,
+    F: Fn(&T) -> K + Sync,
+{
+    engine::par_argsort(values, key)
 }
 
 /// Renamed to [`par_sort`]; the contract is unchanged.

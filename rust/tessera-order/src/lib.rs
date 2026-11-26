@@ -68,11 +68,14 @@
 //! target. Keys without a vector kernel use scalar scans. There is no backend
 //! feature switch; `--no-default-features` uses this same implementation.
 //!
-//! `rayon` is off by default and enables `par_sort` and `par_sort_by_key`. Large inputs partition the root across disjoint
-//! shards and order each bucket's records by shard. Buckets transfer directly
-//! to exclusive final bands and sort there while peers continue moving their
-//! records. Small inputs and one-thread pools use the serial engine. The
-//! feature requires `Send` records and a shared (`Fn + Sync`) key function.
+//! `rayon` is off by default and enables `par_sort`, `par_sort_by_key`,
+//! `par_argsort` and `par_argsort_by_key`. Large inputs partition the root
+//! across disjoint shards and order each bucket's records by shard. Buckets
+//! transfer directly to exclusive final bands and sort there while peers
+//! continue moving their records. Small inputs and one-thread pools use the
+//! serial engine. In-place sorting requires `Send` records, parallel argsort
+//! requires `Sync` records, and both `_by_key` forms require a shared
+//! (`Fn + Sync`) key function.
 
 extern crate alloc;
 
@@ -83,7 +86,8 @@ pub use algorithms::cached::sort_by_cached_key;
 #[cfg(feature = "rayon")]
 #[allow(deprecated)]
 pub use algorithms::parallel::{
-    par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key,
+    par_argsort, par_argsort_by_key, par_sort, par_sort_by_key, par_stable_sort,
+    par_stable_sort_by_key,
 };
 pub use algorithms::{argsort, argsort_by_key, select_nth, select_nth_by_key, sort, sort_by_key};
 #[allow(deprecated)]

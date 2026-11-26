@@ -75,7 +75,7 @@ Additional key types beyond 0.1 are also new in 0.2 and unreleased; see [version
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_stable_sort` and `par_stable_sort_by_key`), requiring `Send` records and a shared `Fn + Sync` key function. Large inputs scatter disjoint root shards in the caller's Rayon pool. Buckets transfer directly into exclusive final bands through a shared source ledger, then sort in their movement tasks. Small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points).
+The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_stable_sort` and `par_stable_sort_by_key`), plus unreleased 0.2 `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
 
 ## Performance
 

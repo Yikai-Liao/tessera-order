@@ -24,9 +24,9 @@ Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instruct
 | sort by a key that is costly to compute | `sort_by_cached_key` |
 | know the sorted order without moving records | `argsort`, `argsort_by_key` |
 | find the record at one rank, such as the median | `select_nth`, `select_nth_by_key` |
-| use several threads | `par_sort`, `par_sort_by_key` |
+| use several threads | `par_sort`, `par_sort_by_key`, `par_argsort`, `par_argsort_by_key` |
 
-All of them place equal keys exactly as a stable sort would. Serial calls use O(√n) extra memory and parallel calls O(P√n) for P threads; in addition, argsort returns an index per record and cached-key sorting stores a key per record.
+All of them place equal keys exactly as a stable sort would; see [ordering semantics](../../conformance/semantics.md#space) for workspace and output-memory bounds.
 
 ## Sort keys
 
@@ -158,11 +158,13 @@ assert_eq!(groups, [2, 2]);
 
 ## Parallel sorting
 
-Enable the `rayon` feature for `par_sort` and `par_sort_by_key`:
+Enable the `rayon` feature for `par_sort`, `par_sort_by_key`, `par_argsort` and `par_argsort_by_key` (all on `main`; see [Versions](#versions) for `0.1`):
 
 ```toml
 [dependencies]
-tessera-order = { version = "0.1", features = ["rayon"] }
+tessera-order = { path = "../tessera-order/rust/tessera-order", features = ["rayon"] }
+# Published 0.1 exposes only `par_stable_sort` and `par_stable_sort_by_key`:
+# tessera-order = { version = "0.1", features = ["rayon"] }
 rayon = "1.10"  # only to configure a custom pool
 ```
 
@@ -175,7 +177,7 @@ pool.install(|| tessera_order::par_sort_by_key(&mut records, |record| record.0))
 assert_eq!(records, [(1, "middle"), (2, "first"), (2, "last")]);
 ```
 
-Records need `Send`, and the key function needs `Fn + Sync` because calls overlap. Small inputs and one-thread pools run serially, and sorted or constant inputs need not get faster with more threads. Extra memory is O(P√n) for P threads.
+Small inputs and one-thread pools run serially, and sorted or constant inputs need not get faster with more threads. See the [Rayon entry-point contract](../../conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds and memory guarantees.
 
 ## When to use something else
 
@@ -184,11 +186,11 @@ Records need `Send`, and the key function needs `Fn + Sync` because calls overla
 
 ## Versions
 
-The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. Main renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples) as unreleased 0.2 changes. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. Main renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, serial and parallel argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples) as unreleased 0.2 changes. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 <a id="try-the-development-api"></a>
 
-To try the new operations now, depend on a local checkout. They need no feature flag:
+To try the new operations now, depend on a local checkout (enable `features = ["rayon"]` for `par_argsort` and `par_argsort_by_key`):
 
 ```toml
 [dependencies]

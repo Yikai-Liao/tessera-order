@@ -19,7 +19,7 @@ Full sorting and single-rank selection share node planning, leaf finishing and s
 
 ## Knowledge boundaries
 
-`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module resolves complete sorts, rank cuts, source permutations and cached distributions. With Rayon it also provides `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
+`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module resolves complete sorts, rank cuts, source permutations and cached distributions. With Rayon it also provides `par_sort` and `par_argsort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
@@ -29,7 +29,7 @@ The [Rust architecture policies](../development/ci.md#rust-architecture-policies
 |---|---|---|
 | `../algorithms.rs` | Expose serial sort, argsort and selection through the engine operations | Their public contracts and key extractors |
 | `../algorithms/cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
-| `../algorithms/parallel.rs` | Define the feature-gated sorting API and its record and extractor bounds | Complete parallel sort, not its scheduling or ownership transfer |
+| `../algorithms/parallel.rs` | Define the feature-gated parallel sorting and argsort APIs and their record and extractor bounds | Complete parallel sort and argsort, not their scheduling or ownership transfer |
 | `distribution.rs` | Stable finite-category distribution and its storage lifetime | Category keys in a bounded bit window; no returned boundaries |
 | `refine.rs` | Selection bounds, rank projection, root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Final band ranges and complete partition and finishing operations |
 | `workspace.rs` | Reusable tile and block capacity owned inside refinement | Capacity is reusable after restoration; no live movement state survives an operation |
@@ -38,7 +38,7 @@ The [Rust architecture policies](../development/ci.md#rust-architecture-policies
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
 | `refine/spans.rs` | Discover a bounded sparse permutation and apply its contiguous spans | Every long span belongs to one monotone source sequence. Key evaluation ends before record movement starts. |
-| `refine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
+| `refine/parallel.rs` | Shard count, task scheduling, scratch pooling and parallel argsort prefix packing/tie refinement for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
 
@@ -96,7 +96,7 @@ Every partition completes movement for every band. Only further analysis and fin
 
 ## Parallel root completion
 
-With the optional `rayon` feature, inputs below the parallel byte threshold and one-thread pools use the serial engine. Larger roots share `prepare` with serial sorting. The [parallel layout](../explain/block-partition.md#parallel-roots) owns the byte gates, shard clamps and block sizing.
+With the optional `rayon` feature, in-place parallel sorting uses the serial engine below the [parallel layout](../explain/block-partition.md#parallel-roots)'s byte threshold or in a one-thread pool, and larger roots share `prepare` with serial sorting; `par_argsort` applies its own index-tile and record-or-index byte eligibility gate, then packs index words and reuses `sort_root` (see [argsort](../explain/operations.md#argsort)). The [parallel layout](../explain/block-partition.md#parallel-roots) owns the in-place byte gate, shard clamps and block sizing.
 
 Each shard scatters its own input range with its own scratch. `Partition` borrows the reusable `Buffers` directly: record scratch stays in that allocation, and its capacity cannot change until completion and recovery finish. The source ledger is built directly from the shard chains: bucket prefixes in original shard order, over each shard's own scratch. Shard guards own recovery until every ledger table exists, then hand it over without a fallible step; no packed output is allocated.
 

@@ -43,7 +43,7 @@ console.log(JSON.stringify([
     environment: Record<string, string>;
     workspace: string;
     key: string;
-    saveIf: string | null;
+    saveIf: string | boolean | null;
   }[];
   const [pr, main, native] = configurations;
   assert.equal(pr.workspace, main.workspace);
@@ -55,6 +55,10 @@ console.log(JSON.stringify([
   assert.equal(pr.environment.CARGO_BUILD_TARGET, "x86_64-unknown-linux-gnu");
   assert.match(pr.environment.RUSTFLAGS, /target-feature=\+crt-static/);
   assert.equal(pr.saveIf, "${{ env.PUBLISH == 'true' && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}");
+  assert.ok(
+    main.saveIf === null || main.saveIf === true || main.saveIf === "true",
+    `main static tracking must allow cache saves, got ${JSON.stringify(main.saveIf)}`,
+  );
   assert.equal(native.environment.RUSTFLAGS, "");
   assert.notEqual(main.key, native.key);
 });

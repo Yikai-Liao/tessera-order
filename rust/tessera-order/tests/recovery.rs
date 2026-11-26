@@ -86,7 +86,8 @@ fn exercise(len: usize, changing: bool) {
 #[cfg(feature = "rayon")]
 #[cfg_attr(miri, ignore = "the public worker path needs a megabyte-sized input")]
 fn worker_unwind_preserves_interior_edits() {
-    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
+    use std::time::Duration;
 
     let len = 65_536;
     let edits: Vec<_> = (0..len).map(|_| AtomicUsize::new(0)).collect();
@@ -100,6 +101,10 @@ fn worker_unwind_preserves_interior_edits() {
         .num_threads(2)
         .build()
         .unwrap();
+    // Warm up the pool so the peer worker is running before the sort starts.
+    pool.broadcast(|_| {});
+    let worker_panicked = AtomicBool::new(false);
+    let caller_calls = AtomicUsize::new(0);
     let panic = catch_unwind(AssertUnwindSafe(|| {
         pool.install(|| {
             let caller = rayon::current_thread_index();
@@ -107,7 +112,16 @@ fn worker_unwind_preserves_interior_edits() {
                 edits[*id].fetch_add(1, Relaxed);
                 touched.set(touched.get() + 1);
                 if rayon::current_thread_index() != caller {
+                    worker_panicked.store(true, Relaxed);
                     std::panic::panic_any(*id);
+                }
+                let call = caller_calls.fetch_add(1, Relaxed) + 1;
+                if call.is_multiple_of(4096) && call <= 64 * 4096 && !worker_panicked.load(Relaxed)
+                {
+                    // Yield without holding engine locks so the peer worker can
+                    // steal work on oversubscribed hosts, while a bounded cap
+                    // keeps a serial fallback regression from hanging.
+                    std::thread::sleep(Duration::from_millis(1));
                 }
                 *key
             });

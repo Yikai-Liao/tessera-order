@@ -401,6 +401,10 @@ fn panic_keeps_borrowed_records() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "compile-time generic API bound check; exercises only the serial fallback"
+)]
 fn generic_radix_key_calls_par_sort_without_send_bound() {
     fn sort_generic<K: RadixKey>(values: &mut [K]) {
         par_sort(values);

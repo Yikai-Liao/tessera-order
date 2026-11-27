@@ -47,23 +47,21 @@ SIMD is always enabled; there is no `portable-simd` or `std` feature. Disabling 
 use std::cmp::Reverse;
 
 let mut values: Vec<u64> = vec![42, 7, 19, 7, 3];
-tessera_order::sort(&mut values);
+tessera_order::stable_sort(&mut values);
 assert_eq!(values, [3, 7, 7, 19, 42]);
 
 // Sort records by a key; equal keys keep their input order.
 let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
-tessera_order::sort_by_key(&mut rows, |row| Reverse(row.0));
+tessera_order::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
-These examples use the unreleased 0.2 names. The published 0.1 package calls the two sorts `stable_sort` and `stable_sort_by_key`; 0.2 keeps them as deprecated aliases.
+| Published 0.1 | Unreleased 0.2 (`main`) | Use |
+|---|---|---|
+| `stable_sort(&mut [K])` | `sort(&mut [K])` | Sort keys themselves |
+| `stable_sort_by_key(&mut [T], F)` | `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
 
-| API | Use |
-|---|---|
-| `sort(&mut [K])` | Sort keys themselves |
-| `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
-
-The following additions are new in 0.2 and **unreleased**. They require a [development checkout](docs/guide/getting-started.md#try-the-development-api). All resolve equal keys as a full stable sort would.
+On `main` (unreleased 0.2), the `stable_*` names remain as deprecated aliases. The following additions are new in 0.2 and **unreleased**; they require a [development checkout](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#try-the-development-api). All resolve equal keys as a full stable sort would.
 
 | Development API | Use |
 |---|---|
@@ -75,13 +73,13 @@ Additional key types beyond 0.1 are also new in 0.2 and unreleased; see [version
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_stable_sort` and `par_stable_sort_by_key`), plus unreleased 0.2 `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
+The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key` in published 0.1 (renamed to `par_sort` and `par_sort_by_key` on `main`), plus unreleased 0.2 `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
 
 ## Performance
 
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/development/benchmarking.md#command-capabilities) for paired implementation comparisons and source-change attribution.
 
-The [implementation comparison](https://yikai-liao.github.io/tessera-order/benchmarks/implementations.html) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
+The [implementation comparison](https://yikai-liao.github.io/tessera-order/benchmarks/implementations) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
 
 Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-order/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 
@@ -115,6 +113,7 @@ A Python binding is planned as well; see the [roadmap](https://github.com/Yikai-
 | How the engine works | [`docs/design/engine.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/design/engine.md) |
 | Why user key functions cache bucket IDs | [Record handling](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/design/engine.md#record-handling) |
 | All documentation | [Documentation site](https://yikai-liao.github.io/tessera-order/) · [Source index](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/README.md) |
+| Machine-readable documentation for AI agents | [`llms.txt`](https://yikai-liao.github.io/tessera-order/llms.txt) · [`llms-full.txt`](https://yikai-liao.github.io/tessera-order/llms-full.txt) |
 
 ## Contributing
 

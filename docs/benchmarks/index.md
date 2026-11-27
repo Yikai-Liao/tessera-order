@@ -44,14 +44,3 @@ Each case's baseline is its first report in the selected range, so changing the 
 Every view uses only runs on the latest run's hardware specification within the range, so environments are never mixed; select an earlier range to inspect older environments. Group means chain each case's ratio to its own previous measurement, so a case that joins later does not shift the mean; with an unchanged case set this equals the geometric mean of the cases' changes.
 
 The page reads monthly JSONL from the public data branch and never queries the live Bencher API. Coverage, publication and limits belong to the [main tracking contract](../development/continuous-benchmarks.md#main-long-term-tracking); PR checks use their own paired comparisons.
-
-## Embed the tracker
-
-In another Vue-enabled Markdown page:
-
-	<script setup>
-	import PerformanceHistory from "./path/to/PerformanceHistory.vue";
-	</script>
-	<PerformanceHistory />
-
-Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or the initially compared case; a URL hash takes precedence. Other webpages can use an iframe. GitHub Markdown uses the [README's fixed SVG preview](../../README.md) of the group means. Publishing measurements does not rebuild this website.

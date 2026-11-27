@@ -6,10 +6,16 @@ This guide follows the main branch, which will become 0.2. [Versions](#versions)
 
 ## Install
 
+The examples on this page use the unreleased 0.2 API on `main`. Depend on `main` (via Git or a local checkout) to compile them:
+
 ```toml
 [dependencies]
-tessera-order = "0.1"
+tessera-order = { git = "https://github.com/Yikai-Liao/tessera-order", branch = "main" }
+# Or a local checkout:
+# tessera-order = { path = "../tessera-order/rust/tessera-order" }
 ```
+
+The published crates.io release (`tessera-order = "0.1"`) provides only `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` over primitive integers, `f32`, `f64` and `Reverse`; see [Versions](#versions) for the differences.
 
 Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instructions automatically; the only public feature is the optional [`rayon`](#parallel-sorting).
 
@@ -17,16 +23,19 @@ Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instruct
 
 ## Choose an operation
 
-| You want to | Call |
-|---|---|
-| sort numbers | `sort` |
-| sort records by a field | `sort_by_key` |
-| sort by a key that is costly to compute | `sort_by_cached_key` |
-| know the sorted order without moving records | `argsort`, `argsort_by_key` |
-| find the record at one rank, such as the median | `select_nth`, `select_nth_by_key` |
-| use several threads | `par_sort`, `par_sort_by_key`, `par_argsort`, `par_argsort_by_key` |
+| You want to | Call | Signature |
+|---|---|---|
+| sort keys in place | `sort` | `(&mut [K])` |
+| sort records by a key | `sort_by_key` | `(&mut [T], F)` |
+| sort by a key computed once per record | `sort_by_cached_key` | `(&mut [T], F)` |
+| know the sorted order without moving records | `argsort` / `argsort_by_key` | `(&[K]) -> Vec<usize>` / `(&[T], F) -> Vec<usize>` |
+| find the record at one rank, such as the median | `select_nth` / `select_nth_by_key` | `(&mut [K], usize) -> (&mut [K], &mut K, &mut [K])` / `(&mut [T], usize, F) -> (&mut [T], &mut T, &mut [T])` |
+| sort in place on several threads (`rayon`) | `par_sort` / `par_sort_by_key` | `(&mut [K])` / `(&mut [T], F)` |
+| get sorted indices on several threads (`rayon`) | `par_argsort` / `par_argsort_by_key` | `(&[K]) -> Vec<usize>` / `(&[T], F) -> Vec<usize>` |
 
-All of them place equal keys exactly as a stable sort would; see [ordering semantics](../../conformance/semantics.md#space) for workspace and output-memory bounds.
+Every signature requires `K: RadixKey` (a sealed trait implying `Copy + Send + Sync`). Serial `_by_key` and `sort_by_cached_key` calls require `F: FnMut(&T) -> K` and place no trait bounds on `T`. Parallel `_by_key` calls require `F: Fn(&T) -> K + Sync`, with `T: Send` for `par_sort_by_key` and `T: Sync` for `par_argsort_by_key`. All of them place equal keys exactly as a stable sort would; see [ordering semantics](../../conformance/semantics.md#space) for workspace and output-memory bounds.
+
+Supported `RadixKey` families are primitive integers (`u8`–`u128`, `usize`, `i8`–`i128`, `isize`), `f32`, `f64` and `Reverse<K>` (in 0.1 and 0.2), plus `bool`, `char`, `NonZero` primitive integers, fixed-size byte arrays and tuples of supported keys (unreleased 0.2); see [key encoding](../../conformance/semantics.md#key-encoding) for exact encoding rules, array lengths and tuple limits.
 
 ## Sort keys
 
@@ -162,7 +171,9 @@ Enable the `rayon` feature for `par_sort`, `par_sort_by_key`, `par_argsort` and 
 
 ```toml
 [dependencies]
-tessera-order = { path = "../tessera-order/rust/tessera-order", features = ["rayon"] }
+tessera-order = { git = "https://github.com/Yikai-Liao/tessera-order", branch = "main", features = ["rayon"] }
+# Or a local checkout:
+# tessera-order = { path = "../tessera-order/rust/tessera-order", features = ["rayon"] }
 # Published 0.1 exposes only `par_stable_sort` and `par_stable_sort_by_key`:
 # tessera-order = { version = "0.1", features = ["rayon"] }
 rayon = "1.10"  # only to configure a custom pool
@@ -190,11 +201,13 @@ The published 0.1 release has only the four full sorts, named `stable_sort`, `st
 
 <a id="try-the-development-api"></a>
 
-To try the new operations now, depend on a local checkout (enable `features = ["rayon"]` for `par_argsort` and `par_argsort_by_key`):
+To try the unreleased 0.2 operations now, depend on `main` (enable `features = ["rayon"]` for `par_argsort` and `par_argsort_by_key`):
 
 ```toml
 [dependencies]
-tessera-order = { path = "../tessera-order/rust/tessera-order" }
+tessera-order = { git = "https://github.com/Yikai-Liao/tessera-order", branch = "main" }
+# Or a local checkout:
+# tessera-order = { path = "../tessera-order/rust/tessera-order" }
 ```
 
 ### Migrate from earlier development snapshots

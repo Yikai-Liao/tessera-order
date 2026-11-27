@@ -66,8 +66,9 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 ## Documentation figures
 
-The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); next retire the remaining engine model:
+The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); next expand engine tracing and retire the remaining engine model:
 
+- **End-to-end engine tracing and realistic visualizations:** `rust/tessera-trace` currently replays only serial `block::partition` on tiny two-digit keys, which is too toy-like to demonstrate Tessera's actual mechanisms. Expand the trace hooks and interactive figures to replay multi-stage execution on realistic inputs, covering order probing, budgeted insertion, varying-bit elimination, sparse source order, equality partition, tile LSD/MSD/SIMD finishing, `argsort` prefix packing, `select_nth` band skipping, panic recovery, and parallel sharded ledger completion.
 - Move `CountingPassDemo` from the frame slider in `StepControls` to structural navigation, then retire `StepControls`.
 - Replace `sim/digits.ts` (`KeySample::collect`, `plan_digits`, `top_window`) with engine events, and extend the trace to tile finishing where a figure needs it.
 

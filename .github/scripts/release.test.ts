@@ -39,6 +39,12 @@ test("tag notes reject empty messages and messages without a heading outside cod
     tagNotes(`${header}\`\`\`sh\n# example\n\`\`\`\n\n# Fixes\n`),
     "```sh\n# example\n```\n\n# Fixes\n",
   );
+  const nested = "```text\n```sh\n```\n\n## Fixes\n";
+  assert.equal(tagNotes(`${header}${nested}`), nested);
+  assert.throws(
+    () => tagNotes(`${header}\`\`\`text\n\`\`\`sh\n## Fixes\n\`\`\`\n`),
+    /no `#` heading/,
+  );
 });
 
 test("release notes come only from an annotated tag at the published commit", () => {

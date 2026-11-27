@@ -60,10 +60,14 @@ export function tagNotes(tagObject: string): string {
 function hasAtxHeading(markdown: string): boolean {
   let fence: string | undefined;
   for (const line of markdown.split("\n")) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (marker !== undefined && (fence === undefined || marker.startsWith(fence)))
-      fence = fence === undefined ? marker : undefined;
-    else if (fence === undefined && /^ {0,3}#{1,6}(?: |$)/.test(line)) return true;
+    if (fence === undefined) {
+      fence = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (fence === undefined && /^ {0,3}#{1,6}(?: |$)/.test(line)) return true;
+    } else {
+      // A closing fence repeats the opening character at least as often, with no info string.
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      if (close?.[0] === fence[0] && close.length >= fence.length) fence = undefined;
+    }
   }
   return false;
 }

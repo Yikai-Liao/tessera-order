@@ -2,13 +2,13 @@
 
 Tessera sorts slices by a fixed-width key (see [key encoding](../../conformance/semantics.md#key-encoding) for supported types and limits). Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
 
-This guide follows the main branch, which will become 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
+This guide covers 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
 
 ## Install
 
 ```toml
 [dependencies]
-tessera-order = "0.1"
+tessera-order = "0.2"
 ```
 
 Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instructions automatically; the only public feature is the optional [`rayon`](#parallel-sorting).
@@ -158,13 +158,11 @@ assert_eq!(groups, [2, 2]);
 
 ## Parallel sorting
 
-Enable the `rayon` feature for `par_sort`, `par_sort_by_key`, `par_argsort` and `par_argsort_by_key` (all on `main`; see [Versions](#versions) for `0.1`):
+Enable the `rayon` feature for `par_sort`, `par_sort_by_key`, `par_argsort` and `par_argsort_by_key` (see [Versions](#versions) for 0.1):
 
 ```toml
 [dependencies]
-tessera-order = { path = "../tessera-order/rust/tessera-order", features = ["rayon"] }
-# Published 0.1 exposes only `par_stable_sort` and `par_stable_sort_by_key`:
-# tessera-order = { version = "0.1", features = ["rayon"] }
+tessera-order = { version = "0.2", features = ["rayon"] }
 rayon = "1.10"  # only to configure a custom pool
 ```
 
@@ -186,20 +184,11 @@ Small inputs and one-thread pools run serially, and sorted or constant inputs ne
 
 ## Versions
 
-The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. Main renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, serial and parallel argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples) as unreleased 0.2 changes. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
-
-<a id="try-the-development-api"></a>
-
-To try the new operations now, depend on a local checkout (enable `features = ["rayon"]` for `par_argsort` and `par_argsort_by_key`):
-
-```toml
-[dependencies]
-tessera-order = { path = "../tessera-order/rust/tessera-order" }
-```
+0.1 has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. 0.2 renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, serial and parallel argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples). 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 ### Migrate from earlier development snapshots
 
-These functions appeared only in unreleased checkouts. For `_by_key` variants, use the keyed operations with the same substitutions.
+These functions appeared only in development checkouts before 0.2. For `_by_key` variants, use the keyed operations with the same substitutions.
 
 | Earlier API | Replacement |
 |---|---|

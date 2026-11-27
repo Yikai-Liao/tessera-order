@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { dirname, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMarkdownRenderer, defineConfig, type MarkdownRenderer } from "vitepress";
+import { HISTORY_DATA_SOURCE } from "../../bench/tracking/history.ts";
+import { indexSchema } from "../../bench/tracking/result.ts";
 import { renderComparisonMarkdown } from "./comparisonMarkdown.ts";
 import {
   addPageMetadata,
@@ -37,6 +40,29 @@ const sidebar = (ids: string[]) =>
       })),
     }));
 const siteUrl = canonicalSiteUrl(process.env.DOCS_BASE);
+
+/** Cache the latest history index and month alongside the static site so `/benchmarks/` renders immediately. */
+async function seedHistorySnapshot(outDir: string) {
+  try {
+    const indexResponse = await fetch(`${HISTORY_DATA_SOURCE}index.json`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!indexResponse.ok) return;
+    const indexText = await indexResponse.text();
+    const latestMonth = indexSchema.parse(JSON.parse(indexText)).months.at(-1);
+    const dir = join(outDir, "benchmarks/data/tessera");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "index.json"), indexText, "utf8");
+    if (!latestMonth) return;
+    const monthResponse = await fetch(`${HISTORY_DATA_SOURCE}${latestMonth}.jsonl`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (monthResponse.ok)
+      await writeFile(join(dir, `${latestMonth}.jsonl`), await monthResponse.text(), "utf8");
+  } catch {
+    // Offline or unreachable data branch: the page still fetches live in the browser.
+  }
+}
 
 /**
  * Turns relative links into what each reader needs: a page link becomes an
@@ -79,7 +105,10 @@ export default defineConfig({
   markdown,
   transformPageData: (page) => addPageMetadata(page, repoRoot, siteUrl),
   async buildEnd(siteConfig) {
-    const snapshot = await loadComparisonSnapshot();
+    const [snapshot] = await Promise.all([
+      loadComparisonSnapshot(),
+      seedHistorySnapshot(siteConfig.outDir),
+    ]);
     await exportLlmsArtifacts({
       repoRoot,
       outDir: siteConfig.outDir,

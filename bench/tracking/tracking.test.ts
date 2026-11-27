@@ -34,6 +34,7 @@ import { explainFailure } from "./failure.ts";
 import { growthPeaks, growthPlans, growthSchema } from "./growth.ts";
 import {
   comparableRuns,
+  currentCases,
   formatTimestamp,
   historyTimestamp,
   latestValues,
@@ -536,6 +537,14 @@ test("history connects reports across other executions and preserves same-execut
   assert.deepEqual(
     latestValues(runs, [serialCase, parallelCase]).map((row) => row.current),
     [true, true],
+  );
+  assert.deepEqual(
+    currentCases(runs, [serialCase, parallelCase]).map((entry) => entry.id),
+    [serialCase.id, parallelCase.id],
+  );
+  assert.deepEqual(
+    currentCases(runs.slice(0, 6), [serialCase, parallelCase]).map((entry) => entry.id),
+    [parallelCase.id],
   );
   assert.equal(latestValues(runs.slice(0, 6), [serialCase])[0].current, false);
   assert.equal(latestValues(runs.slice(0, 8), [serialCase])[0].current, false);

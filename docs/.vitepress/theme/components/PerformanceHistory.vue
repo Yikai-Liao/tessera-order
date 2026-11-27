@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { useData } from "vitepress";
+import { useData, withBase } from "vitepress";
 import {
   computed,
   nextTick,
@@ -18,8 +18,10 @@ import {
   type ComparedCase,
   type ComparisonAxis,
   comparableRuns,
+  currentCases,
   formatTime,
   formatTimestamp,
+  HISTORY_DATA_SOURCE,
   type HistoryAxis,
   latestValues,
   renderComparison,
@@ -33,7 +35,7 @@ import {
 } from "../../../../bench/tracking/result.ts";
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
-  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/tessera/",
+  source: HISTORY_DATA_SOURCE,
   caseId: "rust/sort/u64/random/65536/s1/serial",
 });
 type Color = ComparedCase["color"];
@@ -181,11 +183,47 @@ onMounted(() => {
       error.value = "";
       index.value = null;
       journals.value = new Map();
+      // Seed from the same-origin build snapshot for instant display, then refresh live in place.
+      let seeded = false;
+      if (source === HISTORY_DATA_SOURCE) {
+        try {
+          const snapshotBase = withBase("/benchmarks/data/tessera/");
+          const snapIndex = indexSchema.parse(
+            JSON.parse(await download(snapshotBase, "index.json", controller.signal)),
+          );
+          const latestMonth = snapIndex.months.at(-1);
+          const seededJournals = new Map<string, TrackingRun[]>();
+          if (latestMonth) {
+            const raw = await download(snapshotBase, `${latestMonth}.jsonl`, controller.signal);
+            seededJournals.set(latestMonth, parseRuns(raw));
+          }
+          if (!controller.signal.aborted) {
+            journals.value = seededJournals;
+            index.value = snapIndex;
+            loading.value = false;
+            seeded = true;
+          }
+        } catch {
+          // Local snapshot is optional (absent in dev or offline builds).
+        }
+      }
       try {
         const text = await download(source, "index.json", controller.signal);
-        index.value = readable(() => indexSchema.parse(JSON.parse(text)));
-      } catch (cause) {
+        const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
         if (controller.signal.aborted) return;
+        if (seeded) {
+          const latestMonth = liveIndex.months.at(-1);
+          const updated = new Map(journals.value);
+          if (latestMonth) {
+            const raw = await download(source, `${latestMonth}.jsonl`, controller.signal);
+            updated.set(latestMonth, readable(() => parseRuns(raw)));
+          }
+          if (controller.signal.aborted) return;
+          journals.value = updated;
+        }
+        index.value = liveIndex;
+      } catch (cause) {
+        if (controller.signal.aborted || seeded) return;
         fail(cause);
         loading.value = false;
       }
@@ -232,7 +270,23 @@ const runs = computed(() => {
   return comparableRuns(measured, firstRun.value || lastRun.value
     ? { first: firstRun.value, last: lastRun.value } : undefined);
 });
-const cases = computed(() => index.value?.cases ?? []);
+const allCases = computed(() => index.value?.cases ?? []);
+// Hide cases removed before the latest commit in the selected range.
+const cases = computed(() =>
+  runs.value.length ? currentCases(runs.value, allCases.value) : allCases.value,
+);
+const availableFacets = computed(() => {
+  if (!index.value) return null;
+  const present = Object.fromEntries(
+    FILTERS.map(({ facet }) => [facet, new Set(cases.value.map((entry) => entry[facet]))]),
+  ) as Record<Facet, Set<string>>;
+  return Object.fromEntries(
+    FILTERS.map(({ facet }) => [
+      facet,
+      index.value!.facets[facet].filter((value) => present[facet].has(value)),
+    ]),
+  ) as Record<Facet, string[]>;
+});
 // An empty filter admits every value; filters intersect.
 const shown = computed(() =>
   cases.value.filter((entry) =>
@@ -251,7 +305,7 @@ function setFilter(facet: Facet, value: string | null) {
         : [...current, value];
   filters.value = { ...filters.value, [facet]: next };
 }
-const byId = computed(() => new Map(cases.value.map((entry) => [entry.id, entry])));
+const byId = computed(() => new Map(allCases.value.map((entry) => [entry.id, entry])));
 
 // A colour follows its case: a new case takes the first colour not in use.
 const limitNotice = ref(false);
@@ -488,7 +542,7 @@ const emptyMessage = computed(() => {
           All
         </button>
         <button
-          v-for="value in index.facets[facet]"
+          v-for="value in availableFacets?.[facet] ?? []"
           :key="value"
           type="button"
           :aria-pressed="filters[facet].includes(value)"

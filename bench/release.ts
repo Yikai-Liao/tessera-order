@@ -59,17 +59,22 @@ export function includeGoOpponents(plan: Plan): Plan {
   });
 }
 
-async function buildGoWorker(root: string, workspace: Workspace) {
+export async function buildGoWorker(root: string, workspace: Workspace, libraryRoot = root) {
   const { tree, directory } = workspace;
   for (const path of ["bench/go", "go/tessera"]) {
     await rm(join(tree, path), { recursive: true, force: true });
-    await copySnapshot(join(root, path), join(tree, path), root);
+    const owner = path === "go/tessera" ? libraryRoot : root;
+    await copySnapshot(join(owner, path), join(tree, path), owner);
   }
   const binary = join(directory, process.platform === "win32" ? "go-worker.exe" : "go-worker");
-  await command("go", ["build", "-mod=readonly", "-trimpath", "-o", binary, "."], {
-    cwd: join(tree, "bench/go"),
-    env: { GOTOOLCHAIN: "go1.27.4", GOWORK: "off", GOEXPERIMENT: "simd", CGO_ENABLED: "0" },
-  });
+  await command(
+    "go",
+    ["build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-o", binary, "."],
+    {
+      cwd: join(tree, "bench/go"),
+      env: { GOTOOLCHAIN: "go1.27.4", GOWORK: "off", GOEXPERIMENT: "simd", CGO_ENABLED: "0" },
+    },
+  );
   return binary;
 }
 

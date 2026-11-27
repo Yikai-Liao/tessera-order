@@ -47,10 +47,17 @@ type capability struct {
 }
 
 func main() {
-	if err := serve(os.Stdin, os.Stdout); err != nil {
+	if err := runWorker(); err != nil {
 		json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 		os.Exit(1)
 	}
+}
+
+func runWorker() error {
+	if len(os.Args) == 2 && (os.Args[1] == "--track" || os.Args[1] == "--verify-tracking") {
+		return track(os.Stdin, os.Stdout, os.Args[1] == "--verify-tracking")
+	}
+	return serve(os.Stdin, os.Stdout)
 }
 
 // One process lists capabilities or prepares one slot. Stdout is protocol data.
@@ -120,6 +127,14 @@ func serve(input io.Reader, output io.Writer) error {
 				entry.Route, entry.Decline = "", route
 			}
 			if err := write(entry); err != nil {
+				return err
+			}
+		case "digest":
+			input, route := prepare(req.Case, req, false)
+			if input.digest == nil {
+				return fmt.Errorf("%s: %s", req.ID, route)
+			}
+			if err := write(map[string]string{"id": req.ID, "digest": input.digest()}); err != nil {
 				return err
 			}
 		case "prepare", "verify":

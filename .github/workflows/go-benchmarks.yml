@@ -1,0 +1,167 @@
+name: Go benchmark feedback
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        required: true
+      reused-from:
+        type: string
+
+env:
+  BENCHMARK_LANGUAGE: go
+  PUBLISH: ${{ inputs.publish }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: inputs.reused-from == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
+    outputs:
+      baseline: ${{ steps.prepare.outputs.baseline }}
+      no-baseline: ${{ steps.prepare.outputs.no-baseline }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/benchmark"
+          save-if: 'false'
+          shared-key: go-benchmark-plan
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - id: prepare
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          baseline=$(git merge-base "$PR_BASE" HEAD)
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          if ! git cat-file -e "$baseline:go/tessera/go.mod"; then
+            echo "no-baseline=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun run tools continuous prepare "$baseline" --language go --out bench/results/go-prepared
+          echo "matrix=$(bun run --silent tools continuous matrix --go-prepared bench/results/go-prepared)" >> "$GITHUB_OUTPUT"
+      - id: artifact
+        if: steps.prepare.outputs.matrix != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-prepared-${{ github.run_attempt }}
+          path: bench/results/go-prepared/
+          retention-days: 14
+          if-no-files-found: error
+
+  measure:
+    needs: prepare
+    if: needs.prepare.outputs.artifact != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          path: bench/results/go-prepared
+      - env:
+          SHARD: ${{ matrix.shard }}
+        run: bun run tools continuous measure bench/results/go-prepared --shard "$SHARD" --out bench/results/go-paired
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ matrix.artifact }}-go-${{ needs.prepare.outputs.artifact }}
+          path: |
+            bench/results/go-paired/
+            !bench/results/go-paired/binaries/**
+          retention-days: 14
+
+  report:
+    needs: [prepare, measure]
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
+    env:
+      HASH: ${{ github.event.pull_request.head.sha }}
+      BASE_HASH: ${{ needs.prepare.outputs.baseline || github.event.pull_request.base.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE: ${{ github.event.pull_request.base.ref }}
+      NO_BASELINE: ${{ needs.prepare.outputs.no-baseline }}
+      REUSED_FROM: ${{ inputs.reused-from }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        if: needs.prepare.outputs.artifact != ''
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/prepared
+      - uses: actions/download-artifact@v8
+        if: needs.prepare.outputs.artifact != ''
+        continue-on-error: true
+        with:
+          pattern: paired-*-go-${{ needs.prepare.outputs.artifact }}
+          merge-multiple: false
+          # The action extracts a single match directly into the destination.
+          path: ${{ fromJSON(needs.prepare.outputs.matrix).include[0].shard == '1/1' && format('{0}/paired/paired-1-go-{1}', runner.temp, needs.prepare.outputs.artifact) || format('{0}/paired', runner.temp) }}
+      - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
+        if: inputs.publish && needs.measure.result == 'success'
+        continue-on-error: true
+        with:
+          version: 0.6.16
+      - id: upload
+        if: inputs.publish && needs.measure.result == 'success'
+        continue-on-error: true
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+        run: |
+          bun run tools continuous submit --language go --project "$BENCHER_PROJECT" --hash "$HASH" --base-hash "$BASE_HASH" \
+            --pr "$PR_NUMBER" --prepared "$RUNNER_TEMP/prepared" --artifacts "$RUNNER_TEMP/paired" --out "$RUNNER_TEMP/submission"
+      - run: bun .github/scripts/publish-report.ts
+        env:
+          GITHUB_TOKEN: ${{ inputs.publish && github.token || '' }}
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.upload.outcome != 'skipped'
+        with:
+          name: continuous-go-submission
+          path: ${{ runner.temp }}/submission*
+      - if: always() && steps.upload.outcome == 'failure'
+        run: exit 1

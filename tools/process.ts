@@ -36,7 +36,7 @@ export class CommandCancelledError extends Error {
 interface CommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-  capture?: boolean;
+  capture?: boolean | "raw";
   /** A line-oriented worker exchange, owned and cancelled with this command. */
   interact?: (exchange: (request: string) => Promise<string>) => Promise<void>;
 }
@@ -125,7 +125,7 @@ export function command(
       process.removeListener("SIGTERM", interrupt);
       if (cancelled) reject(cancelled);
       else if (interactionError) reject(interactionError);
-      else if (code === 0) resolve(output.trim());
+      else if (code === 0) resolve(options.capture === "raw" ? output : output.trim());
       else {
         if (output) diagnostic(output.trimEnd());
         reject(new Error(`${program} exited with ${signal ?? code}`));

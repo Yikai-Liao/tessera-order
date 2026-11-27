@@ -103,6 +103,7 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
     const rows = cloudRows(report).filter(
       (row) => row.name.startsWith(`${language}/`) && row.value > 0,
     );
+    if (!rows.length) continue;
     runs.push({
       uuid: report.uuid,
       hash: report.branch.head.version?.hash ?? null,

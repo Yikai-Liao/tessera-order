@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benchmark: ${{ steps.changes.outputs.benchmark }}
+      tracking-go: ${{ steps.changes.outputs.tracking_go }}
       matrix: ${{ steps.selection.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
@@ -37,17 +38,17 @@ jobs:
         run: bun .github/scripts/ci_changes.ts --base "$BASE" --head "$GITHUB_SHA" --out "$GITHUB_OUTPUT"
 
       - run: bun install --frozen-lockfile --ignore-scripts
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true'
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true' || steps.changes.outputs.tracking_go == 'true'
       - id: selection
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true'
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true' || steps.changes.outputs.tracking_go == 'true'
         env:
-          TRACKING_SELECTION: ${{ github.event_name == 'workflow_dispatch' && inputs.selection || 'tessera' }}
+          TRACKING_SELECTION: ${{ github.event_name == 'workflow_dispatch' && inputs.selection || (steps.changes.outputs.tracking_go == 'true' && (steps.changes.outputs.benchmark == 'true' && 'tessera,go-tessera' || 'go-tessera') || 'tessera') }}
         run: bun bench/tracking/implementations.ts
 
   # Builds need no credentials and run in parallel; each freezes one tested image as an artifact.
   build:
     needs: changes
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true' || needs.changes.outputs.tracking-go == 'true')
     name: Build (${{ matrix.column }})
     strategy:
       fail-fast: false
@@ -76,6 +77,11 @@ jobs:
         if: matrix.native
         timeout-minutes: 5
         run: bash .github/scripts/install_native_tools.sh
+      - uses: actions/setup-go@v7
+        if: matrix.go
+        with:
+          go-version: '1.27.4'
+          cache: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -175,7 +181,7 @@ jobs:
   # A column whose build failed fails here when its artifact is missing; the others continue.
   track:
     needs: [changes, build]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true') }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true' || needs.changes.outputs.tracking-go == 'true') }}
     name: Track (${{ matrix.column }})
     strategy:
       fail-fast: false

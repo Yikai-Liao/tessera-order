@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 /** Current single-backend check name. */
-export const BENCHMARK_CHECK = "Benchmarks (rust)";
+export const BENCHMARK_CHECK = benchmarkCheck("rust");
+
+export function benchmarkCheck(language: "rust" | "go") {
+  return `Benchmarks (${language})`;
+}
 
 export const MARKER = "tessera-bench-report";
 

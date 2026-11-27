@@ -643,6 +643,22 @@ fn measure_cases(
 pub fn main(memory: bool) -> Result<()> {
     #[cfg(feature = "compare-native")]
     native::check_layouts();
+    if !memory && std::env::args().nth(1).as_deref() == Some("describe") {
+        let path = std::env::args().nth(2).ok_or("missing plan path")?;
+        for (case, executions) in crate::plan::Plan::parse(&fs::read_to_string(path)?)?.cases()? {
+            for execution in executions {
+                println!(
+                    "{}",
+                    json!({
+                        "id": case.worker_id("go", execution), "case": case,
+                        "record_bytes": crate::plan::record_bytes(&case.ty),
+                        "batch": crate::plan::criterion_batch_iterations(case.len),
+                    })
+                );
+            }
+        }
+        return Ok(());
+    }
     let mut options = Options::parse(memory)?;
     if options.command == "help" || options.command == "--help" || options.command == "-h" {
         let command = if memory {

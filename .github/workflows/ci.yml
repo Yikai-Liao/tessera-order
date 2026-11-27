@@ -32,6 +32,8 @@ jobs:
       go: ${{ steps.changes.outputs.go }}
       comparison: ${{ steps.changes.outputs.comparison }}
       benchmark: ${{ steps.changes.outputs.benchmark }}
+      benchmark_go: ${{ steps.changes.outputs.benchmark_go }}
+      benchmark_go_reused: ${{ steps.changes.outputs.benchmark_go_reused }}
       docs: ${{ steps.changes.outputs.docs }}
       record: ${{ steps.changes.outputs.record }}
       benchmark_reused: ${{ steps.changes.outputs.benchmark_reused }}
@@ -100,7 +102,7 @@ jobs:
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp, go, docs, comparison, registry-msvc, prepare, measure, report, reuse-report]
+    needs: [changes, lint, rust, cpp, go, docs, comparison, registry-msvc, prepare, measure, report, reuse-report, benchmark-go]
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -422,3 +424,16 @@ jobs:
           HASH: ${{ github.event.pull_request.head.sha }}
           REUSED_FROM: ${{ needs.changes.outputs.benchmark_reused }}
           GITHUB_TOKEN: ${{ github.token }}
+
+  benchmark-go:
+    needs: changes
+    if: github.event_name == 'pull_request' && (needs.changes.outputs.benchmark_go == 'true' || needs.changes.outputs.benchmark_go_reused != '')
+    uses: ./.github/workflows/go-benchmarks.yml
+    with:
+      publish: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+      reused-from: ${{ needs.changes.outputs.benchmark_go_reused }}
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
+    secrets: inherit

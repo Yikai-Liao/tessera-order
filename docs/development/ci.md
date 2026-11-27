@@ -14,7 +14,8 @@
 | Reports, status or publication tooling | Repository tooling checks only |
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
-| Go module, its rules or its workflow | Go validation |
+| Go module (`go/tessera/`) | Go validation and [Go PR revision measurement](continuous-benchmarks.md#go-pull-requests) |
+| Go rules or the Go CI workflow | Go validation |
 | Shared golden vectors (`conformance/vectors/`) | Rust and Go validation |
 
 An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust, C++ and Go)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
@@ -25,11 +26,11 @@ Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics an
 
 A PR push skips a selected lane when an earlier run of the same PR passed that lane with identical inputs, so a documentation-only push after a verified engine change runs formatting, lints and Docs only. The router fingerprints each lane's inputs: the mode and blob ID of every tracked file whose `ROUTES` row selects the lane, including unrouted files, plus all of `bench/` and `tools/`. A row says when a change alone needs the lane. Tooling such as report classification can still change a lane's result or verdict without scheduling the lane. Checks fingerprint the tested merge commit. Measurement fingerprints the PR head together with its merge base, because a new base changes the comparison without changing the head.
 
-When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries to the new head the `Benchmarks (rust)` check that the marker's run published or carried (`reuse-report`). Measurement is reused only where reports publish checks, so Dependabot and fork PRs measure every time, and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
+When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries to the new head the `Benchmarks (rust)` or `Benchmarks (go)` check that the marker's run published or carried (`reuse-report`, or the Go workflow's report job). Measurement is reused only where reports publish checks, so Dependabot and fork PRs measure every time, and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
 
 ## Lanes
 
-Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).
+Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)). Go measurement sizes its own matrix from its prepared cases, at most four runners, and runs beside the Rust shards without reducing them.
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -103,7 +104,7 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Reproduce change routing | `bun run --silent tools ci changes --base main --head HEAD` |
 | Validate a PR title | `bun run --silent tools ci title 'fix(bench): validate source snapshots'` |
 | Check every commit's DCO sign-off | `bun run --silent tools ci dco main HEAD` |
-| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix` |
+| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix`, or `--go-prepared DIR` for a prepared Go pair |
 | Reproduce the comparison checks | `bun run --silent tools ci check --native` |
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |

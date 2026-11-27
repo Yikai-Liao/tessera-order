@@ -19,7 +19,8 @@ Run `bun run tools` from the repository root after `bun install --frozen-lockfil
 | Resume an interrupted comparison | `bun run tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `bun run --silent tools plan NAME` | Validated selection without compiling or measuring |
 | Regenerate a report | `bun run tools report DIR` | Statistics and figures from retained results, without new measurements |
-| Read main or PR feedback | `bun run --silent tools status main` or `bun run --silent tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Compare Go revisions | `bun run tools continuous prepare BASE --language go --out DIR`, then `bun run tools continuous measure DIR --out OUT` | The [Go PR protocol](continuous-benchmarks.md#go-pull-requests) on a clean committed checkout: the PR's Go worker built against both revisions of `go/tessera`, then paired samples |
+| Read main or PR feedback | `bun run --silent tools status main` or `bun run --silent tools status --pr NUMBER` | Exact-ref workflow and benchmark states, with `goBenchmark` on PRs and recent `goTracking` runs on main; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 | Inspect core engine production lines | `bun run --silent tools code [BASE] [--current COMMIT] [--text] [--details]` | The same source scope and line statistics as PR reports, without builds or measurements |
 
 `compare commit` defaults to `HEAD` and the `local` plan; `compare implementations` to the `smoke` plan. Incomplete implementation sessions report only with `--partial`; revision reports need every case's full sample budget.

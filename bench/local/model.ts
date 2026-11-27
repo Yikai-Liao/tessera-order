@@ -11,14 +11,18 @@ import {
 import { type Plan, parsePlan, planExecutions, planOperations } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
+import type { GoBuild, GoRequests } from "./go.ts";
 
 /** Revision builds replace only the Tessera library, so a revision comparison measures only
  * Tessera, at the plan's executions; any other implementation would be identical code in both
  * builds. Parallel executions require an operation with a parallel entry point. Returns the CPUs
  * the scheduler must reserve: the largest planned worker count, or one for serial-only plans. */
-export function revisionThreads(plan: Plan): number {
-  if (plan.implementations.join() !== "tessera")
-    throw new Error("Revision comparisons measure only tessera; select executions instead");
+export function revisionThreads(plan: Plan, language: "rust" | "go" = "rust"): number {
+  const implementation = language === "go" ? "go-tessera" : "tessera";
+  if (plan.implementations.join() !== implementation)
+    throw new Error(
+      `Revision comparisons measure only ${implementation}; select executions instead`,
+    );
   if (
     plan.include.some(
       (rule) =>
@@ -88,7 +92,8 @@ export interface RevisionPair {
   binaries: { baseline: string; current: string };
   /** Executed files relative to the artifact directory. */
   binaryPaths: { baseline: string; current: string };
-  builds: { baseline: BuildProvenance; current: BuildProvenance };
+  builds?: { baseline: BuildProvenance; current: BuildProvenance };
+  go?: { builds: { baseline: GoBuild; current: GoBuild }; requests: GoRequests };
   rustc: string;
   flags: string;
   configuration: string;
@@ -129,14 +134,13 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
     !Array.isArray(pair.cases) ||
     !pair.cases.length ||
     new Set(pair.cases).size !== pair.cases.length ||
-    !pair.builds?.baseline ||
-    !pair.builds?.current ||
+    (!pair.go && (!pair.builds?.baseline || !pair.builds?.current)) ||
     !pair.binaryPaths?.baseline ||
     !pair.binaryPaths?.current
   )
     throw new Error("Expected an unmeasured prepared revision pair");
   pair.plan = parsePlan(pair.plan);
-  revisionThreads(pair.plan);
+  revisionThreads(pair.plan, pair.go ? "go" : "rust");
   return pair;
 }
 

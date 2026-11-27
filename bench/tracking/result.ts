@@ -18,7 +18,7 @@ const metric = z
 const reportSchema = z.object({
   uuid: z.uuid(),
   start_time: z.iso.datetime(),
-  adapter: z.literal("rust_criterion"),
+  adapter: z.enum(["rust_criterion", "json"]),
   project: z.object({ slug: z.string() }),
   branch: z.object({
     name: z.string(),
@@ -60,8 +60,15 @@ export const runSchema = z
     workflow: z
       .url()
       .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
-    rustc: z.string(),
-    rustflags: z.string(),
+    rustc: z.string().optional(),
+    rustflags: z.string().optional(),
+    go: z
+      .object({
+        GoVersion: z.string(),
+        Settings: z.array(z.object({ Key: z.string(), Value: z.string() })),
+        Deps: z.array(z.json()),
+      })
+      .optional(),
     // The run measures one column: its implementation is the data directory, and every value's
     // Criterion ID ends in this execution.
     execution: z.string().refine((text) => {
@@ -81,6 +88,15 @@ export const runSchema = z
     // tracking have none. When present it covers exactly the timed cases.
     memory: z.record(z.string().min(1), z.number().int().nonnegative()).optional(),
   })
+  .refine(
+    (run) =>
+      run.go
+        ? !run.memory && Object.keys(run.values).every((id) => id.startsWith("go/"))
+        : run.rustc !== undefined &&
+          run.rustflags !== undefined &&
+          Object.keys(run.values).every((id) => id.startsWith("rust/")),
+    "Tracking provenance must match the worker language",
+  )
   .refine(
     (run) =>
       !run.memory ||
@@ -128,9 +144,11 @@ export function summarizeReport(
   project: string,
   ids: string[],
   branch: string,
+  adapter: "json" | "rust_criterion" = "rust_criterion",
 ) {
   const report = reportSchema.parse(input);
   if (
+    report.adapter !== adapter ||
     report.branch.name !== branch ||
     report.branch.head.version.hash !== hash ||
     report.project.slug !== project

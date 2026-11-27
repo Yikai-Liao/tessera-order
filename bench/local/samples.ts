@@ -65,16 +65,30 @@ export async function measureSamples(
     ) => {
       // Identical argv shape avoids changing the initial stack layout by revision name.
       const binary = binaries[role];
-      const argv = [...(mask ? ["taskset", "-c", mask] : []), `./${basename(binary)}`, "--bench"];
+      const go = run.go?.requests[id];
+      const argv = [
+        ...(mask ? ["taskset", "-c", mask] : []),
+        `./${basename(binary)}`,
+        ...(go ? [] : ["--bench"]),
+      ];
       if (platform() === "linux") argv.unshift("setarch", "-R");
       return command(argv[0], argv.slice(1), {
         cwd: dirname(binary),
-        interact,
-        env: {
-          TESSERA_BENCH_PAIRED: "1",
-          TESSERA_BENCH_IDS: id,
-          TESSERA_BENCH_PLAN: planPath,
-        },
+        interact: go
+          ? (exchange) =>
+              interact((message) =>
+                exchange(
+                  message === "start" ? JSON.stringify({ ...go, action: "prepare" }) : message,
+                ),
+              )
+          : interact,
+        env: go
+          ? { GOMAXPROCS: String(go.threads) }
+          : {
+              TESSERA_BENCH_PAIRED: "1",
+              TESSERA_BENCH_IDS: id,
+              TESSERA_BENCH_PLAN: planPath,
+            },
       });
     };
     const samples: { baseline: number; current: number }[] = [];

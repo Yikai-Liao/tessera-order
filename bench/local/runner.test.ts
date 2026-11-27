@@ -222,6 +222,18 @@ test("revision scheduling reserves the largest selected worker count", async () 
     assert.throws(() => revisionThreads({ ...local, implementations }), /only tessera/);
 });
 
+test("revision scheduling admits only the Tessera implementation for its language", async () => {
+  const rust = await loadPlan("continuous");
+  const go = { ...rust, implementations: ["go-tessera"] };
+  assert.equal(revisionThreads(go, "go"), 4);
+  assert.throws(() => revisionThreads(rust, "go"), /only go-tessera/);
+  assert.throws(() => revisionThreads(go, "rust"), /only tessera/);
+  assert.throws(
+    () => revisionThreads({ ...go, implementations: ["go-tessera", "go-slices"] }, "go"),
+    /only go-tessera/,
+  );
+});
+
 test("revision comparison enables historical SIMD without changing current builds", () => {
   assert.deepEqual(simdFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
     "portable-simd",

@@ -21,6 +21,7 @@ import {
   type Workspace,
   withWorkspace,
 } from "../workspace.ts";
+import { listGo } from "./go.ts";
 import {
   engineOrderingSymbols,
   type LayoutControl,
@@ -349,11 +350,11 @@ export async function comparePrepared(options: {
     .update(await readFile(join(root, "bench/catalog.toml")))
     .digest("hex");
   if (
-    pair.source.harness !== (await sourceHash(join(root, "bench/rust"))) ||
+    pair.source.harness !== (await sourceHash(join(root, pair.go ? "bench/go" : "bench/rust"))) ||
     pair.source.catalog !== catalogHash
   )
     throw new Error("Prepared pair requires its original harness and catalog");
-  const cpu = await comparisonCpus(revisionThreads(plan), options.cpu);
+  const cpu = await comparisonCpus(revisionThreads(plan, pair.go ? "go" : "rust"), options.cpu);
   const binaries = { baseline: "", current: "" };
   const preparedRoot = await realpath(prepared);
   await mkdir(out, { recursive: false });
@@ -375,13 +376,14 @@ export async function comparePrepared(options: {
   }
   if (basename(binaries.baseline) !== basename(binaries.current))
     throw new Error("Prepared executables must have identical basenames");
-  const allCases = await selectedCases(
-    binaries,
-    join(out, "plan.json"),
-    undefined,
-    root,
-    planExecutions(plan),
-  );
+  const allCases = pair.go
+    ? await listGo(binaries.current, pair.go.requests)
+    : await selectedCases(binaries, join(out, "plan.json"), undefined, root, planExecutions(plan));
+  if (
+    pair.go &&
+    JSON.stringify(await listGo(binaries.baseline, pair.go.requests)) !== JSON.stringify(allCases)
+  )
+    throw new Error("Go baseline inventory differs");
   if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
   const run = measurementRun(pair, cpu, options.shard);

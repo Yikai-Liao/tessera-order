@@ -53,9 +53,7 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 A pure Go port in [`go/tessera/`](go/tessera/), following the [Go rules](go/AGENTS.md); it passes the shared golden vectors.
 
-1. **Benchmark worker.** Measure Go operations with the shared input specification against `slices.Sort`, `slices.SortStableFunc`, `sort.Stable` and pinned third-party radix and pdqsort sorts, with cross-language input hashes. Decide workspace pooling (`sync.Pool`) from these measurements.
-2. **PR and main feedback** for the Go lane, reusing the continuous benchmark pipeline.
-3. **Release wiring** for `go/tessera/vX.Y.Z` tags.
+1. **First hosted evidence.** The benchmark, PR feedback, main tracking and release workflows have not yet run on GitHub. Confirm them on the first Go PR and a dispatched main run before the first `go/tessera/v0.1.0` tag, then decide workspace pooling (`sync.Pool`) and Go memory measurement from those results.
 
 Divergences from the Rust engine, each kept until hosted benchmarks show a large loss on a complete operation:
 

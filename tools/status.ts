@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
+import { parseCriterionId } from "../bench/catalog.ts";
+import { BENCHMARK_CHECK, benchmarkCheck, marker } from "../bench/continuous/marker.ts";
+import { indexSchema, parseRuns } from "../bench/tracking/result.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -56,6 +58,17 @@ export interface RepositoryStatus {
   }[];
   benchmark: { state: string; title: string | null };
   report: string | null;
+  goBenchmark?: { state: string; title: string | null; report: string | null };
+  goTracking?: {
+    state: string;
+    runs: {
+      hash: string;
+      execution: string;
+      operations: string[];
+      workflow: string;
+      values?: Record<string, [number, number, number]>;
+    }[];
+  };
   details?: {
     url: string;
     checks: Check[];
@@ -71,18 +84,14 @@ async function repositoryGitHub(root: string) {
     ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
     { cwd: root, capture: true },
   );
-  const read = async (path: string, paginate = false) =>
-    JSON.parse(
-      await command(
-        "gh",
-        ["api", ...(paginate ? ["--paginate", "--slurp"] : []), `repos/${repo}/${path}`],
-        { cwd: root, capture: true },
-      ),
-    );
+  const read = (path: string, args: string[] = [], capture: true | "raw" = true) =>
+    command("gh", ["api", ...args, `repos/${repo}/${path}`], { cwd: root, capture });
   return {
     repo,
-    get: <T>(path: string): Promise<T> => read(path),
-    pages: <T>(path: string): Promise<T[]> => read(path, true),
+    get: async <T>(path: string): Promise<T> => JSON.parse(await read(path)),
+    getRaw: (path: string) => read(path, ["-H", "Accept: application/vnd.github.raw"], "raw"),
+    pages: async <T>(path: string): Promise<T[]> =>
+      JSON.parse(await read(path, ["--paginate", "--slurp"])),
   };
 }
 
@@ -179,6 +188,19 @@ export async function readStatus(
     )
     .at(-1);
   const comment = current ? { url: current.html_url, body: current.body } : null;
+  const goCheck = candidates.find((candidate) => candidate.name === benchmarkCheck("go"));
+  const goComment = commentPages
+    .flatMap((page) => page)
+    .filter(
+      (entry) =>
+        entry.user?.login === "github-actions[bot]" &&
+        entry.body.includes(marker("go", resolved.head)),
+    )
+    .at(-1);
+  const tracking =
+    !pull && resolved.ref === "main"
+      ? await readGoTracking(api, resolved.head, details)
+      : undefined;
   return {
     repository: api.repo,
     target: resolved,
@@ -211,12 +233,23 @@ export async function readStatus(
       title: check?.output.title ?? null,
     },
     report: comment?.url ?? null,
+    ...(pull
+      ? {
+          goBenchmark: {
+            state: goCheck?.conclusion ?? goCheck?.status ?? "missing",
+            title: goCheck?.output.title ?? null,
+            report: goComment?.html_url ?? goCheck?.details_url ?? null,
+          },
+        }
+      : {}),
+    ...(tracking ? { goTracking: tracking } : {}),
     ...(details
       ? {
           details: {
             url,
-            checks: (check ? [check] : []).map(
-              ({ id, name, status, conclusion, external_id, details_url, output }) => ({
+            checks: [check, goCheck]
+              .filter((entry): entry is Check => entry !== undefined)
+              .map(({ id, name, status, conclusion, external_id, details_url, output }) => ({
                 id,
                 name,
                 status,
@@ -224,8 +257,7 @@ export async function readStatus(
                 external_id,
                 details_url,
                 output,
-              }),
-            ),
+              })),
             workflows: workflows.map(({ run, jobs }) => ({
               id: run.id,
               head: run.head_sha,
@@ -250,6 +282,57 @@ export async function readStatus(
   };
 }
 
+async function readGoTracking(
+  api: Awaited<ReturnType<typeof repositoryGitHub>>,
+  head: string,
+  details: boolean,
+) {
+  const path = "go-tessera";
+  const decode = ({ content }: { content: string }) =>
+    Buffer.from(content, "base64").toString("utf8");
+  const refs = await api.get<{ ref: string }[]>("git/matching-refs/heads/benchmark-data");
+  const ref = "benchmark-data";
+  if (!refs.some((entry) => entry.ref === `refs/heads/${ref}`))
+    return { state: "unmeasured", runs: [] };
+  const files = await api.get<{ name: string }[]>(`contents?ref=${ref}`);
+  if (!files.some((file) => file.name === path)) return { state: "unmeasured", runs: [] };
+  const index = indexSchema.parse(
+    JSON.parse(decode(await api.get(`contents/${path}/index.json?ref=benchmark-data`))),
+  );
+  const headRuns = new Map<string, ReturnType<typeof parseRuns>[number]>();
+  const latest = new Map(headRuns);
+  for (const month of index.months.toReversed()) {
+    const monthRuns = parseRuns(
+      await api.getRaw(`contents/${path}/${month}.jsonl?ref=benchmark-data`),
+    );
+    for (const run of monthRuns.toReversed()) {
+      if (!latest.has(run.execution)) latest.set(run.execution, run);
+      if (run.hash === head && !headRuns.has(run.execution)) headRuns.set(run.execution, run);
+    }
+    if (["serial", "t4"].every((execution) => headRuns.has(execution))) break;
+  }
+  const runs = [...latest].map(([execution, prior]) => {
+    const { hash, values, workflow } = headRuns.get(execution) ?? prior;
+    return {
+      hash,
+      execution,
+      workflow,
+      ...(details ? { values } : {}),
+      operations: [
+        ...new Set(Object.keys(values).map((id) => parseCriterionId(id).operation.kind)),
+      ],
+    };
+  });
+  return {
+    state: ["serial", "t4"].every((execution) => headRuns.has(execution))
+      ? "measured"
+      : headRuns.size
+        ? "partial"
+        : "unmeasured",
+    runs,
+  };
+}
+
 /** Print a small optional overview without expanding report bodies. */
 export function formatStatus(status: RepositoryStatus) {
   const lines = [`${status.target.ref} · ${status.target.head}`];
@@ -263,5 +346,16 @@ export function formatStatus(status: RepositoryStatus) {
   }
   const { state, title } = status.benchmark;
   lines.push(`Benchmark: ${state}${title ? ` · ${title}` : ""}`);
+  if (status.goBenchmark)
+    lines.push(
+      `Benchmarks (go): ${status.goBenchmark.state}${status.goBenchmark.title ? ` · ${status.goBenchmark.title}` : ""}`,
+    );
+  if (status.goTracking) {
+    lines.push(`Go tracking: ${status.goTracking.state}`);
+    for (const run of status.goTracking.runs)
+      lines.push(
+        `  ${run.execution} · ${run.hash} · ${run.operations.join(", ")} · ${run.workflow}`,
+      );
+  }
   return lines.join("\n");
 }

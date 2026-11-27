@@ -8,8 +8,17 @@ import { fixture } from "./fixtures/report.ts";
 import { summarizePairedTrend } from "./history.ts";
 import { CONTINUOUS_SHARDS, pairedBmf, pairedSummary } from "./paired.ts";
 
-function measured(ratio: number, uuid: string, time: string, head = "same-baseline") {
-  const runs = Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => pairedRun(index + 1, ratio));
+function measured(
+  ratio: number,
+  uuid: string,
+  time: string,
+  head = "same-baseline",
+  language = "rust",
+) {
+  const cases = pairedRun().shard!.allCases.map((id) => id.replace(/^rust\//, `${language}/`));
+  const runs = Array.from({ length: CONTINUOUS_SHARDS }, (_, index) =>
+    pairedRun(index + 1, ratio, cases),
+  );
   const report = fixture();
   report.uuid = uuid;
   report.start_time = time;
@@ -78,4 +87,24 @@ test("unavailable Cloud still produces the current measured trend point", () => 
   assert.equal(trend.runs.length, 1);
   assert.equal(trend.runs[0].hash, summary.hash);
   assert.ok(Math.abs(trend.overall[0] - 0.2) < 1e-10);
+});
+
+test("paired history ignores reports from the other language", () => {
+  const rust = measured(1.2, "rust", "2026-11-11T00:00:00Z");
+  const go = measured(0.9, "go", "2026-11-11T00:00:00Z", "same-baseline", "go");
+  for (const [language, previous, unrelated] of [
+    ["rust", rust, go],
+    ["go", go, rust],
+  ] as const) {
+    const current = measured(1, "current", "2026-11-11T01:00:00Z", "same-baseline", language);
+    const trend = summarizePairedTrend(current.summary, language, current.report, [
+      previous.report,
+      unrelated.report,
+    ]);
+    assert.deepEqual(
+      trend?.runs.map((run) => run.uuid),
+      [language, "current"],
+    );
+    assert.equal(trend?.series.length, current.summary.rows.length);
+  }
 });

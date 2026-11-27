@@ -7,8 +7,16 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-const LANES = ["rust", "cpp", "go", "comparison", "benchmark", "docs"] as const;
+const LANES = ["rust", "cpp", "go", "comparison", "benchmark", "benchmark_go", "docs"] as const;
 type Lane = (typeof LANES)[number];
+
+const PLAN_RESOLVER = /^bench\/rust\/src\/(plan(\.rs$|\/)|comparison\/mod\.rs$)/;
+const PLAN_THRESHOLDS = /^rust\/tessera-order\/src\/engine\/thresholds\.rs$/;
+const GO_TRACKING_ROUTES = [
+  PLAN_RESOLVER,
+  PLAN_THRESHOLDS,
+  /^(go\/tessera\/|bench\/(go\/|tracking\/|catalog\.|plans\/continuous\.toml$|local\/go\.ts$)|conformance\/vectors\/benchmark-inputs\.json$)/,
+];
 
 /**
  * One row per owner of a path: the lanes whose result that path can change. The
@@ -19,6 +27,9 @@ type Lane = (typeof LANES)[number];
 const ROUTES: [RegExp, Lane[]][] = [
   // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
+  [PLAN_RESOLVER, ["comparison", "benchmark", "benchmark_go"]],
+  [PLAN_THRESHOLDS, ["rust", "benchmark", "benchmark_go", "docs"]],
+  [/^go\/tessera\//, ["go", "benchmark_go"]],
   [/^(go\/|\.github\/actions\/go-test\/|\.github\/workflows\/go-ci\.yml$)/, ["go"]],
   [/^(bench\/go\/|conformance\/vectors\/benchmark-inputs\.json$)/, ["comparison"]],
   [/^conformance\/vectors\//, ["rust", "go"]],
@@ -26,7 +37,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|go-release|go-benchmarks|bench-diagnostics|main-benchmarks)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.
@@ -91,6 +102,7 @@ export function select(paths: string[]) {
     go: false,
     comparison: false,
     benchmark: false,
+    benchmark_go: false,
     docs: false,
   };
   for (const path of paths) for (const lane of lanesOf(path)) selected[lane] = true;
@@ -136,10 +148,9 @@ function inputs(revision: string, lane: Lane) {
  * the measurement compares the PR head with its merge base instead.
  */
 export function marker(lane: Lane, revisions: { tested: string; head: string; baseline: string }) {
-  const text =
-    lane === "benchmark"
-      ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}`
-      : inputs(revisions.tested, lane);
+  const text = lane.startsWith("benchmark")
+    ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}`
+    : inputs(revisions.tested, lane);
   return `ci-pass-${lane}-${createHash("sha256").update(text).digest("hex").slice(0, 40)}`;
 }
 
@@ -204,7 +215,7 @@ async function reuse(
 ) {
   const baseline = git("merge-base", revisions.base, revisions.head).trim();
   const lanes = LANES.filter(
-    (lane) => selected[lane] && (lane !== "benchmark" || github.published),
+    (lane) => selected[lane] && (!lane.startsWith("benchmark") || github.published),
   );
   const markers = lanes.map((lane) => ({
     lane,
@@ -226,6 +237,9 @@ async function reuse(
     lanes: Object.fromEntries(LANES.map((lane) => [lane, selected[lane] && !reused[lane]])),
     record: JSON.stringify(markers.map(({ name }) => name)),
     // The check to carry is the one the marker's run published or carried.
+    benchmark_go_reused: reused.benchmark_go
+      ? `${reused.benchmark_go.head_sha}:${reused.benchmark_go.id}`
+      : "",
     benchmark_reused: reused.benchmark ? `${reused.benchmark.head_sha}:${reused.benchmark.id}` : "",
     summary,
   };
@@ -268,6 +282,9 @@ export async function routeChanges(
     cpp_present: await present("cpp/CMakeLists.txt"),
     record: reused?.record ?? "[]",
     benchmark_reused: reused?.benchmark_reused ?? "",
+    benchmark_go_reused: reused?.benchmark_go_reused ?? "",
+    tracking_go:
+      paths === null || paths.some((path) => GO_TRACKING_ROUTES.some((rule) => rule.test(path))),
   };
   if (out)
     await appendFile(

@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
-import { readTagNotes, verifyRustRelease } from "../.github/scripts/release.ts";
+import { readTagNotes, verifyGoRelease, verifyRustRelease } from "../.github/scripts/release.ts";
 import { checkGoImplementations, checkImplementations } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
@@ -59,9 +59,14 @@ export function repositoryCommands(program: Command) {
   release
     .command("verify")
     .requiredOption("--tag <tag>", "release tag")
-    .action(async (options: { tag: string }) =>
-      console.log(JSON.stringify(await verifyRustRelease(options.tag, await repositoryRoot()))),
-    );
+    .option("--commit <commit>", "commit a Go release tag must point at")
+    .action(async ({ tag, commit }: { tag: string; commit?: string }) => {
+      const root = await repositoryRoot();
+      const result = tag.startsWith("go/")
+        ? verifyGoRelease(tag, root, commit)
+        : await verifyRustRelease(tag, root);
+      console.log(JSON.stringify(result));
+    });
   release
     .command("notes")
     .description("Print the release notes held in an annotated tag's message")

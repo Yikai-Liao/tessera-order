@@ -30,11 +30,13 @@ if (args[0] === "repo") {
   console.log("owner/project");
 } else {
   const route = args.at(-1).replace("repos/owner/project/", "");
-  fs.appendFileSync(path.join(root, "requests"), route + "\\n");
+  const raw = args.includes("Accept: application/vnd.github.raw");
+  fs.appendFileSync(path.join(root, "requests"), (raw ? "raw " : "json ") + route + "\\n");
   const responses = JSON.parse(fs.readFileSync(path.join(root, "responses.json"), "utf8"));
   if (!(route in responses)) throw new Error("Unexpected API route: " + route);
   if (args.includes("--paginate") && !args.includes("--slurp")) throw new Error("Pages not slurped");
-  console.log(JSON.stringify(responses[route]));
+  if (raw) process.stdout.write(String(responses[route]));
+  else console.log(JSON.stringify(responses[route]));
 }
 `,
     { mode: 0o755 },
@@ -80,6 +82,7 @@ function check(id: number, overrides: object = {}) {
 
 test("status pins remote refs and reads all feedback pages", async (t) => {
   const f = await fixture(t, {
+    "git/matching-refs/heads/benchmark-data": [],
     "commits/main": { sha: "current", html_url: "commit-url" },
     "commits/current/check-runs?per_page=100": [
       { check_runs: [check(1)] },
@@ -208,6 +211,7 @@ test("missing workflows never become a clean verdict", async (t) => {
 
 test("main has no automatic benchmark, while an unmeasured PR is still missing", async (t) => {
   const responses = {
+    "git/matching-refs/heads/benchmark-data": [],
     "commits/main": { sha: "current", html_url: "commit-url" },
     "pulls/49": {
       number: 49,
@@ -228,4 +232,56 @@ test("main has no automatic benchmark, while an unmeasured PR is still missing",
 test("API failures fail the command instead of returning empty success", async (t) => {
   const f = await fixture(t, {});
   assert.throws(() => f.run("status", "missing"));
+});
+
+test("main status labels earlier Go history and shows only matching executions as current", async (t) => {
+  const head = "a".repeat(40);
+  const stale = "b".repeat(40);
+  const encoded = (data: string) => ({ content: Buffer.from(data).toString("base64") });
+  const tracked = (hash: string, execution: string) => ({
+    hash,
+    execution,
+    time: "2026-11-01T00:00:00Z",
+    commit_time: "2026-11-01T00:00:00Z",
+    id: "00000000-0000-4000-8000-000000000001",
+    spec: "00000000-0000-4000-8000-000000000002",
+    image: "registry.bencher.dev/p/i@sha256:" + "0".repeat(64),
+    workflow: "https://github.com/owner/project/actions/runs/77",
+    go: { GoVersion: "go1.27.4", Settings: [], Deps: [] },
+    values: { [`go/argsort/u64/random/32/s1/${execution}`]: [100, 90, 110] },
+  });
+  const f = await fixture(t, {
+    "commits/main": { sha: head, html_url: "commit-url" },
+    [`commits/${head}/check-runs?per_page=100`]: [{ check_runs: [] }],
+    [`actions/runs?head_sha=${head}&per_page=100`]: [{ workflow_runs: [] }],
+    "git/matching-refs/heads/benchmark-data": [{ ref: "refs/heads/benchmark-data" }],
+    "contents?ref=benchmark-data": [{ name: "go-tessera" }],
+    "contents/go-tessera/index.json?ref=benchmark-data": encoded(
+      JSON.stringify({
+        months: ["2026-11"],
+        cases: [],
+        facets: { type: [], input: [], length: [], group: [] },
+      }),
+    ),
+    "contents/go-tessera/2026-11.jsonl?ref=benchmark-data":
+      [
+        JSON.stringify({ ...tracked(head, "serial"), padding: "x".repeat(1_100_000) }),
+        JSON.stringify(tracked(stale, "t4")),
+      ].join("\n") + "\n",
+  });
+  const { goTracking } = JSON.parse(f.run("status", "main", "--details"));
+  assert.equal(goTracking.state, "partial");
+  assert.equal(
+    goTracking.runs.find((run: { execution: string }) => run.execution === "t4").hash,
+    stale,
+  );
+  assert.deepEqual(
+    goTracking.runs.find((run: { execution: string }) => run.execution === "serial").values,
+    { "go/argsort/u64/random/32/s1/serial": [100, 90, 110] },
+  );
+  assert.ok(
+    (await f.requests()).some((request) =>
+      request.startsWith("raw contents/go-tessera/2026-11.jsonl?ref=benchmark-data"),
+    ),
+  );
 });

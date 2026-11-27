@@ -13,6 +13,7 @@ function required(name: string) {
   return value;
 }
 
+const language = process.env.BENCHMARK_LANGUAGE === "go" ? "go" : "rust";
 const reusedFrom = process.env.REUSED_FROM;
 if (reusedFrom) {
   const [from, run] = reusedFrom.split(":");
@@ -21,6 +22,7 @@ if (reusedFrom) {
     context,
     hash: required("HASH"),
     from,
+    language,
     run,
   });
   process.exit(0);
@@ -52,5 +54,7 @@ await publishReport({
     prepared: join(temporary, "prepared"),
     reports: join(temporary, "submission"),
     publish,
+    language,
+    noBaseline: language === "go" && process.env.NO_BASELINE === "true",
   },
 });

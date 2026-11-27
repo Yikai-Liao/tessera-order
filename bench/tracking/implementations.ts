@@ -54,6 +54,8 @@ export function trackingBranch(id: string) {
  * PR coverage: Tessera serially and at the plan's pool size.
  */
 export function trackingSelection(selection: string, planExecutions: Execution[]): Column[] {
+  if (selection.includes(","))
+    return selection.split(",").flatMap((id) => trackingSelection(id, planExecutions));
   if (selection === "all") return trackingColumns;
   if (selection.includes("/")) return [trackingColumn(selection)];
   const id = trackingImplementation(selection).id;
@@ -82,6 +84,7 @@ if (import.meta.main) {
       slug: columnSlug(column),
       implementation: column.implementation,
       native: trackingImplementation(column.implementation).adapter === "native",
+      go: trackingImplementation(column.implementation).adapter === "go",
     })),
   });
   if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `matrix=${matrix}\n`);

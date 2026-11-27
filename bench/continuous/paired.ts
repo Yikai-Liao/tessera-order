@@ -32,6 +32,7 @@ export function assertHostedExecution(execution: Execution) {
 export interface PairedSource {
   hash: string;
   baseHash: string;
+  language?: "rust" | "go";
 }
 
 function settings(run: LocalRun) {
@@ -57,6 +58,8 @@ function settings(run: LocalRun) {
 export async function readPaired(directory: string, source: PairedSource, prepared: string) {
   const runs: LocalRun[] = [];
   const reference = await readPrepared(prepared);
+  if (source.language && source.language !== (reference.go ? "go" : "rust"))
+    throw new Error("Prepared pair has the wrong benchmark language");
   const expectedCases = reference.cases;
   const expectedPlan = JSON.stringify(reference.plan);
   if (reference.head !== source.hash || reference.baseline !== source.baseHash || reference.dirty)
@@ -89,11 +92,11 @@ export async function readPaired(directory: string, source: PairedSource, prepar
       JSON.stringify(run.source) !== JSON.stringify(reference.source) ||
       JSON.stringify(run.binaries) !== JSON.stringify(reference.binaries) ||
       JSON.stringify(run.builds) !== JSON.stringify(reference.builds) ||
+      JSON.stringify(run.go) !== JSON.stringify(reference.go) ||
       JSON.stringify(run.cases) !== JSON.stringify(shardCases(shard.allCases, shard.index, count))
     )
       throw new Error("Incompatible, duplicate or misattributed measurement shards");
     if (
-      !run.builds ||
       ![
         run.source.baseline,
         run.source.current,
@@ -102,17 +105,24 @@ export async function readPaired(directory: string, source: PairedSource, prepar
         run.binaries.baseline,
         run.binaries.current,
       ].every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) ||
-      JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
-      run.builds.current.features.join(",") !==
-        continuous.features
-          .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
-          .toSorted()
-          .join(",")
+      (run.go
+        ? JSON.stringify(run.go.builds.baseline) !== JSON.stringify(run.go.builds.current) ||
+          !run.go.builds.current.Settings.some(
+            ({ Key, Value }) => Key === "GOEXPERIMENT" && Value === "simd",
+          )
+        : !run.builds ||
+          JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
+          run.builds.current.features.join(",") !==
+            continuous.features
+              .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
+              .toSorted()
+              .join(","))
     )
       throw new Error("Missing source or configuration provenance");
     for (const id of run.cases) {
       const { execution, len } = parseCriterionId(id);
       assertHostedExecution(execution);
+      if (!id.startsWith(run.go ? "go/" : "rust/")) throw new Error("Wrong benchmark language");
       if (run.sampleCounts?.[id] !== revisionSampling(len).samples)
         throw new Error("Untrusted measurement budget");
     }

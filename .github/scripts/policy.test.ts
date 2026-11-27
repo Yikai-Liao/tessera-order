@@ -2,12 +2,19 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { checkDco } from "./check-dco.ts";
-import { changedPaths, changesTrustedFiles, findMarker, marker, select } from "./ci_changes.ts";
+import {
+  changedPaths,
+  changesTrustedFiles,
+  findMarker,
+  marker,
+  routeChanges,
+  select,
+} from "./ci_changes.ts";
 import {
   BOT_EMAIL,
   isDependabotUpdate,
@@ -45,7 +52,14 @@ function replace(value: object, path: string[], replacement: unknown) {
 }
 
 test("routing keeps library, comparison and revision checks with their owners", () => {
-  const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+  const none = {
+    rust: false,
+    cpp: false,
+    go: false,
+    comparison: false,
+    benchmark: false,
+    docs: false,
+  };
   const owners: [string[], Partial<typeof none>][] = [
     [
       ["rust/tessera-order/src/lib.rs", "rust/tessera-order/Cargo.toml"],
@@ -65,6 +79,17 @@ test("routing keeps library, comparison and revision checks with their owners", 
       { rust: true, comparison: true, benchmark: true },
     ],
     [["cpp/include/sort.hpp", ".github/workflows/cpp-ci.yml"], { cpp: true }],
+    [
+      [
+        "go/AGENTS.md",
+        "go/tessera/go.mod",
+        "go/tessera/internal/engine/order.go",
+        ".github/actions/go-test/action.yml",
+        ".github/workflows/go-ci.yml",
+      ],
+      { go: true },
+    ],
+    [["conformance/vectors/ordering.json"], { rust: true, go: true }],
     [
       [
         "bench/rust/native/ips.cpp",
@@ -139,7 +164,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
   for (const [paths, expected] of owners)
     for (const path of paths) assert.deepEqual(select([path]), { ...none, ...expected }, path);
   // A path no row names, and an unavailable base, select every lane.
-  for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
+  for (const path of ["unknown-input", ".github/workflows/ci.yml", ".gitignore"])
     assert.ok(Object.values(select([path])).every(Boolean), path);
   assert.deepEqual(select(["rust/tessera-order/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
@@ -173,10 +198,19 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
     const base = await commit("docs/guide.md", "a");
     const docs = await commit("docs/guide.md", "b");
     const workflow = await commit(".github/workflows/ci.yml", "b");
+    const go = await commit("go/tessera/go.mod", "a");
+    const vectors = await commit("conformance/vectors/ordering.json", "a");
     process.chdir(root);
     const at = (tested: string) => ({ tested, head: tested, baseline: base });
     assert.equal(marker("rust", at(base)), marker("rust", at(docs)));
     assert.notEqual(marker("docs", at(base)), marker("docs", at(docs)));
+    assert.equal(marker("go", at(base)), marker("go", at(docs)));
+    assert.notEqual(marker("go", at(workflow)), marker("go", at(go)));
+    for (const lane of ["rust", "go"] as const)
+      assert.notEqual(marker(lane, at(go)), marker(lane, at(vectors)));
+    const outputs = join(root, "outputs");
+    assert.equal((await routeChanges(workflow, go, outputs)).go, true);
+    assert.match(await readFile(outputs, "utf8"), /^go=true$/m);
     // Measurement also depends on the baseline it compares against.
     assert.notEqual(
       marker("benchmark", at(base)),

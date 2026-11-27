@@ -148,3 +148,23 @@ func fillWindowRun[T any](run []T, bucket int, shift uint, outside Uint128, deco
 		run[i] = key
 	}
 }
+
+// A counting pass bounds the total by the cursor limit.
+func prefixSum(counts []uint16) uint16 {
+	var offset, largest uint16
+	for i, count := range counts {
+		largest = max(largest, count)
+		counts[i] = offset
+		offset += count
+	}
+	return largest
+}
+
+// The portable package lacks the interleave and slide operations of the MSD network.
+func canFinishMSD[T any, V encoded](_ *extractor[T, V]) bool {
+	return false
+}
+
+func finishMSD[T any, V encoded](_ []T, _ int, _ *extractor[T, V]) bool {
+	return false
+}

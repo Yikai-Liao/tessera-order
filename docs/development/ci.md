@@ -13,6 +13,8 @@
 | Reports, status or publication tooling | Repository tooling checks only |
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
+| Go module, its rules or its workflow | Go validation |
+| Shared golden vectors (`conformance/vectors/`) | Rust and Go validation |
 
 An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
@@ -35,6 +37,8 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 | Miri: serial backend and Rayon ownership fixtures | two parallel jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
+| Go tests, each with formatting and vet | Linux amd64 scalar and `GOEXPERIMENT=simd`, macOS arm64 `GOEXPERIMENT=simd` | adds macOS arm64 scalar and Windows amd64 scalar |
+| Go race detector (both build modes), trace hooks and a 20-second run of each fuzz target | `go / Go race, trace and fuzz` on Linux | the same |
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Implementation harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 

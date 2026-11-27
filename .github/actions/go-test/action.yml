@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: BSD-2-Clause
+name: Go test cell
+description: Check formatting, vet and test the library in the selected build mode.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version: ${{ env.GOTOOLCHAIN }}
+        cache: false
+    - name: Check formatting
+      shell: bash
+      working-directory: go/tessera
+      run: |
+        unformatted=$(gofmt -l .)
+        if [[ -n "$unformatted" ]]; then
+          printf '%s\n' "$unformatted"
+          exit 1
+        fi
+    - shell: bash
+      working-directory: go/tessera
+      run: go vet ./...
+    - shell: bash
+      working-directory: go/tessera
+      run: go test ./... -count=1

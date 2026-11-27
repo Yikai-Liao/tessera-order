@@ -1,0 +1,744 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "u8",
+      "width_bits": 8,
+      "storage_bits": 8,
+      "varying_mask": "ff",
+      "input": ["81", "00", "7f", "ff", "80", "01", "81"],
+      "encoded": ["81", "00", "7f", "ff", "80", "01", "81"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "u16",
+      "width_bits": 16,
+      "storage_bits": 16,
+      "varying_mask": "ffff",
+      "input": ["8001", "0000", "7fff", "ffff", "8000", "0001", "8001"],
+      "encoded": ["8001", "0000", "7fff", "ffff", "8000", "0001", "8001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "u32",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "ffffffff",
+      "input": ["80000001", "00000000", "7fffffff", "ffffffff", "80000000", "00000001", "80000001"],
+      "encoded": ["80000001", "00000000", "7fffffff", "ffffffff", "80000000", "00000001", "80000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "u64",
+      "width_bits": 64,
+      "storage_bits": 64,
+      "varying_mask": "ffffffffffffffff",
+      "input": ["8000000000000001", "0000000000000000", "7fffffffffffffff", "ffffffffffffffff", "8000000000000000", "0000000000000001", "8000000000000001"],
+      "encoded": ["8000000000000001", "0000000000000000", "7fffffffffffffff", "ffffffffffffffff", "8000000000000000", "0000000000000001", "8000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "u128",
+      "width_bits": 128,
+      "storage_bits": 128,
+      "varying_mask": "ffffffffffffffffffffffffffffffff",
+      "input": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "encoded": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "i8",
+      "width_bits": 8,
+      "storage_bits": 8,
+      "varying_mask": "ff",
+      "input": ["81", "00", "7f", "ff", "80", "01", "81"],
+      "encoded": ["01", "80", "ff", "7f", "00", "81", "01"],
+      "stable_order": [4, 0, 6, 3, 1, 5, 2],
+      "argsort": [4, 0, 6, 3, 1, 5, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 0, "after": [1, 2, 3, 5, 6]},
+        {"rank": 2, "before": [0, 4], "nth": 6, "after": [1, 2, 3, 5]},
+        {"rank": 3, "before": [0, 4, 6], "nth": 3, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 1, "after": [2, 5]},
+        {"rank": 5, "before": [0, 1, 3, 4, 6], "nth": 5, "after": [2]},
+        {"rank": 6, "before": [0, 1, 3, 4, 5, 6], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "i16",
+      "width_bits": 16,
+      "storage_bits": 16,
+      "varying_mask": "ffff",
+      "input": ["8001", "0000", "7fff", "ffff", "8000", "0001", "8001"],
+      "encoded": ["0001", "8000", "ffff", "7fff", "0000", "8001", "0001"],
+      "stable_order": [4, 0, 6, 3, 1, 5, 2],
+      "argsort": [4, 0, 6, 3, 1, 5, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 0, "after": [1, 2, 3, 5, 6]},
+        {"rank": 2, "before": [0, 4], "nth": 6, "after": [1, 2, 3, 5]},
+        {"rank": 3, "before": [0, 4, 6], "nth": 3, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 1, "after": [2, 5]},
+        {"rank": 5, "before": [0, 1, 3, 4, 6], "nth": 5, "after": [2]},
+        {"rank": 6, "before": [0, 1, 3, 4, 5, 6], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "i32",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "ffffffff",
+      "input": ["80000001", "00000000", "7fffffff", "ffffffff", "80000000", "00000001", "80000001"],
+      "encoded": ["00000001", "80000000", "ffffffff", "7fffffff", "00000000", "80000001", "00000001"],
+      "stable_order": [4, 0, 6, 3, 1, 5, 2],
+      "argsort": [4, 0, 6, 3, 1, 5, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 0, "after": [1, 2, 3, 5, 6]},
+        {"rank": 2, "before": [0, 4], "nth": 6, "after": [1, 2, 3, 5]},
+        {"rank": 3, "before": [0, 4, 6], "nth": 3, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 1, "after": [2, 5]},
+        {"rank": 5, "before": [0, 1, 3, 4, 6], "nth": 5, "after": [2]},
+        {"rank": 6, "before": [0, 1, 3, 4, 5, 6], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "i64",
+      "width_bits": 64,
+      "storage_bits": 64,
+      "varying_mask": "ffffffffffffffff",
+      "input": ["8000000000000001", "0000000000000000", "7fffffffffffffff", "ffffffffffffffff", "8000000000000000", "0000000000000001", "8000000000000001"],
+      "encoded": ["0000000000000001", "8000000000000000", "ffffffffffffffff", "7fffffffffffffff", "0000000000000000", "8000000000000001", "0000000000000001"],
+      "stable_order": [4, 0, 6, 3, 1, 5, 2],
+      "argsort": [4, 0, 6, 3, 1, 5, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 0, "after": [1, 2, 3, 5, 6]},
+        {"rank": 2, "before": [0, 4], "nth": 6, "after": [1, 2, 3, 5]},
+        {"rank": 3, "before": [0, 4, 6], "nth": 3, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 1, "after": [2, 5]},
+        {"rank": 5, "before": [0, 1, 3, 4, 6], "nth": 5, "after": [2]},
+        {"rank": 6, "before": [0, 1, 3, 4, 5, 6], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "i128",
+      "width_bits": 128,
+      "storage_bits": 128,
+      "varying_mask": "ffffffffffffffffffffffffffffffff",
+      "input": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "encoded": ["00000000000000000000000000000001", "80000000000000000000000000000000", "ffffffffffffffffffffffffffffffff", "7fffffffffffffffffffffffffffffff", "00000000000000000000000000000000", "80000000000000000000000000000001", "00000000000000000000000000000001"],
+      "stable_order": [4, 0, 6, 3, 1, 5, 2],
+      "argsort": [4, 0, 6, 3, 1, 5, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 0, "after": [1, 2, 3, 5, 6]},
+        {"rank": 2, "before": [0, 4], "nth": 6, "after": [1, 2, 3, 5]},
+        {"rank": 3, "before": [0, 4, 6], "nth": 3, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 1, "after": [2, 5]},
+        {"rank": 5, "before": [0, 1, 3, 4, 6], "nth": 5, "after": [2]},
+        {"rank": 6, "before": [0, 1, 3, 4, 5, 6], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "nonzero_u16",
+      "width_bits": 16,
+      "storage_bits": 16,
+      "varying_mask": "ffff",
+      "input": ["ffff", "0001", "8000", "0002", "0001"],
+      "encoded": ["ffff", "0001", "8000", "0002", "0001"],
+      "stable_order": [1, 4, 3, 2, 0],
+      "argsort": [1, 4, 3, 2, 0],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4]},
+        {"rank": 1, "before": [1], "nth": 4, "after": [0, 2, 3]},
+        {"rank": 2, "before": [1, 4], "nth": 3, "after": [0, 2]},
+        {"rank": 3, "before": [1, 3, 4], "nth": 2, "after": [0]},
+        {"rank": 4, "before": [1, 2, 3, 4], "nth": 0, "after": []}
+      ]
+    },
+    {
+      "name": "nonzero_i16",
+      "width_bits": 16,
+      "storage_bits": 16,
+      "varying_mask": "ffff",
+      "input": ["ffff", "0001", "8000", "7fff", "0001"],
+      "encoded": ["7fff", "8001", "0000", "ffff", "8001"],
+      "stable_order": [2, 0, 1, 4, 3],
+      "argsort": [2, 0, 1, 4, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 2, "after": [0, 1, 3, 4]},
+        {"rank": 1, "before": [2], "nth": 0, "after": [1, 3, 4]},
+        {"rank": 2, "before": [0, 2], "nth": 1, "after": [3, 4]},
+        {"rank": 3, "before": [0, 1, 2], "nth": 4, "after": [3]},
+        {"rank": 4, "before": [0, 1, 2, 4], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bool",
+      "width_bits": 8,
+      "storage_bits": 8,
+      "varying_mask": "01",
+      "input": ["01", "00", "01", "00"],
+      "encoded": ["01", "00", "01", "00"],
+      "stable_order": [1, 3, 0, 2],
+      "argsort": [1, 3, 0, 2],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3]},
+        {"rank": 1, "before": [1], "nth": 3, "after": [0, 2]},
+        {"rank": 2, "before": [1, 3], "nth": 0, "after": [2]},
+        {"rank": 3, "before": [0, 1, 3], "nth": 2, "after": []}
+      ]
+    },
+    {
+      "name": "char",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "001fffff",
+      "input": ["0010ffff", "00010000", "00000000", "0000e000", "0000d7ff", "00000000"],
+      "encoded": ["0010ffff", "00010000", "00000000", "0000e000", "0000d7ff", "00000000"],
+      "stable_order": [2, 5, 4, 3, 1, 0],
+      "argsort": [2, 5, 4, 3, 1, 0],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 2, "after": [0, 1, 3, 4, 5]},
+        {"rank": 1, "before": [2], "nth": 5, "after": [0, 1, 3, 4]},
+        {"rank": 2, "before": [2, 5], "nth": 4, "after": [0, 1, 3]},
+        {"rank": 3, "before": [2, 4, 5], "nth": 3, "after": [0, 1]},
+        {"rank": 4, "before": [2, 3, 4, 5], "nth": 1, "after": [0]},
+        {"rank": 5, "before": [1, 2, 3, 4, 5], "nth": 0, "after": []}
+      ]
+    },
+    {
+      "name": "f32",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "ffffffff",
+      "input": ["7fc00002", "80000000", "ff800001", "00000000", "ffc00001", "ff800000", "7f800001", "bf800000", "7f800000", "3f800000", "80000001", "00000001", "80000000", "7fc00002"],
+      "encoded": ["ffc00002", "7fffffff", "007ffffe", "80000000", "003ffffe", "007fffff", "ff800001", "407fffff", "ff800000", "bf800000", "7ffffffe", "80000001", "7fffffff", "ffc00002"],
+      "stable_order": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "argsort": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 1, "before": [4], "nth": 2, "after": [0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 2, "before": [2, 4], "nth": 5, "after": [0, 1, 3, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 3, "before": [2, 4, 5], "nth": 7, "after": [0, 1, 3, 6, 8, 9, 10, 11, 12, 13]},
+        {"rank": 4, "before": [2, 4, 5, 7], "nth": 10, "after": [0, 1, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 5, "before": [2, 4, 5, 7, 10], "nth": 1, "after": [0, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 6, "before": [1, 2, 4, 5, 7, 10], "nth": 12, "after": [0, 3, 6, 8, 9, 11, 13]},
+        {"rank": 7, "before": [1, 2, 4, 5, 7, 10, 12], "nth": 3, "after": [0, 6, 8, 9, 11, 13]},
+        {"rank": 8, "before": [1, 2, 3, 4, 5, 7, 10, 12], "nth": 11, "after": [0, 6, 8, 9, 13]},
+        {"rank": 9, "before": [1, 2, 3, 4, 5, 7, 10, 11, 12], "nth": 9, "after": [0, 6, 8, 13]},
+        {"rank": 10, "before": [1, 2, 3, 4, 5, 7, 9, 10, 11, 12], "nth": 8, "after": [0, 6, 13]},
+        {"rank": 11, "before": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12], "nth": 6, "after": [0, 13]},
+        {"rank": 12, "before": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 0, "after": [13]},
+        {"rank": 13, "before": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 13, "after": []}
+      ]
+    },
+    {
+      "name": "f64",
+      "width_bits": 64,
+      "storage_bits": 64,
+      "varying_mask": "ffffffffffffffff",
+      "input": ["7ff8000000000002", "8000000000000000", "fff0000000000001", "0000000000000000", "fff8000000000001", "fff0000000000000", "7ff0000000000001", "bff0000000000000", "7ff0000000000000", "3ff0000000000000", "8000000000000001", "0000000000000001", "8000000000000000", "7ff8000000000002"],
+      "encoded": ["fff8000000000002", "7fffffffffffffff", "000ffffffffffffe", "8000000000000000", "0007fffffffffffe", "000fffffffffffff", "fff0000000000001", "400fffffffffffff", "fff0000000000000", "bff0000000000000", "7ffffffffffffffe", "8000000000000001", "7fffffffffffffff", "fff8000000000002"],
+      "stable_order": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "argsort": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 1, "before": [4], "nth": 2, "after": [0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 2, "before": [2, 4], "nth": 5, "after": [0, 1, 3, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 3, "before": [2, 4, 5], "nth": 7, "after": [0, 1, 3, 6, 8, 9, 10, 11, 12, 13]},
+        {"rank": 4, "before": [2, 4, 5, 7], "nth": 10, "after": [0, 1, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 5, "before": [2, 4, 5, 7, 10], "nth": 1, "after": [0, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 6, "before": [1, 2, 4, 5, 7, 10], "nth": 12, "after": [0, 3, 6, 8, 9, 11, 13]},
+        {"rank": 7, "before": [1, 2, 4, 5, 7, 10, 12], "nth": 3, "after": [0, 6, 8, 9, 11, 13]},
+        {"rank": 8, "before": [1, 2, 3, 4, 5, 7, 10, 12], "nth": 11, "after": [0, 6, 8, 9, 13]},
+        {"rank": 9, "before": [1, 2, 3, 4, 5, 7, 10, 11, 12], "nth": 9, "after": [0, 6, 8, 13]},
+        {"rank": 10, "before": [1, 2, 3, 4, 5, 7, 9, 10, 11, 12], "nth": 8, "after": [0, 6, 13]},
+        {"rank": 11, "before": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12], "nth": 6, "after": [0, 13]},
+        {"rank": 12, "before": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 0, "after": [13]},
+        {"rank": 13, "before": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 13, "after": []}
+      ]
+    },
+    {
+      "name": "bytes1",
+      "width_bits": 8,
+      "storage_bits": 8,
+      "varying_mask": "ff",
+      "input": ["81", "00", "7f", "ff", "80", "01", "81"],
+      "encoded": ["81", "00", "7f", "ff", "80", "01", "81"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes2",
+      "width_bits": 16,
+      "storage_bits": 16,
+      "varying_mask": "ffff",
+      "input": ["8001", "0000", "7fff", "ffff", "8000", "0001", "8001"],
+      "encoded": ["8001", "0000", "7fff", "ffff", "8000", "0001", "8001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes3",
+      "width_bits": 24,
+      "storage_bits": 32,
+      "varying_mask": "00ffffff",
+      "input": ["800001", "000000", "7fffff", "ffffff", "800000", "000001", "800001"],
+      "encoded": ["00800001", "00000000", "007fffff", "00ffffff", "00800000", "00000001", "00800001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes4",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "ffffffff",
+      "input": ["80000001", "00000000", "7fffffff", "ffffffff", "80000000", "00000001", "80000001"],
+      "encoded": ["80000001", "00000000", "7fffffff", "ffffffff", "80000000", "00000001", "80000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes5",
+      "width_bits": 40,
+      "storage_bits": 64,
+      "varying_mask": "000000ffffffffff",
+      "input": ["8000000001", "0000000000", "7fffffffff", "ffffffffff", "8000000000", "0000000001", "8000000001"],
+      "encoded": ["0000008000000001", "0000000000000000", "0000007fffffffff", "000000ffffffffff", "0000008000000000", "0000000000000001", "0000008000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes6",
+      "width_bits": 48,
+      "storage_bits": 64,
+      "varying_mask": "0000ffffffffffff",
+      "input": ["800000000001", "000000000000", "7fffffffffff", "ffffffffffff", "800000000000", "000000000001", "800000000001"],
+      "encoded": ["0000800000000001", "0000000000000000", "00007fffffffffff", "0000ffffffffffff", "0000800000000000", "0000000000000001", "0000800000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes7",
+      "width_bits": 56,
+      "storage_bits": 64,
+      "varying_mask": "00ffffffffffffff",
+      "input": ["80000000000001", "00000000000000", "7fffffffffffff", "ffffffffffffff", "80000000000000", "00000000000001", "80000000000001"],
+      "encoded": ["0080000000000001", "0000000000000000", "007fffffffffffff", "00ffffffffffffff", "0080000000000000", "0000000000000001", "0080000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes8",
+      "width_bits": 64,
+      "storage_bits": 64,
+      "varying_mask": "ffffffffffffffff",
+      "input": ["8000000000000001", "0000000000000000", "7fffffffffffffff", "ffffffffffffffff", "8000000000000000", "0000000000000001", "8000000000000001"],
+      "encoded": ["8000000000000001", "0000000000000000", "7fffffffffffffff", "ffffffffffffffff", "8000000000000000", "0000000000000001", "8000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes9",
+      "width_bits": 72,
+      "storage_bits": 128,
+      "varying_mask": "00000000000000ffffffffffffffffff",
+      "input": ["800000000000000001", "000000000000000000", "7fffffffffffffffff", "ffffffffffffffffff", "800000000000000000", "000000000000000001", "800000000000000001"],
+      "encoded": ["00000000000000800000000000000001", "00000000000000000000000000000000", "000000000000007fffffffffffffffff", "00000000000000ffffffffffffffffff", "00000000000000800000000000000000", "00000000000000000000000000000001", "00000000000000800000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes10",
+      "width_bits": 80,
+      "storage_bits": 128,
+      "varying_mask": "000000000000ffffffffffffffffffff",
+      "input": ["80000000000000000001", "00000000000000000000", "7fffffffffffffffffff", "ffffffffffffffffffff", "80000000000000000000", "00000000000000000001", "80000000000000000001"],
+      "encoded": ["00000000000080000000000000000001", "00000000000000000000000000000000", "0000000000007fffffffffffffffffff", "000000000000ffffffffffffffffffff", "00000000000080000000000000000000", "00000000000000000000000000000001", "00000000000080000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes11",
+      "width_bits": 88,
+      "storage_bits": 128,
+      "varying_mask": "0000000000ffffffffffffffffffffff",
+      "input": ["8000000000000000000001", "0000000000000000000000", "7fffffffffffffffffffff", "ffffffffffffffffffffff", "8000000000000000000000", "0000000000000000000001", "8000000000000000000001"],
+      "encoded": ["00000000008000000000000000000001", "00000000000000000000000000000000", "00000000007fffffffffffffffffffff", "0000000000ffffffffffffffffffffff", "00000000008000000000000000000000", "00000000000000000000000000000001", "00000000008000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes12",
+      "width_bits": 96,
+      "storage_bits": 128,
+      "varying_mask": "00000000ffffffffffffffffffffffff",
+      "input": ["800000000000000000000001", "000000000000000000000000", "7fffffffffffffffffffffff", "ffffffffffffffffffffffff", "800000000000000000000000", "000000000000000000000001", "800000000000000000000001"],
+      "encoded": ["00000000800000000000000000000001", "00000000000000000000000000000000", "000000007fffffffffffffffffffffff", "00000000ffffffffffffffffffffffff", "00000000800000000000000000000000", "00000000000000000000000000000001", "00000000800000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes13",
+      "width_bits": 104,
+      "storage_bits": 128,
+      "varying_mask": "000000ffffffffffffffffffffffffff",
+      "input": ["80000000000000000000000001", "00000000000000000000000000", "7fffffffffffffffffffffffff", "ffffffffffffffffffffffffff", "80000000000000000000000000", "00000000000000000000000001", "80000000000000000000000001"],
+      "encoded": ["00000080000000000000000000000001", "00000000000000000000000000000000", "0000007fffffffffffffffffffffffff", "000000ffffffffffffffffffffffffff", "00000080000000000000000000000000", "00000000000000000000000000000001", "00000080000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes14",
+      "width_bits": 112,
+      "storage_bits": 128,
+      "varying_mask": "0000ffffffffffffffffffffffffffff",
+      "input": ["8000000000000000000000000001", "0000000000000000000000000000", "7fffffffffffffffffffffffffff", "ffffffffffffffffffffffffffff", "8000000000000000000000000000", "0000000000000000000000000001", "8000000000000000000000000001"],
+      "encoded": ["00008000000000000000000000000001", "00000000000000000000000000000000", "00007fffffffffffffffffffffffffff", "0000ffffffffffffffffffffffffffff", "00008000000000000000000000000000", "00000000000000000000000000000001", "00008000000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes15",
+      "width_bits": 120,
+      "storage_bits": 128,
+      "varying_mask": "00ffffffffffffffffffffffffffffff",
+      "input": ["800000000000000000000000000001", "000000000000000000000000000000", "7fffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffff", "800000000000000000000000000000", "000000000000000000000000000001", "800000000000000000000000000001"],
+      "encoded": ["00800000000000000000000000000001", "00000000000000000000000000000000", "007fffffffffffffffffffffffffffff", "00ffffffffffffffffffffffffffffff", "00800000000000000000000000000000", "00000000000000000000000000000001", "00800000000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "bytes16",
+      "width_bits": 128,
+      "storage_bits": 128,
+      "varying_mask": "ffffffffffffffffffffffffffffffff",
+      "input": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "encoded": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "reverse_f64",
+      "width_bits": 64,
+      "storage_bits": 64,
+      "varying_mask": "ffffffffffffffff",
+      "input": ["7ff8000000000002", "8000000000000000", "fff0000000000001", "0000000000000000", "fff8000000000001", "fff0000000000000", "7ff0000000000001", "bff0000000000000", "7ff0000000000000", "3ff0000000000000", "8000000000000001", "0000000000000001", "8000000000000000", "7ff8000000000002"],
+      "encoded": ["0007fffffffffffd", "8000000000000000", "fff0000000000001", "7fffffffffffffff", "fff8000000000001", "fff0000000000000", "000ffffffffffffe", "bff0000000000000", "000fffffffffffff", "400fffffffffffff", "8000000000000001", "7ffffffffffffffe", "8000000000000000", "0007fffffffffffd"],
+      "stable_order": [0, 13, 6, 8, 9, 11, 3, 1, 12, 10, 7, 5, 2, 4],
+      "argsort": [0, 13, 6, 8, 9, 11, 3, 1, 12, 10, 7, 5, 2, 4],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 0, "after": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 1, "before": [0], "nth": 13, "after": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+        {"rank": 2, "before": [0, 13], "nth": 6, "after": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]},
+        {"rank": 3, "before": [0, 6, 13], "nth": 8, "after": [1, 2, 3, 4, 5, 7, 9, 10, 11, 12]},
+        {"rank": 4, "before": [0, 6, 8, 13], "nth": 9, "after": [1, 2, 3, 4, 5, 7, 10, 11, 12]},
+        {"rank": 5, "before": [0, 6, 8, 9, 13], "nth": 11, "after": [1, 2, 3, 4, 5, 7, 10, 12]},
+        {"rank": 6, "before": [0, 6, 8, 9, 11, 13], "nth": 3, "after": [1, 2, 4, 5, 7, 10, 12]},
+        {"rank": 7, "before": [0, 3, 6, 8, 9, 11, 13], "nth": 1, "after": [2, 4, 5, 7, 10, 12]},
+        {"rank": 8, "before": [0, 1, 3, 6, 8, 9, 11, 13], "nth": 12, "after": [2, 4, 5, 7, 10]},
+        {"rank": 9, "before": [0, 1, 3, 6, 8, 9, 11, 12, 13], "nth": 10, "after": [2, 4, 5, 7]},
+        {"rank": 10, "before": [0, 1, 3, 6, 8, 9, 10, 11, 12, 13], "nth": 7, "after": [2, 4, 5]},
+        {"rank": 11, "before": [0, 1, 3, 6, 7, 8, 9, 10, 11, 12, 13], "nth": 5, "after": [2, 4]},
+        {"rank": 12, "before": [0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13], "nth": 2, "after": [4]},
+        {"rank": 13, "before": [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13], "nth": 4, "after": []}
+      ]
+    },
+    {
+      "name": "reverse_bytes3",
+      "width_bits": 24,
+      "storage_bits": 32,
+      "varying_mask": "00ffffff",
+      "input": ["800001", "000000", "7fffff", "ffffff", "800000", "000001", "800001"],
+      "encoded": ["007ffffe", "00ffffff", "00800000", "00000000", "007fffff", "00fffffe", "007ffffe"],
+      "stable_order": [3, 0, 6, 4, 2, 5, 1],
+      "argsort": [3, 0, 6, 4, 2, 5, 1],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 3, "after": [0, 1, 2, 4, 5, 6]},
+        {"rank": 1, "before": [3], "nth": 0, "after": [1, 2, 4, 5, 6]},
+        {"rank": 2, "before": [0, 3], "nth": 6, "after": [1, 2, 4, 5]},
+        {"rank": 3, "before": [0, 3, 6], "nth": 4, "after": [1, 2, 5]},
+        {"rank": 4, "before": [0, 3, 4, 6], "nth": 2, "after": [1, 5]},
+        {"rank": 5, "before": [0, 2, 3, 4, 6], "nth": 5, "after": [1]},
+        {"rank": 6, "before": [0, 2, 3, 4, 5, 6], "nth": 1, "after": []}
+      ]
+    },
+    {
+      "name": "reverse_bool",
+      "width_bits": 8,
+      "storage_bits": 8,
+      "varying_mask": "01",
+      "input": ["01", "00", "01", "00"],
+      "encoded": ["fe", "ff", "fe", "ff"],
+      "stable_order": [0, 2, 1, 3],
+      "argsort": [0, 2, 1, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 0, "after": [1, 2, 3]},
+        {"rank": 1, "before": [0], "nth": 2, "after": [1, 3]},
+        {"rank": 2, "before": [0, 2], "nth": 1, "after": [3]},
+        {"rank": 3, "before": [0, 1, 2], "nth": 3, "after": []}
+      ]
+    },
+    {
+      "name": "reverse_reverse_f32",
+      "width_bits": 32,
+      "storage_bits": 32,
+      "varying_mask": "ffffffff",
+      "input": ["7fc00002", "80000000", "ff800001", "00000000", "ffc00001", "ff800000", "7f800001", "bf800000", "7f800000", "3f800000", "80000001", "00000001", "80000000", "7fc00002"],
+      "encoded": ["ffc00002", "7fffffff", "007ffffe", "80000000", "003ffffe", "007fffff", "ff800001", "407fffff", "ff800000", "bf800000", "7ffffffe", "80000001", "7fffffff", "ffc00002"],
+      "stable_order": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "argsort": [4, 2, 5, 7, 10, 1, 12, 3, 11, 9, 8, 6, 0, 13],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 1, "before": [4], "nth": 2, "after": [0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 2, "before": [2, 4], "nth": 5, "after": [0, 1, 3, 6, 7, 8, 9, 10, 11, 12, 13]},
+        {"rank": 3, "before": [2, 4, 5], "nth": 7, "after": [0, 1, 3, 6, 8, 9, 10, 11, 12, 13]},
+        {"rank": 4, "before": [2, 4, 5, 7], "nth": 10, "after": [0, 1, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 5, "before": [2, 4, 5, 7, 10], "nth": 1, "after": [0, 3, 6, 8, 9, 11, 12, 13]},
+        {"rank": 6, "before": [1, 2, 4, 5, 7, 10], "nth": 12, "after": [0, 3, 6, 8, 9, 11, 13]},
+        {"rank": 7, "before": [1, 2, 4, 5, 7, 10, 12], "nth": 3, "after": [0, 6, 8, 9, 11, 13]},
+        {"rank": 8, "before": [1, 2, 3, 4, 5, 7, 10, 12], "nth": 11, "after": [0, 6, 8, 9, 13]},
+        {"rank": 9, "before": [1, 2, 3, 4, 5, 7, 10, 11, 12], "nth": 9, "after": [0, 6, 8, 13]},
+        {"rank": 10, "before": [1, 2, 3, 4, 5, 7, 9, 10, 11, 12], "nth": 8, "after": [0, 6, 13]},
+        {"rank": 11, "before": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12], "nth": 6, "after": [0, 13]},
+        {"rank": 12, "before": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 0, "after": [13]},
+        {"rank": 13, "before": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "nth": 13, "after": []}
+      ]
+    },
+    {
+      "name": "pair_cross64",
+      "width_bits": 88,
+      "storage_bits": 128,
+      "varying_mask": "000000000001ffffffffffffffffffff",
+      "input": ["0180000000010203040506", "007fc000010f0e0d0c0b0a", "0080000000ffffffffffff", "0000000000000000000000", "00ff800001010203040506", "0180000000010203040506", "0180000000010203040505"],
+      "encoded": ["0000000000017fffffff010203040506", "000000000000ffc000010f0e0d0c0b0a", "0000000000007fffffffffffffffffff", "00000000000080000000000000000000", "000000000000007ffffe010203040506", "0000000000017fffffff010203040506", "0000000000017fffffff010203040505"],
+      "stable_order": [4, 2, 3, 1, 6, 0, 5],
+      "argsort": [4, 2, 3, 1, 6, 0, 5],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 4, "after": [0, 1, 2, 3, 5, 6]},
+        {"rank": 1, "before": [4], "nth": 2, "after": [0, 1, 3, 5, 6]},
+        {"rank": 2, "before": [2, 4], "nth": 3, "after": [0, 1, 5, 6]},
+        {"rank": 3, "before": [2, 3, 4], "nth": 1, "after": [0, 5, 6]},
+        {"rank": 4, "before": [1, 2, 3, 4], "nth": 6, "after": [0, 5]},
+        {"rank": 5, "before": [1, 2, 3, 4, 6], "nth": 0, "after": [5]},
+        {"rank": 6, "before": [0, 1, 2, 3, 4, 6], "nth": 5, "after": []}
+      ]
+    },
+    {
+      "name": "tuple16",
+      "width_bits": 128,
+      "storage_bits": 128,
+      "varying_mask": "ffffffffffffffffffffffffffffffff",
+      "input": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "encoded": ["80000000000000000000000000000001", "00000000000000000000000000000000", "7fffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff", "80000000000000000000000000000000", "00000000000000000000000000000001", "80000000000000000000000000000001"],
+      "stable_order": [1, 5, 2, 4, 0, 6, 3],
+      "argsort": [1, 5, 2, 4, 0, 6, 3],
+      "selections": [
+        {"rank": 0, "before": [], "nth": 1, "after": [0, 2, 3, 4, 5, 6]},
+        {"rank": 1, "before": [1], "nth": 5, "after": [0, 2, 3, 4, 6]},
+        {"rank": 2, "before": [1, 5], "nth": 2, "after": [0, 3, 4, 6]},
+        {"rank": 3, "before": [1, 2, 5], "nth": 4, "after": [0, 3, 6]},
+        {"rank": 4, "before": [1, 2, 4, 5], "nth": 0, "after": [3, 6]},
+        {"rank": 5, "before": [0, 1, 2, 4, 5], "nth": 6, "after": [3]},
+        {"rank": 6, "before": [0, 1, 2, 4, 5, 6], "nth": 3, "after": []}
+      ]
+    }
+  ]
+}

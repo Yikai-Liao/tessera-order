@@ -38,9 +38,9 @@ All four libraries are stable and move arbitrary `T` without `Copy` or `Clone`; 
 | | **Tessera** | slice::sort (std) | radsort | glidesort |
 |---|---|---|---|---|
 | **Time** | **O(n)** | O(n log n) | O(n) | O(n log n) |
-| **Extra memory** | **O(√n)** | O(n) | O(n) | O(n) |
+| **Extra memory** | **O(√n)** (O(P√n) parallel) | O(n) | O(n) | O(n) |
 | **Keys** | Fixed-width keys | Any Ord or comparator | Fixed-width keys | Any Ord or comparator |
-| **Parallel** | Rayon, O(P√n) | Separate (rayon) | No | No |
+| **Parallel** | Built-in (Rayon) | Separate (rayon) | No | No |
 | **Operations** | Sort, cached key, argsort, select_nth | Sort, unstable select_nth | Sort | Sort |
 
 ## One engine, zero record-trait bounds

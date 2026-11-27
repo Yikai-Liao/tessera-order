@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['rust/v*', 'cpp/v*']
+    tags: ['rust/v*', 'cpp/v*', 'go/tessera/v*']
 
 permissions:
   contents: read
@@ -24,5 +24,11 @@ jobs:
   cpp:
     if: startsWith(github.ref_name, 'cpp/v')
     uses: ./.github/workflows/cpp-release.yml
+    permissions:
+      contents: write
+
+  go:
+    if: startsWith(github.ref_name, 'go/tessera/v')
+    uses: ./.github/workflows/go-release.yml
     permissions:
       contents: write

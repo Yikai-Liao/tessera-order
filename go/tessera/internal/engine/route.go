@@ -23,6 +23,10 @@ const (
 	routeSource
 	routeTransfer
 	routeBand
+	routeParallelEntry
+	routeParallelRoot
+	routeShards
+	routeParallelTies
 )
 
 type routeEvent struct {

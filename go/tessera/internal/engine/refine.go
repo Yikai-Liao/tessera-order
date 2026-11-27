@@ -41,6 +41,14 @@ func refine[T any, V encoded](records []T, e *extractor[T, V], rank, budgetBytes
 		return
 	}
 	var scratch workspace[T]
+	if half, narrowed, ok := narrowRoot(varying, e); ok {
+		sortNode(records, narrowed, rank, tileLen, &scratch, &half)
+		return
+	}
+	sortNode(records, varying, rank, tileLen, &scratch, e)
+}
+
+func narrowRoot[T any, V encoded](varying Uint128, e *extractor[T, V]) (extractor[T, uint64], Uint128, bool) {
 	if isWide[V]() && (varying.Hi == 0 || varying.Lo == 0) {
 		half := extractor[T, uint64]{encode: e.encode, decode: e.decode}
 		if varying.Lo == 0 {
@@ -51,10 +59,9 @@ func refine[T any, V encoded](records []T, e *extractor[T, V], rank, budgetBytes
 		if observeRoutes {
 			emitRoute(routeEvent{stage: routeNarrow, a: int(half.half), mask: varying})
 		}
-		sortNode(records, varying, rank, tileLen, &scratch, &half)
-		return
+		return half, varying, true
 	}
-	sortNode(records, varying, rank, tileLen, &scratch, e)
+	return extractor[T, uint64]{}, varying, false
 }
 
 type order uint8
@@ -67,21 +74,34 @@ const (
 	unordered
 )
 
-func prepare[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V], tileLen int, probeInsertion bool) Uint128 {
+func probe[T any, V encoded](records []T, e *extractor[T, V]) order {
 	sampled := probeOrder(records, e)
 	if observeRoutes {
 		emitRoute(routeEvent{stage: routeProbe, a: int(sampled), b: len(records)})
 	}
+	return sampled
+}
+
+func prepare[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V], tileLen int, probeInsertion bool) Uint128 {
+	sampled := probe(records, e)
 	if probeInsertion && sampled == unordered && insertionProbe(records, e, tileLen) {
 		return Uint128{}
 	}
+	varying, resolved := resolveVarying(records, candidate, e, sampled)
+	if varying == (Uint128{}) {
+		finishOrdered(records, resolved, e)
+	}
+	return varying
+}
+
+// Share deferred flat confirmation with the read-only argsort root.
+func resolveVarying[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V], sampled order) (Uint128, order) {
 	if sampled <= descendingTies {
-		finishOrdered(records, sampled, e)
-		return Uint128{}
+		return Uint128{}, sampled
 	}
 	varying := scanVarying(records, candidate, e)
 	if varying == (Uint128{}) {
-		return varying
+		return varying, ascending
 	}
 	if sampled == flatSample {
 		confirmed := confirmOrder(records, e)
@@ -89,11 +109,10 @@ func prepare[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V
 			emitRoute(routeEvent{stage: routeProbe, a: int(confirmed), b: len(records)})
 		}
 		if confirmed <= descendingTies {
-			finishOrdered(records, confirmed, e)
-			return Uint128{}
+			return Uint128{}, confirmed
 		}
 	}
-	return varying
+	return varying, unordered
 }
 
 // A longer input estimates its insertion budget from one tile of encoded
@@ -270,16 +289,7 @@ func sortNode[T any, V encoded](records []T, varying Uint128, rank, tileLen int,
 }
 
 func executeNode[T any, V encoded](records []T, varying Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, V], plan nodePlan[V]) {
-	if observeRoutes {
-		kind := 0
-		if plan.mode {
-			kind = 1
-		}
-		if plan.boundary != 0 {
-			kind = 2
-		}
-		emitRoute(routeEvent{stage: routeNodeDigit, a: kind, b: plan.boundary, digit: plan.digit, mask: varying})
-	}
+	traceNodePlan(plan, varying)
 	if plan.boundary != 0 {
 		boundary := plan.boundary
 		if plan.set {
@@ -296,18 +306,8 @@ func executeNode[T any, V encoded](records []T, varying Uint128, rank, tileLen i
 		return
 	}
 
-	radix := plan.digit.Width
-	cl := blockClassifier[V]{digit: plan.digit}
-	candidate := varying.andNot(plan.digit.Mask())
-	finished := -1
-	if plan.mode {
-		bit := topBit(varying)
-		radix = 2
-		candidate = varying.andNot(bit)
-		split := keyBits(plan.equal).andNot(lowMask(uint(varying.bitLen()))).or(bit)
-		cl = blockClassifier[V]{rank: true, equal: plan.equal, split: fromBits[V](split)}
-		finished = cl.bucket(plan.equal)
-	} else if candidate == (Uint128{}) && tryCountWindow(records, plan.digit, e) {
+	radix, cl, candidate, finished := splitNode(plan, varying)
+	if !plan.mode && candidate == (Uint128{}) && tryCountWindow(records, plan.digit, e) {
 		return
 	}
 	// Finish requested tile-size bands while their final ranges are cache hot.
@@ -331,5 +331,35 @@ func executeNode[T any, V encoded](records []T, varying Uint128, rank, tileLen i
 			}
 		}
 		start = end
+	}
+}
+
+// Both executors consume the same classifier and remaining candidate bits.
+func splitNode[V encoded](plan nodePlan[V], varying Uint128) (uint, blockClassifier[V], Uint128, int) {
+	radix := plan.digit.Width
+	cl := blockClassifier[V]{digit: plan.digit}
+	candidate := varying.andNot(plan.digit.Mask())
+	finished := -1
+	if plan.mode {
+		bit := topBit(varying)
+		radix = 2
+		candidate = varying.andNot(bit)
+		split := keyBits(plan.equal).andNot(lowMask(uint(varying.bitLen()))).or(bit)
+		cl = blockClassifier[V]{rank: true, equal: plan.equal, split: fromBits[V](split)}
+		finished = cl.bucket(plan.equal)
+	}
+	return radix, cl, candidate, finished
+}
+
+func traceNodePlan[V encoded](plan nodePlan[V], varying Uint128) {
+	if observeRoutes {
+		kind := 0
+		if plan.mode {
+			kind = 1
+		}
+		if plan.boundary != 0 {
+			kind = 2
+		}
+		emitRoute(routeEvent{stage: routeNodeDigit, a: kind, b: plan.boundary, digit: plan.digit, mask: varying})
 	}
 }

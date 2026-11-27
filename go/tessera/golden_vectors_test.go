@@ -100,14 +100,18 @@ func checkVector[K comparable](t *testing.T, vector orderingVector, fromRaw func
 
 func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys []K, encode func(K) Uint128, same func(K, K) bool) {
 	t.Helper()
-	if got := Argsort(keys); !slices.Equal(got, vector.Argsort) {
-		t.Fatalf("argsort = %v, want %v", got, vector.Argsort)
+	for _, argsort := range []func([]K) []int{Argsort[K], ParArgsort[K]} {
+		if got := argsort(keys); !slices.Equal(got, vector.Argsort) {
+			t.Fatalf("argsort = %v, want %v", got, vector.Argsort)
+		}
 	}
-	sorted := slices.Clone(keys)
-	Sort(sorted)
-	for i, source := range vector.StableOrder {
-		if !same(sorted[i], keys[source]) {
-			t.Fatalf("sort differs at position %d", i)
+	for _, sort := range []func([]K){Sort[K], ParSort[K]} {
+		sorted := slices.Clone(keys)
+		sort(sorted)
+		for i, source := range vector.StableOrder {
+			if !same(sorted[i], keys[source]) {
+				t.Fatalf("sort differs at position %d", i)
+			}
 		}
 	}
 	for _, want := range vector.Selections {
@@ -142,6 +146,7 @@ func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys
 		bits[i] = encode(key)
 	}
 	checkGoldenIDs(t, vector, bits)
+	checkParallelKeys(t, keys, same)
 }
 
 func checkGoldenIDs(t *testing.T, vector orderingVector, bits []Uint128) {
@@ -151,10 +156,12 @@ func checkGoldenIDs(t *testing.T, vector orderingVector, bits []Uint128) {
 		ids[i] = i
 	}
 	key := func(id *int) Uint128 { return bits[*id] }
-	if got := ArgsortByKey(ids, key); !slices.Equal(got, vector.Argsort) {
-		t.Fatal("keyed argsort changed tie order")
+	for _, argsort := range []func([]int, func(*int) Uint128) []int{ArgsortByKey[int, Uint128], ParArgsortByKey[int, Uint128]} {
+		if got := argsort(ids, key); !slices.Equal(got, vector.Argsort) {
+			t.Fatal("keyed argsort changed tie order")
+		}
 	}
-	for _, operation := range []func([]int, func(*int) Uint128){SortByKey[int, Uint128], SortByCachedKey[int, Uint128]} {
+	for _, operation := range []func([]int, func(*int) Uint128){SortByKey[int, Uint128], SortByCachedKey[int, Uint128], ParSortByKey[int, Uint128]} {
 		got := slices.Clone(ids)
 		operation(got, key)
 		if !slices.Equal(got, vector.StableOrder) {

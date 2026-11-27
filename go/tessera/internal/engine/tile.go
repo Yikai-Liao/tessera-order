@@ -111,28 +111,40 @@ func finishTileChild[T any, V encoded](scratch *tileScratch[T], records []T, can
 // A complete direct digit reconstructs interchangeable keys from the common
 // outside bits, including any constant half omitted at root dispatch.
 func tryCountWindow[T any, V encoded](records []T, digit Digit, e *extractor[T, V]) bool {
-	if !e.direct() || digit.Width < 1 || digit.Width > 8 {
+	if !canCountWindow(digit, e) {
 		return false
 	}
 	var counts [256]int
-	for i := range records {
-		counts[keyDigit(e.get(&records[i]), digit)]++
-	}
+	histogramWindow(records, digit, e, &counts)
 	if observeRoutes {
 		emitRoute(routeEvent{stage: routeCountWindow, a: len(records), digit: digit})
 	}
-	outside := e.encode(&records[0]).andNot(Digit{digit.Shift + e.half, digit.Width}.Mask())
+	window := Digit{digit.Shift + e.half, digit.Width}
+	outside := e.encode(&records[0]).andNot(window.Mask())
 	start := 0
 	for bucket, count := range counts[:1<<digit.Width] {
-		if count == 0 {
-			continue
-		}
-		bits := outside.or(Uint128{Lo: uint64(bucket)}.lsh(digit.Shift + e.half))
-		key := e.decode(bits)
-		for i := start; i < start+count; i++ {
-			records[i] = key
-		}
+		fillWindowRun(records[start:start+count], bucket, window.Shift, outside, e.decode)
 		start += count
 	}
 	return true
+}
+
+func canCountWindow[T any, V encoded](digit Digit, e *extractor[T, V]) bool {
+	return e.direct() && digit.Width >= 1 && digit.Width <= 8
+}
+
+func histogramWindow[T any, V encoded](records []T, digit Digit, e *extractor[T, V], counts *[256]int) {
+	for i := range records {
+		counts[keyDigit(e.get(&records[i]), digit)]++
+	}
+}
+
+func fillWindowRun[T any](run []T, bucket int, shift uint, outside Uint128, decode func(Uint128) T) {
+	if len(run) == 0 {
+		return
+	}
+	key := decode(outside.or(Uint128{Lo: uint64(bucket)}.lsh(shift)))
+	for i := range run {
+		run[i] = key
+	}
 }

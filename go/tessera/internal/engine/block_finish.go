@@ -19,12 +19,14 @@ type blockBand struct {
 }
 
 type completion[T any] struct {
-	partition *partition[T]
-	owners    []int
-	sources   []blockSource
-	bands     []blockBand
-	ends      []int
-	free      []int
+	input                    []T
+	partitions               []partition[T]
+	blockSize, scratchBlocks int
+	owners                   []int
+	sources                  []blockSource
+	bands                    []blockBand
+	ends                     []int
+	free                     []int
 }
 
 func serialDescriptorBytes() int {
@@ -32,15 +34,18 @@ func serialDescriptorBytes() int {
 }
 
 // Build the source ledger and compute every final range before movement.
-func buildCompletion[T any](p *partition[T]) completion[T] {
+func buildCompletion[T any](input []T, partitions []partition[T]) completion[T] {
+	p := &partitions[0]
 	buckets := len(p.buffers.writers)
-	count := len(p.buffers.links)
+	scratchBlocks := len(partitions) * p.scratchBlocks
+	fullBlocks := len(input) / p.blockSize
+	count := scratchBlocks + fullBlocks
 	c := completion[T]{
-		partition: p,
-		owners:    make([]int, count),
-		sources:   make([]blockSource, 0, len(p.input)/p.blockSize+buckets),
-		bands:     make([]blockBand, buckets),
-		ends:      make([]int, buckets),
+		input: input, partitions: partitions, blockSize: p.blockSize, scratchBlocks: scratchBlocks,
+		owners:  make([]int, count),
+		sources: make([]blockSource, 0, fullBlocks+len(partitions)*buckets),
+		bands:   make([]blockBand, buckets),
+		ends:    make([]int, buckets),
 		// Every physical block appears at most once. Reserving all slots
 		// keeps movement allocation-free.
 		free: make([]int, 0, count),
@@ -49,32 +54,43 @@ func buildCompletion[T any](p *partition[T]) completion[T] {
 		c.owners[i] = freeBlock
 	}
 	start := 0
-	for bucket, writer := range p.buffers.writers {
+	for bucket := range buckets {
 		first := len(c.sources)
-		tail := int(p.buffers.writerPhysical[bucket])
 		length := 0
-		for physical := bucket; ; physical = int(p.buffers.links[physical]) {
-			prefix := p.blockSize
-			if physical == tail {
-				prefix -= writer.end - writer.next
-			}
-			if prefix != 0 {
-				c.owners[physical] = len(c.sources)
-				if observeRoutes {
-					emitRoute(routeEvent{stage: routeSource, a: len(c.sources), b: prefix})
+		firstBlock := 0
+		// Preserve input order by visiting each bucket's shards in order.
+		for shard := range partitions {
+			part := &partitions[shard]
+			writer := part.buffers.writers[bucket]
+			tail := int(part.buffers.writerPhysical[bucket])
+			for local := bucket; ; local = int(part.buffers.links[local]) {
+				prefix := c.blockSize
+				if local == tail {
+					prefix -= writer.end - writer.next
 				}
-				c.sources = append(c.sources, blockSource{physical, prefix})
-				length += prefix
+				if prefix != 0 {
+					physical := shard*p.scratchBlocks + local
+					if local >= p.scratchBlocks {
+						physical = scratchBlocks + firstBlock + local - p.scratchBlocks
+					}
+					c.owners[physical] = len(c.sources)
+					if observeRoutes {
+						emitRoute(routeEvent{stage: routeSource, a: len(c.sources), b: prefix})
+					}
+					c.sources = append(c.sources, blockSource{physical, prefix})
+					length += prefix
+				}
+				if local == tail {
+					break
+				}
 			}
-			if physical == tail {
-				break
-			}
+			firstBlock += len(part.input) / c.blockSize
 		}
 		c.bands[bucket] = blockBand{first, len(c.sources), start}
 		start += length
 		c.ends[bucket] = start
 	}
-	if start != len(p.input) {
+	if start != len(input) {
 		panic("tessera: incomplete block ledger")
 	}
 	for physical, owner := range c.owners {
@@ -83,6 +99,15 @@ func buildCompletion[T any](p *partition[T]) completion[T] {
 		}
 	}
 	return c
+}
+
+func (c *completion[T]) block(physical int) []T {
+	if physical < c.scratchBlocks {
+		perShard := c.partitions[0].scratchBlocks
+		return c.partitions[physical/perShard].block(physical % perShard)
+	}
+	start := (physical - c.scratchBlocks) * c.blockSize
+	return c.input[start : start+c.blockSize]
 }
 
 // Protect a destination by relocating its unread source if necessary.
@@ -98,9 +123,8 @@ func (c *completion[T]) protect(physical int) {
 				break
 			}
 		}
-		p := c.partition
 		length := c.sources[logical].length
-		copy(p.block(free)[:length], p.block(physical)[:length])
+		copy(c.block(free)[:length], c.block(physical)[:length])
 		c.owners[free] = logical
 		c.sources[logical].physical = free
 	}
@@ -114,19 +138,18 @@ func (c *completion[T]) transfer(logical, start int) int {
 	if observeRoutes {
 		emitRoute(routeEvent{stage: routeTransfer, a: logical})
 	}
-	p := c.partition
-	first := start / p.blockSize
-	last := min((start+source.length-1)/p.blockSize+1, len(p.input)/p.blockSize)
+	first := start / c.blockSize
+	last := min((start+source.length-1)/c.blockSize+1, len(c.input)/c.blockSize)
 	overlaps := false
 	for block := first; block < last; block++ {
-		physical := p.scratchBlocks + block
+		physical := c.scratchBlocks + block
 		if physical == source.physical {
 			overlaps = true
 		} else {
 			c.protect(physical)
 		}
 	}
-	copy(p.input[start:start+source.length], p.block(source.physical)[:source.length])
+	copy(c.input[start:start+source.length], c.block(source.physical)[:source.length])
 	if overlaps {
 		c.owners[source.physical] = finalBlock
 	} else {
@@ -137,11 +160,8 @@ func (c *completion[T]) transfer(logical, start int) int {
 }
 
 // Stream one bucket into its final band before publishing that band.
-func (c *completion[T]) finish(bucket int, visit visitBand[T]) {
-	band := &c.bands[bucket]
-	if band.first == band.end {
-		return
-	}
+func (c *completion[T]) moveBand(bucket int) {
+	band := c.bands[bucket]
 	start := band.start
 	for logical := band.first; logical < band.end; logical++ {
 		start += c.transfer(logical, start)
@@ -149,16 +169,19 @@ func (c *completion[T]) finish(bucket int, visit visitBand[T]) {
 	if observeRoutes {
 		emitRoute(routeEvent{stage: routeBand, a: bucket, b: start - band.start})
 	}
-	if visit != nil {
-		input := c.partition.input
-		visit(bucket, band.start, start, input[band.start:start:start])
-	}
 }
 
 func completeSerial[T any](p *partition[T], visit visitBand[T]) []int {
-	c := buildCompletion(p)
-	for bucket := range c.bands {
-		c.finish(bucket, visit)
+	c := buildCompletion(p.input, []partition[T]{*p})
+	for bucket, band := range c.bands {
+		if band.first == band.end {
+			continue
+		}
+		c.moveBand(bucket)
+		if visit != nil {
+			end := c.ends[bucket]
+			visit(bucket, band.start, end, c.input[band.start:end:end])
+		}
 	}
 	return c.ends
 }

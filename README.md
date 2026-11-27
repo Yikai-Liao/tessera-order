@@ -18,9 +18,6 @@
   <a href="https://yikai-liao.github.io/tessera-order/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
-> [!NOTE]
-> 0.1 is the first release and provides the full sort. `main` adds the operations listed below as development API for 0.2; they are unreleased and under API review. 0.x minor releases may change the API; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).
-
 ## Why Tessera
 
 An LSD radix sort is stable and runs in linear time, but it needs a second buffer as large as the input. Comparison sorts avoid that buffer and pay O(n log n) comparisons instead. Tessera keeps the radix sort's linear time and stability and bounds the extra memory to O(√n).
@@ -31,14 +28,14 @@ The same engine sorts records, sorts index payloads for `argsort`, and can skip 
 - **O(√n) sorting scratch**, through a stable in-place block partition and a bounded tile buffer. Cached keys and argsort's index output use O(n) space; parallel sorting uses O(P√n) scratch for P participating threads.
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
-- **Fixed-width keys.** Supports fixed-width keys encoded as unsigned integers; see [key encoding](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#key-encoding) for supported types and limits, and [versions](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#versions) for what ships in published 0.1 versus a [development checkout](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#try-the-development-api).
+- **Fixed-width keys.** Supports fixed-width keys encoded as unsigned integers; see [key encoding](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#key-encoding) for supported types and limits.
 - **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start
 
 ```toml
 [dependencies]
-tessera-order = "0.1"
+tessera-order = "0.2"
 ```
 
 SIMD is always enabled; there is no `portable-simd` or `std` feature. Disabling default features does not change the backend or remove the `std` requirement.
@@ -47,33 +44,28 @@ SIMD is always enabled; there is no `portable-simd` or `std` feature. Disabling 
 use std::cmp::Reverse;
 
 let mut values: Vec<u64> = vec![42, 7, 19, 7, 3];
-tessera_order::stable_sort(&mut values);
+tessera_order::sort(&mut values);
 assert_eq!(values, [3, 7, 7, 19, 42]);
 
 // Sort records by a key; equal keys keep their input order.
 let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
-tessera_order::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+tessera_order::sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
-| Published 0.1 | Unreleased 0.2 (`main`) | Use |
-|---|---|---|
-| `stable_sort(&mut [K])` | `sort(&mut [K])` | Sort keys themselves |
-| `stable_sort_by_key(&mut [T], F)` | `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+All operations resolve equal keys as a full stable sort would:
 
-On `main` (unreleased 0.2), the `stable_*` names remain as deprecated aliases. The following additions are new in 0.2 and **unreleased**; they require a [development checkout](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#try-the-development-api). All resolve equal keys as a full stable sort would.
-
-| Development API | Use |
+| Operation | Use |
 |---|---|
+| `sort(&mut [K])` | Sort keys themselves |
+| `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
 | `sort_by_cached_key(&mut [T], F)` | Sort by a key computed once per record on nontrivial inputs |
 | `select_nth` / `_by_key` | Place one ranked record and partition around it |
 | `argsort` / `_by_key` | Return sorted indices without moving source records |
 
-Additional key types beyond 0.1 are also new in 0.2 and unreleased; see [versions](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#versions) and [multi-field sorting](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#sort-by-several-fields). See the [guide](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#select-one-rank) for examples and [migration from earlier development snapshots](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#migrate-from-earlier-development-snapshots).
+See the [getting-started guide](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md) for examples, including [multi-field sorting](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#sort-by-several-fields) and [single-rank selection](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#select-one-rank). Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
-
-The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key` in published 0.1 (renamed to `par_sort` and `par_sort_by_key` on `main`), plus unreleased 0.2 `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
+The optional `rayon` feature adds `par_sort`, `par_sort_by_key`, `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
 
 ## Performance
 
@@ -95,11 +87,12 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
 
-| Capability | Rust 0.1 | C++ |
+| Capability | Rust 0.2 | C++ |
 |---|---|---|
-| Stable sort | Implemented | Planned |
-| Unstable sort | Not in 0.1 | Planned |
-| 128-bit keys | Signed and unsigned | Planned |
+| Stable sort, cached-key sort, argsort and selection | Implemented | Planned |
+| Parallel sort and argsort | Optional (`rayon`) | Planned |
+| Unstable sort | Not planned | Planned |
+| Fixed-width keys up to 128 bits | Supported | Planned |
 | Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
 
 A Python binding is planned as well; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).

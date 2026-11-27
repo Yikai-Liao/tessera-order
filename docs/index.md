@@ -51,7 +51,7 @@ tessera_order::sort_by_key(&mut rows, |row| row.0);
 assert_eq!(rows, [(10, "a"), (30, "c"), (30, "d")]);
 ```
 
-The key can be any supported fixed-width key (see [key encoding](../conformance/semantics.md#key-encoding) for supported types and limits). Records with equal keys keep their input order. This example uses the unreleased 0.2 API; see [versions](guide/getting-started.md#versions) for the published 0.1 names and key support.
+The key can be any supported fixed-width key (see [key encoding](../conformance/semantics.md#key-encoding) for supported types and limits). Records with equal keys keep their input order.
 
 ## Is it for you?
 

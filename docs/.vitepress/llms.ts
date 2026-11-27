@@ -137,8 +137,7 @@ const USING_TESSERA_SPECS: readonly TierSpec[] = [
   },
   {
     sitePath: "guide/getting-started.md",
-    summary:
-      "Installation, operations, examples, Rayon parallelism, and published 0.1 vs unreleased 0.2 differences.",
+    summary: "Installation, operations, examples, Rayon parallelism, and version notes.",
   },
   {
     sitePath: "conformance/semantics.md",
@@ -238,7 +237,8 @@ const OPTIONAL_SPECS: readonly TierSpec[] = [
   },
   {
     sitePath: "design/operation-extensions-proposal.md",
-    summary: "Design proposal for unreleased operation extensions and API scope rules.",
+    summary:
+      "Design record for the 0.2 operation surface and API scope rules for future extensions.",
   },
   {
     sitePath: "design/python-binding.md",

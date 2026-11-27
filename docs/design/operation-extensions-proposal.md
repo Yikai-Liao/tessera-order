@@ -1,6 +1,6 @@
 # Operation extensions proposal
 
-This page records the unreleased 0.2 scope decision and constraints on future extensions. The [guide](../guide/getting-started.md) shows how to use the retained operations, the [engine reference](engine.md) owns their implementation, and the [roadmap](../../ROADMAP.md#operation-extension-experiment) tracks open acceptance work.
+This page records the 0.2 scope decision and constraints on future extensions. The [guide](../guide/getting-started.md) shows how to use the retained operations, the [engine reference](engine.md) owns their implementation, and the [roadmap](../../ROADMAP.md#operation-extension-experiment) tracks open acceptance work.
 
 ## Scope and direction
 

@@ -10,7 +10,7 @@ Pull-request performance acceptance is governed by hosted PR paired benchmarks (
 
 ### 0.2 release surface and follow-ups
 
-The [0.2 scope decision](docs/design/operation-extensions-proposal.md#release-surface-alignment) is implemented on `main`: full and cached-key sorting, optional Rayon full sorting and argsort (`par_argsort`, `par_argsort_by_key`), serial argsort, single-rank selection, and fixed-width keys including `bool`, `char`, `NonZero`, byte arrays and tuples up to 128 bits.
+The [0.2 scope decision](docs/design/operation-extensions-proposal.md#release-surface-alignment) shipped in 0.2.0: full and cached-key sorting, optional Rayon full sorting and argsort (`par_argsort`, `par_argsort_by_key`), serial argsort, single-rank selection, and fixed-width keys including `bool`, `char`, `NonZero`, byte arrays and tuples up to 128 bits.
 
 Post-0.2 cleanup and capabilities (new capabilities require a concrete consumer and per-PR acceptance):
 

@@ -125,9 +125,9 @@ function groupStarts(s: Stage): Set<number> {
     </div>
 
     <p class="tsr-caption">
-      Letters show input order (<code>a</code> before <code>b</code>). In-place MSD's swap cycles flip equal keys
-      (<code>12e</code> before <code>12b</code>, <code>25i</code> before <code>25d</code>, outlined in red); Tessera
-      matches LSD's exact stable order while cutting 10M-record extra memory from 76 MiB to 5.9 MiB.
+      Small numbers show each record's original input position (<code>0</code>…<code>11</code>). In-place MSD's swap
+      cycles flip equal keys out of input order (outlined in red); Tessera matches LSD's exact stable order while
+      cutting 10M-record extra memory from 76 MiB to 5.9 MiB.
     </p>
   </figure>
 </template>

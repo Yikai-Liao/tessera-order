@@ -73,9 +73,9 @@ const caption = computed(() => {
     const displaced = KEYS[item.out];
     const clobber =
       item.out !== item.id
-        ? ` Writing directly into input slot ${item.out} would overwrite key ${displaced} (${recordLabel(item.out)}) before it is read.`
+        ? ` Writing directly into input slot ${item.out} would overwrite key ${displaced} (pos ${recordLabel(item.out)}) before it is read.`
         : " Even when a key stays in place, other keys still collide with unread input slots.";
-    return `Key ${item.key} (${recordLabel(item.id)}, digit ${item.bucket}) moves to output slot ${item.out}.${clobber}`;
+    return `Key ${item.key} (pos ${recordLabel(item.id)}, digit ${item.bucket}) moves to output slot ${item.out}.${clobber}`;
   }
   if (activeBucket.value !== null) {
     const b = activeBucket.value;

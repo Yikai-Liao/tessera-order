@@ -234,3 +234,71 @@
     transition: none;
   }
 }
+
+/* Lightweight Markdown copy/view bar at the top of documentation pages. */
+.tsr-md-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tsr-md-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.tsr-md-action:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.tsr-md-action:focus-visible,
+.tsr-md-link:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+.tsr-md-action:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.tsr-md-action.is-copied {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.tsr-md-action.is-error {
+  border-color: var(--tsr-focus);
+  color: var(--tsr-focus);
+}
+
+.tsr-md-link {
+  padding: 3px 4px;
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.tsr-md-link:hover {
+  color: var(--vp-c-brand-1);
+}

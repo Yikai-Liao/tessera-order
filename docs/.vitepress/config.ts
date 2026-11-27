@@ -1,55 +1,28 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
+import {
+  buildPageHeadMeta,
+  type ComparisonRenderer,
+  type ComparisonView,
+  canonicalSiteUrl,
+  discoverSitePages,
+  exportLlmsArtifacts,
+  formatRepositoryUrl,
+  REPOSITORY_URL,
+  resolveRepositoryLink,
+} from "./llms.ts";
 
 // The site renders the Markdown files of the repository in place, so the
-// same files read correctly on GitHub, in an editor, and on the site. Pages
-// are the files under `docs/` plus the shared documents listed here.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const repository = "https://github.com/Yikai-Liao/tessera-order";
-const sharedPages = new Set([
-  "conformance/semantics.md",
-  "ROADMAP.md",
-  "RELEASING.md",
-  "CONTRIBUTING.md",
-]);
-// The task index is for repository readers; the site has its own home page.
-const notPages = new Set(["docs/README.md"]);
-
-function isPage(path: string): boolean {
-  if (!path.endsWith(".md") || notPages.has(path)) return false;
-  return (
-    sharedPages.has(path) || (path.startsWith("docs/") && !path.startsWith("docs/.vitepress/"))
-  );
-}
-
-/** Where a source file is served: `docs/` is the site root, `README.md` is a directory index. */
-function sitePath(path: string): string {
-  const served = path.startsWith("docs/") ? path.slice("docs/".length) : path;
-  return served.replace(/(^|\/)README\.md$/, "$1index.md");
-}
-
-function markdownFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === "target" || entry.startsWith(".git")) continue;
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      if (entry === ".vitepress") continue;
-      markdownFiles(full, out);
-    } else if (entry.endsWith(".md")) {
-      out.push(relative(repoRoot, full).split(sep).join("/"));
-    }
-  }
-  return out;
-}
-
-const allMarkdown = markdownFiles(repoRoot);
-const rewrites = Object.fromEntries(
-  allMarkdown.filter((p) => isPage(p) && sitePath(p) !== p).map((p) => [p, sitePath(p)]),
-);
+// same files read correctly on GitHub, in an editor, and on the site. Page
+// discovery and link resolution live in `llms.ts` so HTML and `.md` exports
+// share one authority.
+const vitepressDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(vitepressDir, "../..");
+const catalog = discoverSitePages(repoRoot);
+const siteUrl = canonicalSiteUrl(process.env.DOCS_BASE);
 
 /**
  * Turns relative links into what each reader needs: a page link becomes an
@@ -65,29 +38,45 @@ function repositoryLinks(md: MarkdownRenderer) {
         if (token.children) visit(token.children);
         if (token.type !== "link_open") continue;
         const href = token.attrGet("href");
-        if (
-          !href ||
-          /^[a-z][a-z0-9+.-]*:/i.test(href) ||
-          href.startsWith("#") ||
-          href.startsWith("/")
-        )
-          continue;
-        const [path, hash = ""] = href.split("#", 2);
-        const target = resolve(dirname(source), decodeURIComponent(path));
-        const rel = relative(repoRoot, target).split(sep).join("/");
-        if (rel.startsWith("..")) continue;
-        const anchor = hash ? `#${hash}` : "";
-        if (isPage(rel) && existsSync(target)) {
-          token.attrSet("href", `/${sitePath(rel)}${anchor}`);
-        } else if (existsSync(target)) {
-          const kind = statSync(target).isDirectory() ? "tree" : "blob";
-          token.attrSet("href", `${repository}/${kind}/main/${rel}${anchor}`);
+        if (!href) continue;
+        const resolved = resolveRepositoryLink(repoRoot, source, href);
+        if (resolved.kind === "page") {
+          token.attrSet("href", `/${resolved.sitePath}${resolved.anchor}`);
+        } else if (resolved.kind === "repository") {
+          token.attrSet("href", formatRepositoryUrl(resolved));
         }
         // A missing target is left alone, so the dead-link check reports it.
       }
     };
     visit(state.tokens);
   });
+}
+
+interface ComparisonMarkdownModule {
+  loadComparisonSnapshot?: () => Promise<unknown>;
+  renderComparisonMarkdown?: (data: unknown, view: ComparisonView) => string;
+  COMPARISON_DATA_URL?: string;
+}
+
+/** Loads build-time comparison snapshot rendering from `comparisonMarkdown.ts` when present. */
+async function loadOptionalComparisonRenderer(): Promise<{
+  renderComparison?: ComparisonRenderer;
+  comparisonSourceUrl?: string;
+}> {
+  const modulePath = resolve(vitepressDir, "comparisonMarkdown.ts");
+  if (!existsSync(modulePath)) return {};
+  const mod = (await import(pathToFileURL(modulePath).href)) as ComparisonMarkdownModule;
+  const comparisonSourceUrl = mod.COMPARISON_DATA_URL;
+  if (!mod.loadComparisonSnapshot || !mod.renderComparisonMarkdown) {
+    return { comparisonSourceUrl };
+  }
+  const snapshot = await mod.loadComparisonSnapshot();
+  if (!snapshot) return { comparisonSourceUrl };
+  const render = mod.renderComparisonMarkdown;
+  return {
+    renderComparison: (view) => render(snapshot, view),
+    comparisonSourceUrl,
+  };
 }
 
 export default defineConfig({
@@ -97,10 +86,13 @@ export default defineConfig({
   // GitHub Pages serves the project under /<repository>/; the workflow sets it.
   base: process.env.DOCS_BASE ?? "/",
   srcDir: "..",
-  srcExclude: allMarkdown.filter((p) => !isPage(p)),
-  rewrites,
+  srcExclude: catalog.srcExclude,
+  rewrites: catalog.rewrites,
   cleanUrls: true,
   lastUpdated: true,
+  sitemap: {
+    hostname: siteUrl,
+  },
   head: [
     [
       "link",
@@ -111,10 +103,34 @@ export default defineConfig({
     math: true,
     config: repositoryLinks,
   },
+  transformPageData(pageData, { siteConfig }) {
+    const meta = buildPageHeadMeta({
+      relativePath: pageData.relativePath,
+      filePath: pageData.filePath,
+      title: pageData.title,
+      description: pageData.description,
+      frontmatter: pageData.frontmatter,
+      srcDir: siteConfig.srcDir,
+      siteUrl,
+    });
+    pageData.description = meta.description;
+    pageData.frontmatter.head = meta.head;
+  },
+  async buildEnd(siteConfig) {
+    const { renderComparison, comparisonSourceUrl } = await loadOptionalComparisonRenderer();
+    await exportLlmsArtifacts({
+      repoRoot,
+      outDir: siteConfig.outDir,
+      siteUrl,
+      catalog,
+      renderComparison,
+      comparisonSourceUrl,
+    });
+  },
   vite: {
     // `srcDir` is the repository root, one level above this Vite project.
     // Vite would otherwise look for static assets in `<srcDir>/public`.
-    publicDir: resolve(dirname(fileURLToPath(import.meta.url)), "../public"),
+    publicDir: resolve(vitepressDir, "../public"),
     server: { fs: { allow: [repoRoot] } },
   },
   themeConfig: {
@@ -169,10 +185,10 @@ export default defineConfig({
     search: { provider: "local" },
     editLink: {
       // A string, not a function: VitePress serializes this option for the client.
-      pattern: `${repository}/edit/main/:path`,
+      pattern: `${REPOSITORY_URL}/edit/main/:path`,
       text: "Edit this page on GitHub",
     },
-    socialLinks: [{ icon: "github", link: repository }],
+    socialLinks: [{ icon: "github", link: REPOSITORY_URL }],
     footer: {
       message: "Released under the BSD 2-Clause License.",
     },
@@ -197,6 +213,7 @@ function developmentSidebar() {
       text: "Design",
       items: [
         { text: "Engine reference", link: "/design/engine" },
+        { text: "Operation extensions proposal", link: "/design/operation-extensions-proposal" },
         { text: "Python binding design", link: "/design/python-binding" },
         { text: "Engine evidence", link: "/design/evidence" },
         { text: "CI scaling proposal", link: "/design/ci-scaling-proposal" },

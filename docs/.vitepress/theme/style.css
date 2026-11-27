@@ -289,7 +289,7 @@
   padding-bottom: 32px;
 }
 
-.VPHome .vp-doc > div > table {
+.VPHome .vp-doc table:not(.implementation-comparison table) {
   display: table;
   width: 100%;
   border-collapse: separate;
@@ -301,8 +301,8 @@
   font-size: 14px;
 }
 
-.VPHome .vp-doc > div > table th,
-.VPHome .vp-doc > div > table td {
+.VPHome .vp-doc table:not(.implementation-comparison table) th,
+.VPHome .vp-doc table:not(.implementation-comparison table) td {
   padding: 12px 16px;
   border: none;
   border-bottom: 1px solid var(--tsr-line);
@@ -310,30 +310,30 @@
   vertical-align: middle;
 }
 
-.VPHome .vp-doc > div > table tr:last-child td {
+.VPHome .vp-doc table:not(.implementation-comparison table) tr:last-child td {
   border-bottom: none;
 }
 
-.VPHome .vp-doc > div > table th {
+.VPHome .vp-doc table:not(.implementation-comparison table) th {
   font-size: 13px;
   font-weight: 600;
   color: var(--vp-c-text-2);
 }
 
-.VPHome .vp-doc > div > table th:first-child,
-.VPHome .vp-doc > div > table td:first-child {
+.VPHome .vp-doc table:not(.implementation-comparison table) th:first-child,
+.VPHome .vp-doc table:not(.implementation-comparison table) td:first-child {
   white-space: nowrap;
   color: var(--vp-c-text-2);
 }
 
-.VPHome .vp-doc > div > table th:nth-child(2),
-.VPHome .vp-doc > div > table td:nth-child(2) {
+.VPHome .vp-doc table:not(.implementation-comparison table) th:nth-child(2),
+.VPHome .vp-doc table:not(.implementation-comparison table) td:nth-child(2) {
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-text-1);
 }
 
 @media (max-width: 720px) {
-  .VPHome .vp-doc > div > table {
+  .VPHome .vp-doc table:not(.implementation-comparison table) {
     display: block;
     overflow-x: auto;
   }

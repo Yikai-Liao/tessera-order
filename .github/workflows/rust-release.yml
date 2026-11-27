@@ -27,6 +27,14 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: bun run tools release verify --tag "$RELEASE_TAG"
+      # Before publishing, so a tag without notes publishes nothing. Checkout may
+      # leave only the commit, so fetch the annotated tag object explicitly.
+      - name: Read release notes from the tag message
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          bun run --silent tools release notes --tag "$RELEASE_TAG" --commit "$GITHUB_SHA" > "$RUNNER_TEMP/release-notes.md"
       - run: cargo publish --locked -p tessera-order --dry-run
       # Exchanges the job's OIDC token for a short-lived crates.io token, revoked after the job.
       - uses: rust-lang/crates-io-auth-action@v1
@@ -42,5 +50,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          # A draft: an agent or maintainer writes the notes per RELEASING.md, then publishes it.
-          gh release create "$RELEASE_TAG" target/package/tessera-order-*.crate --verify-tag --title "$RELEASE_TAG" --draft --notes 'Draft: write the notes per RELEASING.md.'
+          gh release create "$RELEASE_TAG" target/package/tessera-order-*.crate --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"

@@ -183,7 +183,7 @@ onMounted(() => {
       error.value = "";
       index.value = null;
       journals.value = new Map();
-      // Seed from the same-origin build snapshot for instant display, then refresh live in place.
+      // Seed from the same-origin build snapshot only when its latest month overlaps the active range.
       let seeded = false;
       if (source === HISTORY_DATA_SOURCE) {
         try {
@@ -192,16 +192,22 @@ onMounted(() => {
             JSON.parse(await download(snapshotBase, "index.json", controller.signal)),
           );
           const latestMonth = snapIndex.months.at(-1);
+          const start = from.value.slice(0, 7);
+          const end = to.value.slice(0, 7);
+          const latestNeeded =
+            Boolean(latestMonth) &&
+            (!start || latestMonth! >= start) &&
+            (!end || latestMonth! <= end);
           const seededJournals = new Map<string, TrackingRun[]>();
-          if (latestMonth) {
+          if (latestNeeded && latestMonth) {
             const raw = await download(snapshotBase, `${latestMonth}.jsonl`, controller.signal);
             seededJournals.set(latestMonth, parseRuns(raw));
-          }
-          if (!controller.signal.aborted) {
-            journals.value = seededJournals;
-            index.value = snapIndex;
-            loading.value = false;
-            seeded = true;
+            if (!controller.signal.aborted) {
+              journals.value = seededJournals;
+              index.value = snapIndex;
+              loading.value = false;
+              seeded = true;
+            }
           }
         } catch {
           // Local snapshot is optional (absent in dev or offline builds).
@@ -212,14 +218,19 @@ onMounted(() => {
         const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
         if (controller.signal.aborted) return;
         if (seeded) {
-          const latestMonth = liveIndex.months.at(-1);
-          const updated = new Map(journals.value);
-          if (latestMonth) {
-            const raw = await download(source, `${latestMonth}.jsonl`, controller.signal);
-            updated.set(latestMonth, readable(() => parseRuns(raw)));
-          }
+          const start = from.value.slice(0, 7);
+          const end = to.value.slice(0, 7);
+          const needed = liveIndex.months.filter(
+            (month) => (!start || month >= start) && (!end || month <= end),
+          );
+          const batches = await Promise.all(
+            needed.map(async (month) => {
+              const raw = await download(source, `${month}.jsonl`, controller.signal);
+              return [month, readable(() => parseRuns(raw))] as const;
+            }),
+          );
           if (controller.signal.aborted) return;
-          journals.value = updated;
+          journals.value = new Map([...journals.value, ...batches]);
         }
         index.value = liveIndex;
       } catch (cause) {

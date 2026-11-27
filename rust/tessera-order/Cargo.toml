@@ -1,6 +1,6 @@
 [package]
 name = "tessera-order"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stable radix ordering with O(sqrt(n)) auxiliary memory: sorting, argsort and selection on one engine"
 readme = "README.md"
 keywords = ["sort", "radix-sort", "stable-sort", "sorting", "algorithm"]

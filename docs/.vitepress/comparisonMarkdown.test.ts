@@ -22,12 +22,43 @@ const SPEC_UUID = "eaf61c35-a989-4097-bdd0-ef1dc30a7009";
 const TESSERA_HASH = "d849b6801234567890abcdef1234567890abcdef";
 const OTHER_HASH = "b67122201234567890abcdef1234567890abcdef";
 
-function makeFixture() {
+function makeFixture(validChart = true) {
+  const chart = validChart
+    ? {
+        title: "Fastest of 7 stable sorts",
+        guide: "Speed vs slice::sort",
+        columns: ["Speed"],
+        groups: [
+          {
+            title: "SORT",
+            rows: [
+              {
+                name: { input: "random", sub: "u64 · 1M", tag: "" },
+                marks: [{ value: 2.6, tone: "primary" }],
+                cells: ["2.6×"],
+              },
+            ],
+          },
+        ],
+        scale: {
+          low: 0.5,
+          high: 4,
+          ticks: [
+            { value: 1, label: "1×" },
+            { value: 2, label: "2×" },
+          ],
+          origin: 1,
+          clamp: false,
+        },
+        legend: { note: "Median of runs" },
+        axis: ["slower", "faster"],
+      }
+    : { title: "Fastest of 7 stable sorts" };
   const figure = {
     name: "overview",
     title: "Fastest of 7 stable sorts",
     summary: "Every sort on the same records.",
-    chart: { title: "Fastest of 7 stable sorts" },
+    chart,
     table: "| Sort | Speed |\n| --- | --- |\n| Tessera | 2.6× |",
   };
   const sort = {
@@ -169,26 +200,28 @@ test("snapshot loading validates local and remote sources and preserves offline 
     await rm(dir, { recursive: true, force: true });
   });
   process.env.DOCS_COMPARISON_FILE = file;
-  assert.deepEqual(await loadComparisonSnapshot(), fixture);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: fixture, overridden: true });
+  await writeFile(file, JSON.stringify(makeFixture(false)));
+  assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   await writeFile(file, "{}");
-  assert.equal(await loadComparisonSnapshot(), null);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   assert.equal(calls.length, 0);
   delete process.env.DOCS_COMPARISON_FILE;
   process.env.VITE_COMPARISON_SOURCE = "/../comparison.json";
-  assert.equal(await loadComparisonSnapshot(), null);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   assert.equal(calls.length, 0);
   process.env.VITE_COMPARISON_SOURCE = "https://example.test/comparison.json";
   response = new Response(JSON.stringify(fixture));
-  assert.deepEqual(await loadComparisonSnapshot(), fixture);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: fixture, overridden: true });
   for (const failure of [new Response("{}"), new Response("missing", { status: 404 })]) {
     response = failure;
-    assert.equal(await loadComparisonSnapshot(), null);
+    assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   }
   response = new TypeError("offline");
-  assert.equal(await loadComparisonSnapshot(), null);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   delete process.env.VITE_COMPARISON_SOURCE;
   response = new Response(JSON.stringify(fixture));
-  assert.deepEqual(await loadComparisonSnapshot(), fixture);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: fixture, overridden: false });
   assert.equal(calls.at(-1), COMPARISON_DATA_URL);
   const originalConfig = Reflect.get(globalThis, "VITEPRESS_CONFIG");
   t.after(() => {
@@ -198,13 +231,13 @@ test("snapshot loading validates local and remote sources and preserves offline 
   Reflect.set(globalThis, "VITEPRESS_CONFIG", {});
   response = new Response(JSON.stringify(fixture));
   const before = calls.length;
-  assert.deepEqual(await loadComparisonSnapshot(), fixture);
+  assert.deepEqual(await loadComparisonSnapshot(), { data: fixture, overridden: false });
   const loader = await loadConfigFromFile(
     { command: "build", mode: "production" },
     fileURLToPath(new URL("./theme/components/comparisonSnapshot.data.ts", import.meta.url)),
   );
   const rebundled = loader!.config as unknown as { load: typeof loadComparisonSnapshot };
-  assert.deepEqual(await rebundled.load(), fixture);
+  assert.deepEqual(await rebundled.load(), { data: fixture, overridden: false });
   assert.equal(
     calls.length,
     before + 1,

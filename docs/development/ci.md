@@ -102,5 +102,6 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Reproduce the comparison checks | `bun run --silent tools ci check --native` |
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |
+| Print the notes held in a release tag | `bun run --silent tools release notes --tag rust/v0.2.0` |
 
 Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check with one-millisecond samples, not an experiment: it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke plan, measures one `u64/random` group, checks native linkage under `--native` and generates a partial report. Routing, title and DCO also have dependency-free entry points in `.github/scripts/`; DCO runs the base commit's trusted code without installing PR code.

@@ -101,11 +101,29 @@ function jumpPhase(phase: MacroPhase) {
   frameIndex.value = phase === "complete" ? b.last : phase === "scatter" ? b.first : b.first;
 }
 
-const readIndex = computed(() => {
-  if (!frame.value) return 0;
-  if (frame.value.phase !== "setup" && frame.value.phase !== "scatter") return length.value;
-  if (frame.value.reads !== undefined) return frame.value.reads + 1;
-  return 0;
+const readThrough = computed(() => {
+  const out: number[] = [];
+  let seen = 0;
+  for (const f of frames.value) {
+    if (f.phase === "setup") seen = 0;
+    else if (f.phase === "scatter") {
+      if (f.reads !== undefined) seen = f.reads + 1;
+    } else seen = length.value;
+    out.push(seen);
+  }
+  return out;
+});
+
+const readIndex = computed(() => readThrough.value[frameIndex.value] ?? 0);
+
+// Map each input slot (including tail) to the bucket that will own it in the final layout.
+const slotFinalBucket = computed(() => {
+  const owners = new Array<number | null>(length.value).fill(null);
+  if (!result.value) return owners;
+  result.value.bands.forEach((band, bucket) => {
+    for (let i = band.start; i < band.start + band.len; i++) owners[i] = bucket;
+  });
+  return owners;
 });
 
 // Input blocks strictly before `readBlocks` have had every record read and are free to recycle.
@@ -281,8 +299,18 @@ function jumpToSource(sourceId?: number) {
               :key="offset"
               type="button"
               class="bp-cell"
-              :class="{ stale: !cell.live, empty: !cell.rec }"
-              :style="cell.rec && cell.live ? { background: bucketColor(cell.rec.bucket, BUCKETS) } : undefined"
+              :class="{
+                stale: !cell.live,
+                empty: !cell.rec,
+                banded: activePhase !== 'scatter' && slotFinalBucket[blk.inputIdx * blockSize + offset] !== null,
+              }"
+              :style="{
+                background: cell.rec && cell.live ? bucketColor(cell.rec.bucket, BUCKETS) : undefined,
+                borderBottomColor:
+                  activePhase !== 'scatter' && slotFinalBucket[blk.inputIdx * blockSize + offset] !== null
+                    ? bucketColor(slotFinalBucket[blk.inputIdx * blockSize + offset]!, BUCKETS)
+                    : undefined,
+              }"
               @click="jumpToRead(blk.inputIdx * blockSize + offset)"
             >
               <template v-if="cell.rec">
@@ -304,8 +332,18 @@ function jumpToSource(sourceId?: number) {
               :key="offset"
               type="button"
               class="bp-cell"
-              :class="{ stale: !cell.live, empty: !cell.rec }"
-              :style="cell.rec && cell.live ? { background: bucketColor(cell.rec.bucket, BUCKETS) } : undefined"
+              :class="{
+                stale: !cell.live,
+                empty: !cell.rec,
+                banded: activePhase !== 'scatter' && slotFinalBucket[result.fullBlocks * blockSize + offset] !== null,
+              }"
+              :style="{
+                background: cell.rec && cell.live ? bucketColor(cell.rec.bucket, BUCKETS) : undefined,
+                borderBottomColor:
+                  activePhase !== 'scatter' && slotFinalBucket[result.fullBlocks * blockSize + offset] !== null
+                    ? bucketColor(slotFinalBucket[result.fullBlocks * blockSize + offset]!, BUCKETS)
+                    : undefined,
+              }"
               @click="jumpToRead(result.fullBlocks * blockSize + offset)"
             >
               <template v-if="cell.rec">
@@ -542,6 +580,10 @@ function jumpToSource(sourceId?: number) {
   background: var(--tsr-stale) !important;
   color: var(--vp-c-text-3);
   opacity: 0.55;
+}
+.bp-cell.banded {
+  border-bottom-width: 4px;
+  border-bottom-style: solid;
 }
 .bp-cell.empty {
   background: transparent !important;

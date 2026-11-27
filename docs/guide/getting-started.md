@@ -19,7 +19,7 @@ Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instruct
 |---|---|---|
 | sort keys in place | `sort` | `(&mut [K])` |
 | sort records by a key | `sort_by_key` | `(&mut [T], F)` |
-| sort by a key computed once per record | `sort_by_cached_key` | `(&mut [T], F)` |
+| sort by a key evaluated at most once per record ([exceptions](#partitions-and-groups)) | `sort_by_cached_key` | `(&mut [T], F)` |
 | know the sorted order without moving records | `argsort` / `argsort_by_key` | `(&[K]) -> Vec<usize>` / `(&[T], F) -> Vec<usize>` |
 | find the record at one rank, such as the median | `select_nth` / `select_nth_by_key` | `(&mut [K], usize) -> (&mut [K], &mut K, &mut [K])` / `(&mut [T], usize, F) -> (&mut [T], &mut T, &mut [T])` |
 | sort in place on several threads (`rayon`) | `par_sort` / `par_sort_by_key` | `(&mut [K])` / `(&mut [T], F)` |
@@ -185,11 +185,11 @@ Small inputs and one-thread pools run serially, and sorted or constant inputs ne
 
 ## Versions
 
-`tessera-order` 0.2 is the current release; the 0.1 `stable_sort*` and `par_stable_sort*` names remain as deprecated aliases. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+0.1 has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`, and supports primitive integers, `f32`, `f64` and `Reverse`. 0.2 renames the sorts (keeping the old names as deprecated aliases) and adds cached-key sorting, serial and parallel argsort, selection and the remaining key types (`bool`, `char`, `NonZero` integers, byte arrays and tuples). 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 ### Migrate from earlier development snapshots
 
-These functions appeared only in unreleased checkouts. For `_by_key` variants, use the keyed operations with the same substitutions.
+These functions appeared only in development checkouts before 0.2. For `_by_key` variants, use the keyed operations with the same substitutions.
 
 | Earlier API | Replacement |
 |---|---|

@@ -114,7 +114,9 @@ export default defineConfig({
       outDir: siteConfig.outDir,
       siteUrl,
       catalog,
-      renderComparison: snapshot ? (view) => renderComparisonMarkdown(snapshot, view) : undefined,
+      renderComparison: snapshot.data
+        ? (view) => renderComparisonMarkdown(snapshot.data!, view)
+        : undefined,
     });
   },
   vite: {

@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Tessera
-  text: Linear-time stable sorting, argsort, and selection in O(√n) auxiliary memory
-  tagline: Sort records of any Rust type by fixed-width keys without Clone, Default, or an input-sized scratch buffer.
+  text: Linear-time stable radix sorting in O(√n) scratch memory
+  tagline: One engine for stable sort, argsort, and single-rank selection on any Rust record type without Clone, Default, or an input-sized sort buffer.
   image:
     src: /logo.svg
     alt: Tessera logo, a mosaic rosette
@@ -38,10 +38,12 @@ All four libraries are stable and move arbitrary `T` without `Copy` or `Clone`; 
 | | **Tessera** | slice::sort (std) | radsort | glidesort |
 |---|---|---|---|---|
 | **Time** | **O(n)** | O(n log n) | O(n) | O(n log n) |
-| **Extra memory** | **O(√n)** (O(P√n) parallel) | O(n) | O(n) | O(n) |
+| **Extra memory (sort)** | **O(√n)** scratch (O(P√n) parallel) | O(n) | O(n) | O(n) |
 | **Keys** | Fixed-width keys | Any Ord or comparator | Fixed-width keys | Any Ord or comparator |
 | **Parallel** | Built-in (Rayon) | Separate (rayon) | No | No |
 | **Operations** | Sort, cached key, argsort, select_nth | Sort, unstable select_nth | Sort | Sort |
+
+`argsort` returns an O(n) index `Vec<usize>` and `sort_by_cached_key` caches O(n) keys; see [ordering semantics](../conformance/semantics.md#space) for exact memory bounds.
 
 ## One engine, zero record-trait bounds
 

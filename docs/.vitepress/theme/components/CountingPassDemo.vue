@@ -72,9 +72,11 @@ const caption = computed(() => {
     const item = placements[activeIndex.value];
     const displaced = KEYS[item.out];
     const clobber =
-      item.out !== item.id
-        ? ` Writing directly into input slot ${item.out} would overwrite key ${displaced} (pos ${recordLabel(item.out)}) before it is read.`
-        : " Even when a key stays in place, other keys still collide with unread input slots.";
+      item.out > item.id
+        ? ` Writing directly into input slot ${item.out} would overwrite unread key ${displaced} (pos ${recordLabel(item.out)}).`
+        : item.out < item.id
+          ? ` Input slot ${item.out} was already read, but forward moves in the same pass (such as key 12 from pos 1 to slot 2) still collide with unread slots.`
+          : " This record lands on its own index, yet forward moves in the same pass still collide with unread slots.";
     return `Key ${item.key} (pos ${recordLabel(item.id)}, digit ${item.bucket}) moves to output slot ${item.out}.${clobber}`;
   }
   if (activeBucket.value !== null) {

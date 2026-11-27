@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "smol-toml";
@@ -11,4 +12,47 @@ export async function verifyRustRelease(tag: string, root: string) {
   if (tag !== `rust/v${pkg.version}` || pkg.publish === false)
     throw new Error("Rust tag/package version mismatch or package is unpublished");
   return { tag, state: "verified" };
+}
+
+/**
+ * Release notes are the message of the annotated release tag, so publication
+ * needs no manual step. Reject a lightweight tag, a tag that does not point at
+ * the commit being published, and an unusable message before anything is
+ * published.
+ */
+export function readTagNotes(tag: string, cwd?: string, commit?: string): string {
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const ref = `refs/tags/${tag}`;
+  if (git("cat-file", "-t", ref) !== "tag")
+    throw new Error(`${tag} is not an annotated tag; its message holds the release notes`);
+  if (
+    commit !== undefined &&
+    git("rev-parse", `${ref}^{commit}`) !== git("rev-parse", `${commit}^{commit}`)
+  )
+    throw new Error(`${tag} does not point at the commit being published`);
+  return tagNotes(git("cat-file", "tag", ref));
+}
+
+// Git's signature markers (`gpg-interface.c`). A signature is the last such
+// block and runs to the end of the message; a quoted marker is note text.
+const signatureStart =
+  /^-----BEGIN (PGP SIGNATURE|PGP MESSAGE|SSH SIGNATURE|SIGNED MESSAGE)-----$/gm;
+
+/** Extract the message of a raw tag object (`git cat-file tag`), without its signature. */
+export function tagNotes(tagObject: string): string {
+  const headerEnd = tagObject.indexOf("\n\n");
+  const message = headerEnd < 0 ? "" : tagObject.slice(headerEnd + 2);
+  const last = [...message.matchAll(signatureStart)].at(-1);
+  const signed =
+    last !== undefined && message.slice(last.index).trimEnd().endsWith(`-----END ${last[1]}-----`);
+  // Keep leading indentation: an indented first line is a Markdown code block.
+  const notes = (signed ? message.slice(0, last.index) : message).replace(/^\n+/, "").trimEnd();
+  if (notes === "") throw new Error("release tag message is empty; it holds the release notes");
+  // Git's default `--cleanup=strip` deletes every line that starts with `#`,
+  // headings and code alike. Notes grouped under `##` headings always keep
+  // one, so none left means the cleanup ran. This is not a Markdown check.
+  if (!/^#/m.test(notes))
+    throw new Error("release notes have no line starting with #; tag with --cleanup=whitespace");
+  return `${notes}\n`;
 }

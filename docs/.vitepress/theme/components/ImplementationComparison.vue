@@ -29,28 +29,33 @@ const props = withDefaults(defineProps<{ view?: ComparisonView; source?: string 
 const defaultSource =
   (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL;
 // Initialize from the build-time snapshot when using the default source so SSR emits real
-// cards, SVGs, provenance, and tables; `onMounted` refreshes live without erasing SSR data.
-const data = shallowRef<ComparisonData | null>(props.source === defaultSource ? snapshot : null);
+// cards, SVGs, provenance, and tables; keep explicit local preview overrides authoritative.
+const usingSnapshot = props.source === defaultSource;
+const data = shallowRef<ComparisonData | null>(usingSnapshot ? snapshot.data : null);
 const error = shallowRef("");
-// When data arrives after mount (offline build or custom source), refresh the outline and
-// resolve any URL fragment once headings render. `contentUpdatedCallbacks` is a private
-// VitePress 1.6 export (declared in env.d.ts); after an upgrade, verify both outlines list these headings.
+let scrolledToHash = false;
+function scrollToFragment() {
+  if (!location.hash || scrolledToHash) return;
+  const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (!target) return;
+  scrolledToHash = true;
+  // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
+  window.scrollTo(
+    0,
+    scrollY +
+      target.getBoundingClientRect().top -
+      getScrollOffset() +
+      parseInt(getComputedStyle(target).paddingTop, 10),
+  );
+}
+// When data arrives or gains newly published sections after mount, refresh the outline and
+// resolve any URL fragment once its target heading renders.
 watch(
   data,
-  (current, previous) => {
+  (current) => {
     if (props.view !== "all" || !current) return;
     for (const refresh of contentUpdatedCallbacks) refresh();
-    if (previous) return;
-    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
-    if (target)
-      window.scrollTo(
-        0,
-        scrollY +
-          target.getBoundingClientRect().top -
-          getScrollOffset() +
-          parseInt(getComputedStyle(target).paddingTop, 10),
-      );
+    scrollToFragment();
   },
   { flush: "post" },
 );
@@ -62,7 +67,9 @@ onMounted(async () => {
   window.addEventListener("keydown", clearOnEscape);
   if (props.view === "all" && data.value) {
     for (const refresh of contentUpdatedCallbacks) refresh();
+    scrollToFragment();
   }
+  if (usingSnapshot && snapshot.overridden && data.value) return;
   let response: Response;
   try {
     response = await fetch(props.source, { cache: "no-cache" });
@@ -79,6 +86,13 @@ onMounted(async () => {
   }
   try {
     const next = comparisonSchema.parse(await response.json());
+    for (const fig of [
+      ...(next.overview ? [next.overview] : []),
+      ...next.operations.flatMap((op) => op.figures),
+    ]) {
+      if (fig.kind === "curves") renderCurves({ ...(fig.chart as CurveChart), id: "check" });
+      else renderRows({ ...(fig.chart as RowChart), id: "check" });
+    }
     error.value = "";
     if (!data.value || JSON.stringify(next) !== JSON.stringify(data.value)) data.value = next;
   } catch (cause) {

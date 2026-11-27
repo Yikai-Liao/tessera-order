@@ -31,8 +31,7 @@ const SHARED_PAGES = new Set([
 const NOT_PAGES = new Set(["docs/README.md"]);
 
 const VUE_TAG_RE = /^<([A-Z][A-Za-z0-9]*)(?:\s+([^>]*?))?\s*\/?>(?:\s*<\/\1>)?$/;
-const NOISE_LINE_RE =
-  /^(?:<!--\s*SPDX-License-Identifier:[^>]*-->|<\/?div\b[^>]*>|<a\s+id="[^"]*"\s*>\s*<\/a>)$/i;
+const NOISE_LINE_RE = /^(?:<!--\s*SPDX-License-Identifier:[^>]*-->|<\/?div\b[^>]*>)$/i;
 
 const isPage = (repoPath: string): boolean =>
   repoPath.endsWith(".md") &&

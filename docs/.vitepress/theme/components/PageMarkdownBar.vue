@@ -7,29 +7,42 @@ const LABELS = { idle: "Copy Markdown", copying: "Copying…", copied: "Copied",
 const { page } = useData();
 const status = ref<keyof typeof LABELS>("idle");
 let timer: ReturnType<typeof setTimeout> | undefined;
+let copySeq = 0;
 
 const markdownHref = computed(() =>
   page.value.isNotFound || !page.value.relativePath ? "" : withBase(`/${page.value.relativePath}`),
 );
 watch(markdownHref, () => {
+  copySeq++;
   clearTimeout(timer);
   status.value = "idle";
 });
-onUnmounted(() => clearTimeout(timer));
+onUnmounted(() => {
+  copySeq++;
+  clearTimeout(timer);
+});
 
 async function copyMarkdown() {
   if (!markdownHref.value || status.value === "copying") return;
+  const seq = ++copySeq;
+  const href = markdownHref.value;
   status.value = "copying";
   try {
-    const res = await fetch(markdownHref.value);
+    const res = await fetch(href);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await navigator.clipboard.writeText(await res.text());
+    const text = await res.text();
+    if (seq !== copySeq) return;
+    await navigator.clipboard.writeText(text);
+    if (seq !== copySeq) return;
     status.value = "copied";
   } catch {
+    if (seq !== copySeq) return;
     status.value = "error";
   }
   clearTimeout(timer);
-  timer = setTimeout(() => { status.value = "idle"; }, 2000);
+  timer = setTimeout(() => {
+    if (seq === copySeq) status.value = "idle";
+  }, 2000);
 }
 </script>
 

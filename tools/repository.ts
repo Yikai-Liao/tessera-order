@@ -63,7 +63,8 @@ export function repositoryCommands(program: Command) {
     .command("notes")
     .description("Print the release notes held in an annotated tag's message")
     .requiredOption("--tag <tag>", "release tag")
-    .action(async (options: { tag: string }) => {
-      process.stdout.write(readTagNotes(options.tag, await repositoryRoot()));
+    .option("--commit <commit>", "commit the tag must point at")
+    .action(async (options: { tag: string; commit?: string }) => {
+      process.stdout.write(readTagNotes(options.tag, await repositoryRoot(), options.commit));
     });
 }

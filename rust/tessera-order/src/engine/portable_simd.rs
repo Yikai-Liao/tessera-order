@@ -62,6 +62,12 @@ pub trait SimdKey: Copy {
         unreachable!("load_encoded called on scalar SimdKey")
     }
 
+    /// Broadcasts one key into all lanes of [`Self::Vec`] in encoded order.
+    /// Only called when `lanes > 1`.
+    fn splat_encoded<S: Simd>(_simd: S, _key: Self) -> Self::Vec<S> {
+        unreachable!("splat_encoded called on scalar SimdKey")
+    }
+
     /// Decodes and stores [`Self::lanes`] keys loaded by [`Self::load_encoded`],
     /// preserving exact bit patterns. Only called when `lanes > 1`.
     fn store_decoded<S: Simd>(_vec: Self::Vec<S>, _slice: &mut [Self]) {
@@ -385,6 +391,10 @@ macro_rules! integer_key {
                 Self::Vec::<S>::from_slice(simd, slice)
             }
             #[inline(always)]
+            fn splat_encoded<S: Simd>(simd: S, key: Self) -> Self::Vec<S> {
+                Self::Vec::<S>::splat(simd, key)
+            }
+            #[inline(always)]
             fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {
                 vec.store_slice(slice);
             }
@@ -409,6 +419,10 @@ macro_rules! pointer_key {
                     core::slice::from_raw_parts(slice.as_ptr().cast::<$fixed>(), slice.len())
                 };
                 <$fixed as SimdKey>::load_encoded(simd, slice)
+            }
+            #[inline(always)]
+            fn splat_encoded<S: Simd>(simd: S, key: Self) -> Self::Vec<S> {
+                <$fixed as SimdKey>::splat_encoded(simd, key as $fixed)
             }
             #[inline(always)]
             fn store_decoded<S: Simd>(vec: Self::Vec<S>, slice: &mut [Self]) {

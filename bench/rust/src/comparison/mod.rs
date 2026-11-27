@@ -3,6 +3,7 @@
 //! Command orchestration and persistent comparison results.
 
 mod check;
+mod go;
 mod host;
 #[cfg(feature = "compare-native")]
 mod native;
@@ -16,7 +17,7 @@ pub use variant::{Kernel, Variant, list_variants};
 use crate::plan::{Execution, InputCase, Operation, catalog};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fs::{self, File, OpenOptions},
     io::Write,
@@ -37,6 +38,9 @@ struct Options {
     plan_path: Option<PathBuf>,
     output_dir: PathBuf,
     sampling: run::Sampling,
+    go_worker: Option<PathBuf>,
+    go_build: Option<Value>,
+    go_routes: BTreeMap<(String, &'static str, Execution), Value>,
 }
 impl Options {
     /// Parses the executable arguments into one comparison command.
@@ -54,6 +58,9 @@ impl Options {
             plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"))?,
             plan_path: None,
             output_dir: "bench/results/local".into(),
+            go_worker: None,
+            go_build: None,
+            go_routes: BTreeMap::new(),
             sampling: run::Sampling {
                 min_sample_ns: 5_000_000,
                 prepared_cap_bytes: 256 << 20,
@@ -74,6 +81,7 @@ impl Options {
                     options.plan_name = value
                 }
                 "--plan" => options.plan_path = Some(value.into()),
+                "--go-worker" => options.go_worker = Some(fs::canonicalize(value)?),
                 "--out" => options.output_dir = value.into(),
                 "--blocks" => {
                     let count = value.parse::<usize>()?;
@@ -139,7 +147,10 @@ impl Options {
         if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
-        let available = variant::list_variants();
+        let available = variant::list_variants()
+            .into_iter()
+            .chain(variant::go_variants().filter(|_| options.go_worker.is_some()))
+            .collect::<Vec<_>>();
         for id in &options.plan.implementations {
             if BUILD == "default"
                 && options.plan_path.is_some()
@@ -188,14 +199,69 @@ impl Options {
     ) -> Vec<(Variant, Execution)> {
         let probe = record::CaseInput::new(&case.probe());
         self.planned_columns(executions)
-            .filter(|(v, e)| v.supports(&probe, *e))
+            .filter(|(v, e)| self.route(case, &probe, *v, *e).0.is_some())
             .collect()
+    }
+
+    fn discover_go(&mut self) -> Result<()> {
+        let variants: Vec<_> = self
+            .variants()
+            .into_iter()
+            .filter(|v| v.adapter == "go")
+            .collect();
+        if variants.is_empty() {
+            return Ok(());
+        }
+        use sha2::{Digest, Sha256};
+        let binary = self
+            .go_worker
+            .as_ref()
+            .ok_or("missing Go comparison worker")?;
+        let mut worker = go::Worker::start(binary, Execution::Serial, None)?;
+        self.go_build = Some(json!({
+            "binary_sha256": format!("{:x}", Sha256::digest(fs::read(binary)?)),
+            "build_info": worker.request(&json!({"action":"info"}))?,
+        }));
+        for (case, executions) in self.cases(None)? {
+            for v in &variants {
+                for &execution in &executions {
+                    let route = worker.case("list", v.name, &case, execution)?;
+                    match (route["route"].as_str(), route["decline"].as_str()) {
+                        (Some(value), None) | (None, Some(value)) if !value.is_empty() => {}
+                        _ => return Err("invalid Go capability response".into()),
+                    }
+                    self.go_routes.insert((case.id(), v.name, execution), route);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn route(
+        &self,
+        case: &InputCase,
+        probe: &record::CaseInput,
+        variant: Variant,
+        execution: Execution,
+    ) -> (Option<&str>, &str) {
+        if variant.adapter == "go" {
+            let capability = &self.go_routes[&(case.id(), variant.name, execution)];
+            return (
+                capability["route"].as_str(),
+                capability["decline"].as_str().unwrap_or(""),
+            );
+        }
+        (
+            variant.route(probe, execution),
+            "unsupported operation/input/execution combination",
+        )
     }
 
     /// Retains the selected implementations available in this build configuration.
     fn variants(&self) -> Vec<variant::Variant> {
         variant::list_variants()
             .into_iter()
+            .chain(variant::go_variants().filter(|_| self.go_worker.is_some()))
             .filter(|entry| self.plan.implementations.iter().any(|id| id == entry.name))
             .collect()
     }
@@ -260,6 +326,9 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
         provenance["index_bytes"] = json!(size_of::<usize>());
     }
     provenance["plan"] = json!(options.plan);
+    if let Some(build) = &options.go_build {
+        provenance["go_build"] = build.clone();
+    }
     let mut measured = BTreeSet::new();
     provenance["cases"] = json!(
         cases
@@ -271,12 +340,13 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 let mut routes = std::collections::BTreeMap::new();
                 for (v, e) in options.planned_columns(executions) {
                     let id = run::column_id(v, e);
-                    if let Some(route) = v.route(&input, e) {
+                    let (route, reason) = options.route(case, &input, v, e);
+                    if let Some(route) = route {
                         measured.insert((v.name, e));
                         columns.push(id.clone());
                         routes.insert(id, route);
                     } else {
-                        omitted.push(json!({"column":id,"reason":"unsupported operation/input/execution combination"}));
+                        omitted.push(json!({"column":id,"reason":reason}));
                     }
                 }
                 let mut entry = json!(case);
@@ -455,6 +525,7 @@ fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
 /// Checks every supported adapter against each case's shared reference.
 fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
     for (index, (case, executions)) in cases.iter().enumerate() {
+        let mut digest = None;
         eprintln!(
             "Validating {}/{}: {} ({BUILD})",
             index + 1,
@@ -463,9 +534,25 @@ fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
         );
         let input = record::CaseInput::new(case);
         for (v, e) in options.supported_columns(case, executions) {
-            if let Some(mut k) = v.prepare(&input, e, 32_768) {
-                k.measure_batch(1)
+            if v.adapter == "go" {
+                let mut worker = go::Worker::start(options.go_worker.as_ref().unwrap(), e, None)?;
+                let result = worker.case("verify", v.name, case, e)?;
+                let expected =
+                    digest.get_or_insert_with(|| format!("{:016x}", record::input_digest(case)));
+                if result["digest"].as_str() != Some(expected) {
+                    return Err(format!(
+                        "{}: Go input digest differs from Rust for {}",
+                        case.id(),
+                        v.name
+                    )
+                    .into());
+                }
+            } else if let Some(mut k) = v.prepare(&input, e, 32_768) {
+                k.restore(1);
+                k.run_batch();
+                k.check()
                     .map_err(|error| format!("{} {}: {error}", case.id(), run::column_id(v, e)))?;
+                host::check_threads(k.worker_threads())?;
             }
         }
     }
@@ -473,13 +560,20 @@ fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
     Ok(())
 }
 /// Resumes completed groups and records the missing paired measurements.
-fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
+fn measure_cases(
+    options: &Options,
+    cases: &[(InputCase, Vec<Execution>)],
+    lock: &File,
+) -> Result<()> {
     prepare_output(options)?;
     // The memory worker owns completeness for every adapter, not just Tessera.
     // It repairs an interrupted write and skips every row already committed.
     let exe = std::env::current_exe()?.with_file_name("memory");
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--out").arg(&options.output_dir);
+    if let Some(worker) = &options.go_worker {
+        cmd.arg("--go-worker").arg(worker);
+    }
     cmd.arg("--blocks").arg(options.sampling.blocks.to_string());
     if let Some(path) = &options.plan_path {
         cmd.arg("--plan").arg(path);
@@ -530,6 +624,7 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
                 bytes,
                 &options.sampling,
                 BUILD,
+                options.go_worker.as_deref().map(|worker| (worker, lock)),
                 |sample| append_record(&mut f, &sample),
             )?;
         }
@@ -548,7 +643,7 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
 pub fn main(memory: bool) -> Result<()> {
     #[cfg(feature = "compare-native")]
     native::check_layouts();
-    let options = Options::parse(memory)?;
+    let mut options = Options::parse(memory)?;
     if options.command == "help" || options.command == "--help" || options.command == "-h" {
         let command = if memory {
             "memory"
@@ -560,6 +655,7 @@ pub fn main(memory: bool) -> Result<()> {
         );
         return Ok(());
     }
+    options.discover_go()?;
     let cases = options.cases(options.group.as_deref())?;
     if options.command == "run" {
         // The manifest includes every case, even for a restricted group. Keep
@@ -610,11 +706,11 @@ pub fn main(memory: bool) -> Result<()> {
             Ok(())
         }
         "validate" | "run" => {
-            let _lock = lock_worker(&options.output_dir, "comparison")?;
+            let lock = lock_worker(&options.output_dir, "comparison")?;
             if options.command == "validate" {
                 validate_cases(&options, &cases)
             } else {
-                measure_cases(&options, &cases)
+                measure_cases(&options, &cases, &lock)
             }
         }
         "memory" => {
@@ -645,6 +741,9 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
         );
         let input = record::CaseInput::new(case);
         for (v, e) in options.supported_columns(case, executions) {
+            if v.adapter == "go" {
+                continue;
+            }
             if case.operation.is_sort()
                 && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
                 && v.name != "tessera"

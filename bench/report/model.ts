@@ -50,6 +50,14 @@ export interface Manifest {
   source_sha256: string;
   binary_sha256: string;
   cargo_lock: string;
+  go_build?: {
+    binary_sha256: string;
+    build_info: {
+      GoVersion: string;
+      Settings: { Key: string; Value: string }[];
+      Deps: { Path: string; Version: string }[];
+    };
+  };
   features: string[];
   target: string;
   profile: string;

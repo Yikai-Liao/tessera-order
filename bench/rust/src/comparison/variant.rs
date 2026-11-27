@@ -357,6 +357,18 @@ pub fn list_variants() -> Vec<Variant> {
         })
         .collect()
 }
+pub(super) fn go_variants() -> impl Iterator<Item = Variant> {
+    crate::plan::catalog()
+        .implementations
+        .iter()
+        .filter(|entry| entry.adapter == "go")
+        .map(|implementation| Variant {
+            name: &implementation.id,
+            adapter: &implementation.adapter,
+            parallel_sort: implementation.parallel,
+            implementation,
+        })
+}
 /// Prepares the standard or Tessera adapter for any benchmark record type.
 fn try_prepare_common<T: TesseraAdapter>(
     v: Variant,

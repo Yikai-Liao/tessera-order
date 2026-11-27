@@ -25,6 +25,7 @@ const schema = z.strictObject({
   build: z.strictObject({
     compareSha256: digest,
     memorySha256: digest,
+    goSha256: digest.optional(),
   }),
 });
 
@@ -56,16 +57,19 @@ export function executables(out: string) {
   return {
     compare: join(directory, `compare${suffix}`),
     memory: join(directory, `memory${suffix}`),
+    go: join(directory, `go-worker${suffix}`),
   };
 }
 
 /** Retain both executable roles before removing the temporary build tree. */
-export async function retainBuild(out: string, binary: string): Promise<Build> {
+export async function retainBuild(out: string, binary: string, goWorker?: string): Promise<Build> {
   const paths = executables(out);
   await mkdir(dirname(paths.compare), { recursive: true });
   await copyFile(binary, paths.compare);
   await copyFile(join(dirname(binary), basename(paths.memory)), paths.memory);
+  if (goWorker) await copyFile(goWorker, paths.go);
   return {
+    ...(goWorker ? { goSha256: await fileHash(paths.go) } : {}),
     compareSha256: await fileHash(paths.compare),
     memorySha256: await fileHash(paths.memory),
   };
@@ -93,7 +97,8 @@ export async function loadSession(out: string): Promise<Session> {
   const paths = executables(out);
   if (
     (await fileHash(paths.compare)) !== session.build.compareSha256 ||
-    (await fileHash(paths.memory)) !== session.build.memorySha256
+    (await fileHash(paths.memory)) !== session.build.memorySha256 ||
+    (session.build.goSha256 !== undefined && (await fileHash(paths.go)) !== session.build.goSha256)
   )
     throw new Error("Session executables changed; start a new experiment instead");
   return session;

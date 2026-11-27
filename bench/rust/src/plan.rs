@@ -25,7 +25,7 @@ pub(crate) struct Catalog {
     pub(crate) paired_blocks: PairedBlocks,
     pub(crate) implementations: Vec<Implementation>,
     pub(crate) types: Vec<RecordType>,
-    distributions: Vec<Distribution>,
+    pub(crate) distributions: Vec<Distribution>,
     operations: Vec<OperationEntry>,
     inputs: InputDefaults,
     #[serde(rename = "revisionSampling")]
@@ -123,8 +123,8 @@ pub(crate) struct RecordType {
 }
 /// A supported input distribution.
 #[derive(Deserialize)]
-struct Distribution {
-    id: String,
+pub(crate) struct Distribution {
+    pub(crate) id: String,
 }
 /// An operation's identity and the order of its identity parameters.
 #[derive(Deserialize)]
@@ -226,7 +226,7 @@ impl Rule {
 }
 
 /// Storage width of a validated catalog record type.
-fn record_bytes(ty: &str) -> usize {
+pub(crate) fn record_bytes(ty: &str) -> usize {
     catalog()
         .types
         .iter()
@@ -335,7 +335,11 @@ impl InputCase {
 
     /// Formats the Criterion ID `rust/<case>/<execution>`.
     pub fn criterion_id(&self, execution: Execution) -> String {
-        format!("{}/{execution}", self.criterion_group())
+        self.worker_id("rust", execution)
+    }
+
+    pub(crate) fn worker_id(&self, language: &str, execution: Execution) -> String {
+        format!("{language}/{}/{execution}", self.id())
     }
 
     /// Decodes a Criterion ID into its case and execution.

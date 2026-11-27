@@ -20,6 +20,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
   [/^(go\/|\.github\/actions\/go-test\/|\.github\/workflows\/go-ci\.yml$)/, ["go"]],
+  [/^(bench\/go\/|conformance\/vectors\/benchmark-inputs\.json$)/, ["comparison"]],
   [/^conformance\/vectors\//, ["rust", "go"]],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],

@@ -558,3 +558,49 @@ test("the memory key clears segments spanning unmeasured lengths", () => {
     if (firstPeak === 0) assert.match(figure.table, /\| slice::sort .*?\| 0 B \| – \| – \|/);
   }
 });
+
+test("mixed runs report Go timings and retain required Rust memory", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "tessera-mixed-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dataset = createFixture(3);
+  const c = dataset.manifest.cases.find((input) => caseId(input) === "sort/u64/random/1000/s1")!;
+  const id = caseId(c);
+  const column = "go-tessera/serial";
+  dataset.manifest.cases = [c];
+  dataset.manifest.plan.implementations.push("go-tessera");
+  dataset.manifest.columns.push({
+    id: column,
+    implementation: "go-tessera",
+    execution: "serial",
+    stable: true,
+    adapter: "go",
+  });
+  dataset.samples = dataset.samples.filter((row) => row.case_id === id);
+  dataset.memory = dataset.memory.filter((row) => row.case_id === id);
+  dataset.observations = dataset.observations.filter((row) => row.group === caseGroup(c));
+  for (const row of dataset.samples.filter((row) => row.column === "tessera/serial"))
+    dataset.samples.push({ ...row, column, slot: c.columns.length + 1 });
+  c.columns.push(column);
+  c.routes[column] = "Sort";
+  assert.throws(() => validateRun(dataset), /Go column provenance/);
+  dataset.manifest.go_build = {
+    binary_sha256: "a".repeat(64),
+    build_info: {
+      GoVersion: "go1.27.4",
+      Settings: [{ Key: "GOEXPERIMENT", Value: "simd" }],
+      Deps: [{ Path: "github.com/klauspost/radsort", Version: "v1.1.0" }],
+    },
+  };
+  await writeFixture(dir, dataset);
+  await writeReport([dir]);
+  const report = await readFile(join(dir, "report", "index.md"), "utf8");
+  assert.match(report, /Tessera \(Go\)/);
+  assert.match(report, /Go memory unavailable/);
+  assert.match(report, /GOEXPERIMENT \| simd/);
+  const figures = renderFigures(dataset, summarize(dataset));
+  assert.ok(figures.some((figure) => figure.table.includes("Tessera (Go)")));
+  const rustMemory = dataset.memory.pop()!;
+  assert.throws(() => validateRun(dataset), /missing memory sample/);
+  dataset.memory.push(rustMemory, { ...rustMemory, column });
+  assert.throws(() => validateRun(dataset), /invalid or duplicate memory sample/);
+});

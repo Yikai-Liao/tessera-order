@@ -8,6 +8,7 @@
 | Library tests or Rust validation workflow | Rust validation |
 | Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, implementation comparison checks and PR revision measurement |
 | Native adapters or implementation-session tooling | Implementation comparison checks |
+| Go benchmark worker or shared benchmark input digests | Implementation comparison checks |
 | Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Implementation comparison checks and PR revision measurement |
 | Revision execution or shard validation | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
@@ -16,7 +17,7 @@
 | Go module, its rules or its workflow | Go validation |
 | Shared golden vectors (`conformance/vectors/`) | Rust and Go validation |
 
-An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
+An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust, C++ and Go)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
@@ -64,7 +65,7 @@ The Rust lint job tests the library's native `trace` hooks. It also runs Clippy 
 
 ### Implementation harness
 
-The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production implementation and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke plan and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
+The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production implementation and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke plan and generates a partial report. The same job checks the Go worker in scalar and SIMD builds and runs the Go smoke cases without the clock, checking inputs against the shared digests. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
 
 The job pins Ubuntu 24.04 LTS and the image's Clang. It installs TBB headers only when absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror, which [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296) where the Kernel.org mirror timed out. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata, and unrelated runner repositories cannot block it; retries and step and job timeouts bound the installation.
 

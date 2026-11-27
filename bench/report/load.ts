@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   caseGroup,
+  catalog,
   columnId,
   operationSchema,
   parseColumnId,
@@ -104,7 +105,20 @@ function parseManifest(value: unknown): Manifest {
     )
       throw new Error("invalid column plan");
     assertString(column.adapter);
+    const go =
+      catalog.implementations.find((entry) => entry.id === parsed.implementation)?.adapter === "go";
+    if ((column.adapter === "go") !== go || (go && value.go_build === undefined))
+      throw new Error("missing or incompatible Go column provenance");
     columns.add(column.id);
+  }
+  if (value.go_build !== undefined) {
+    assertObject(value.go_build);
+    assertString(value.go_build.binary_sha256);
+    const info = value.go_build.build_info;
+    assertObject(info);
+    assertString(info.GoVersion);
+    if (!Array.isArray(info.Settings) || !Array.isArray(info.Deps))
+      throw new Error("missing Go build settings or module versions");
   }
   const ids = new Set<string>();
   for (const c of value.cases) {
@@ -154,7 +168,8 @@ function parseManifest(value: unknown): Manifest {
   return value as unknown as Manifest;
 }
 /** Sort memory beyond a million wide records is measured only for Tessera's columns. */
-function requiresMemory(c: Manifest["cases"][number], column: string) {
+function requiresMemory(m: Manifest, c: Manifest["cases"][number], column: string) {
+  if (m.columns.some((entry) => entry.id === column && entry.adapter === "go")) return false;
   if (c.operation.kind !== "sort" || c.len <= 1000000 || c.ty === "u64") return true;
   return parseColumnId(column).implementation === "tessera";
 }
@@ -241,6 +256,7 @@ export function validateRun(dataset: Dataset): void {
       r.build !== build ||
       r.verified !== true ||
       !c?.columns.includes(r.column) ||
+      m.columns.some((entry) => entry.id === r.column && entry.adapter === "go") ||
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);
@@ -262,7 +278,7 @@ export function validateRun(dataset: Dataset): void {
   for (const c of m.cases) {
     if (dataset.partial && !samples.has(measurementId(build, caseId(c), TESSERA))) continue;
     for (const column of c.columns)
-      if (requiresMemory(c, column) && !memories.has(measurementId(build, caseId(c), column)))
+      if (requiresMemory(m, c, column) && !memories.has(measurementId(build, caseId(c), column)))
         throw new Error(`missing memory sample ${build}/${caseId(c)}/${column}`);
   }
 }
@@ -303,6 +319,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       "cxx",
       "native_build",
       "native_sources",
+      "go_build",
     ]) {
       if (!isDeepStrictEqual(memory[field], manifest[field]))
         throw new Error(`memory provenance differs: default/${field}`);

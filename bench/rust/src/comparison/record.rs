@@ -390,3 +390,99 @@ mod tests {
         assert!(nan.order(&other_nan).is_gt());
     }
 }
+/// Hashes logical record fields with their canonical little-endian encoding.
+pub(super) fn input_digest(case: &InputCase) -> u64 {
+    fn digest<T: BenchmarkRecord>(
+        records: &PreparedRecords<T>,
+        bytes: impl Fn(&T, &mut Vec<u8>),
+    ) -> u64 {
+        let mut record = Vec::with_capacity(128);
+        let mut hash = 0xcbf29ce484222325u64;
+        for value in records.original() {
+            record.clear();
+            bytes(value, &mut record);
+            for &byte in &record {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        hash
+    }
+    match CaseInput::new(case) {
+        CaseInput::U32(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U64(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U128(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::F64(v) => digest(&v, |v, b| b.extend(v.to_bits().to_le_bytes())),
+        CaseInput::ReverseU64(v) => digest(&v, |v, b| b.extend(v.0.to_le_bytes())),
+        CaseInput::ReverseF64(v) => digest(&v, |v, b| b.extend(v.0.to_bits().to_le_bytes())),
+        CaseInput::Row32(v) => digest(&v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.row.to_le_bytes());
+        }),
+        CaseInput::Row64(v) => digest(&v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.row.to_le_bytes());
+        }),
+        CaseInput::WideRecord(v) => digest(&v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.payload);
+        }),
+        CaseInput::OwnedRecord(v) => digest(&v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend((v.payload.len() as u64).to_le_bytes());
+            b.extend(v.payload.as_bytes());
+        }),
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::input_digest;
+    use crate::plan::{InputCase, Operation, catalog};
+    use serde_json::{Value, json};
+
+    #[test]
+    fn benchmark_input_vectors() {
+        // All generator branches, both sides of the sorted-tail boundary,
+        // and records long enough to exercise run transitions.
+        let mut pins = Vec::new();
+        for ty in &catalog().types {
+            for distribution in &catalog().distributions {
+                for len in [127, 4097] {
+                    let case = InputCase {
+                        ty: ty.id.clone(),
+                        distribution: distribution.id.clone(),
+                        len,
+                        operation: Operation::default(),
+                    };
+                    pins.push(json!({
+                        "ty": case.ty, "distribution": case.distribution,
+                        "len": len, "seed": 1, "record_bytes": crate::plan::record_bytes(&case.ty),
+                        "fnv1a64": format!("{:016x}", input_digest(&case)),
+                    }));
+                }
+            }
+        }
+        let actual = json!({"schema": 1, "inputs": pins});
+        if let Some(path) = std::env::var_os("TESSERA_WRITE_INPUT_VECTORS") {
+            // Keep one complete case per line so generator changes are reviewable.
+            use std::io::Write;
+            let mut file = std::fs::File::create(path).unwrap();
+            writeln!(file, "{{\"schema\":1,\"inputs\":[").unwrap();
+            let pins = actual["inputs"].as_array().unwrap();
+            for (index, pin) in pins.iter().enumerate() {
+                writeln!(
+                    file,
+                    "  {pin}{}",
+                    if index + 1 == pins.len() { "" } else { "," }
+                )
+                .unwrap();
+            }
+            writeln!(file, "]}}").unwrap();
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conformance/vectors/benchmark-inputs.json");
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(actual, expected);
+    }
+}

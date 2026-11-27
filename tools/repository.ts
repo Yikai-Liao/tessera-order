@@ -5,7 +5,7 @@ import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
 import { readTagNotes, verifyRustRelease } from "../.github/scripts/release.ts";
-import { checkImplementations } from "../bench/release.ts";
+import { checkGoImplementations, checkImplementations } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
@@ -16,13 +16,16 @@ export function repositoryCommands(program: Command) {
     .description("Reproduce harness, change routing, PR title and DCO checks");
   ci.command("check")
     .description("Run comparison harness checks, not a performance experiment")
+    .option("--go", "verify mixed Rust and Go cases without timing")
     .option("--native", "include native adapters and verify sequential linkage (Linux)")
     .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-    .action(async (options: { native?: boolean; out?: string }) => {
+    .action(async (options: { native?: boolean; go?: boolean; out?: string }) => {
       const root = await repositoryRoot();
       const out = resultDirectory(root, options.out);
       await runTask(out, Boolean(program.opts().verbose), () =>
-        checkImplementations(root, out, Boolean(options.native)),
+        options.go
+          ? checkGoImplementations(root, out)
+          : checkImplementations(root, out, Boolean(options.native)),
       );
     });
   ci.command("changes")

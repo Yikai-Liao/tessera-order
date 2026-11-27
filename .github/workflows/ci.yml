@@ -147,7 +147,7 @@ jobs:
           }
 
   comparison:
-    name: Implementation harness (Rust and C++)
+    name: Implementation harness (Rust, C++ and Go)
     needs: changes
     if: needs.changes.outputs.comparison == 'true'
     runs-on: ubuntu-24.04
@@ -193,11 +193,26 @@ jobs:
               -c bench/rust/native/registry.cpp -o "$RUNNER_TEMP/registry.o"
           done
       - run: bun run tools --verbose ci check --native --out bench/results/ci
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.4"
+          cache-dependency-path: bench/go/go.sum
+      - name: Check Go benchmark worker
+        working-directory: bench/go
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./...
+          GOEXPERIMENT=simd go vet ./...
+          GOEXPERIMENT=simd go test ./...
+      - run: bun run tools ci check --go --out bench/results/ci-go
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: comparison-check-log
-          path: bench/results/ci.log
+          path: |
+            bench/results/ci.log
+            bench/results/ci-go.log
           if-no-files-found: ignore
 
 

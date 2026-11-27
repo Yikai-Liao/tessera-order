@@ -10,7 +10,7 @@ import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
-import { compareImplementations, resumeComparison } from "../bench/release.ts";
+import { compareImplementations, includeGoOpponents, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
 import { pairedBudget } from "../bench/statistics.ts";
 import { workingTreeDirty } from "../bench/workspace.ts";
@@ -290,7 +290,10 @@ export function experimentCommands(program: Command) {
           blocks: number;
         },
       ) => {
-        const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
+        const preset = options.plan ?? "smoke";
+        let plan = await loadPlan(preset, selectAxes(options));
+        if (!options.implementations && ["smoke", "release", "parallel"].includes(preset))
+          plan = includeGoOpponents(plan);
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>

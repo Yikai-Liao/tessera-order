@@ -16,13 +16,15 @@ import {
 } from "./session.ts";
 
 /** Persist harmless executable bytes without invoking a compiler or benchmark. */
-async function prepared(directory: string) {
+async function prepared(directory: string, go = false) {
   const source = join(directory, "build");
   await mkdir(source);
   const suffix = process.platform === "win32" ? ".exe" : "";
   await writeFile(join(source, `compare${suffix}`), "compare contents");
   await writeFile(join(source, `memory${suffix}`), "memory contents");
-  const build = await retainBuild(directory, join(source, `compare${suffix}`));
+  const goWorker = go ? join(source, `go-worker${suffix}`) : undefined;
+  if (goWorker) await writeFile(goWorker, "Go worker contents");
+  const build = await retainBuild(directory, join(source, `compare${suffix}`), goWorker);
   await writeFile(join(directory, "plan.json"), JSON.stringify(await loadPlan("smoke")));
   const session: Session = {
     schema: 2,
@@ -54,7 +56,7 @@ test("resume rejects incomplete or altered experiments before execution", async 
   const directory = await mkdtemp(join(tmpdir(), "tessera-invalid-session-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(loadSession(directory), /preparation must finish/);
-  const session = await prepared(directory);
+  const session = await prepared(directory, true);
   for (const path of [join(directory, "plan.json"), ...Object.values(executables(directory))]) {
     const original = await readFile(path);
     await writeFile(path, "changed");

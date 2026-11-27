@@ -91,6 +91,10 @@ test("routing keeps library, comparison and revision checks with their owners", 
     ],
     [["conformance/vectors/ordering.json"], { rust: true, go: true }],
     [
+      ["bench/go/worker_test.go", "conformance/vectors/benchmark-inputs.json"],
+      { comparison: true },
+    ],
+    [
       [
         "bench/rust/native/ips.cpp",
         "bench/rust/src/allocation.rs",

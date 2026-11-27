@@ -5,15 +5,14 @@ import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
 import { computed, onMounted, onUnmounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
 import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
-import type { ComparisonData } from "../../../../bench/tracking/result.ts";
+import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
 import {
   COMPARISON_DATA_URL,
   type ComparisonFigure,
   type ComparisonView,
   comparisonHeadlines,
   comparisonSections,
-  parseComparisonData,
-  parseMarkdownTable,
+  comparisonTable,
 } from "../../comparisonMarkdown.ts";
 import { data as snapshot } from "./comparisonSnapshot.data.ts";
 import { useFigureSelection } from "./figureSelection.ts";
@@ -79,7 +78,7 @@ onMounted(async () => {
     return;
   }
   try {
-    const next = parseComparisonData(await response.json());
+    const next = comparisonSchema.parse(await response.json());
     error.value = "";
     if (!data.value || JSON.stringify(next) !== JSON.stringify(data.value)) data.value = next;
   } catch (cause) {
@@ -104,7 +103,7 @@ const rendered = (operation: string, figure: ComparisonFigure) => {
         ? renderCurves({ ...(figure.chart as CurveChart), id: key })
         : renderRows({ ...(figure.chart as RowChart), id: key }),
     selection: figure.selection,
-    table: parseMarkdownTable(figure.table),
+    table: comparisonTable(figure.table),
   };
 };
 // The overview is the sort ranking; the full page shows each operation's section in order.
@@ -129,41 +128,30 @@ function clearOnEscape(event: KeyboardEvent) {
 
 <template>
   <div ref="root" class="implementation-comparison" :class="{ 'is-strip': view === 'headlines' }">
-    <template v-if="view === 'headlines'">
-      <div v-if="cards.length" class="proof-strip">
-        <a
-          v-for="card in cards"
-          :key="card.id"
-          class="proof-card"
-          :href="withBase(`/benchmarks/implementations#${card.id}`)"
-        >
-          <span class="proof-op">{{ card.headline.operation }}</span>
-          <span class="proof-claim">{{ card.claim }}</span>
-          <span class="proof-metrics">
-            <span class="proof-metric">
-              <strong>{{ card.speedText }}</strong>
-              <span>vs std</span>
-            </span>
-            <span v-if="card.memoryText !== null" class="proof-metric">
-              <strong>{{ card.memoryText }}</strong>
-              <span
-                >extra<template v-if="card.referenceMemoryText !== null">
-                  (vs <span class="nowrap">{{ card.referenceMemoryText }}</span
-                  >)</template
-                ></span
-              >
-            </span>
+    <h2 v-if="view === 'all' && cards.length" id="at-a-glance" class="operation-title" tabindex="-1">At a glance</h2>
+    <div v-if="view !== 'overview' && cards.length" class="cards">
+      <a v-for="card in cards" :key="card.id" class="card"
+        :href="view === 'headlines' ? withBase(`/benchmarks/implementations#${card.id}`) : `#${card.id}`">
+        <span class="card-operation">{{ card.headline.operation }}</span>
+        <span class="card-claim">{{ card.claim }}</span>
+        <span class="card-stats">
+          <span class="card-stat">
+            <strong>{{ card.speedText }}</strong>
+            <span>{{ view === 'headlines' ? 'vs std' : 'speed vs the standard library' }}</span>
           </span>
-        </a>
-      </div>
-      <p class="proof-foot">
-        <template v-if="cards.length"
-          >Measured on Bencher Intel v1 bare metal against Rust &amp; C++ sorts.</template
-        >
-        <template v-else>Live benchmark measurements are published on the comparison page.</template>
-        <a :href="withBase('/benchmarks/implementations')">Full comparison →</a>
-      </p>
-    </template>
+          <span v-if="card.memoryText !== null" class="card-stat">
+            <strong>{{ card.memoryText }}</strong>
+            <span>{{ view === 'headlines' ? 'extra' : 'extra memory' }}<template v-if="card.referenceMemoryText !== null">
+              {{ view === 'headlines' ? ' (vs ' : ', vs ' }}<span class="nowrap">{{ card.referenceMemoryText }}</span>{{ view === 'headlines' ? ')' : '' }}
+            </template></span>
+          </span>
+        </span>
+      </a>
+    </div>
+    <p v-if="view === 'headlines'" class="proof-foot">
+      <span>{{ cards.length ? 'Measured on Bencher Intel v1 bare metal against Rust & C++ sorts.' : 'Live benchmark measurements are published on the comparison page.' }}</span>
+      <a :href="withBase('/benchmarks/implementations')">Full comparison →</a>
+    </p>
     <p v-else-if="error" class="notice" role="alert">{{ error }}</p>
     <p v-else-if="!data" class="notice" role="status">Loading the latest measurements…</p>
     <p v-else-if="!sections.length" class="notice">
@@ -171,26 +159,6 @@ function clearOnEscape(event: KeyboardEvent) {
     </p>
     <template v-else>
       <template v-if="view === 'all'">
-        <h2 v-if="cards.length" id="at-a-glance" class="operation-title" tabindex="-1">At a glance</h2>
-        <div v-if="cards.length" class="headlines">
-          <a v-for="card in cards" :key="card.id" class="headline" :href="`#${card.id}`">
-            <span class="headline-operation">{{ card.headline.operation }}</span>
-            <span class="headline-claim">{{ card.claim }}</span>
-            <span class="headline-stats">
-              <span class="headline-stat">
-                <strong>{{ card.speedText }}</strong>
-                <span>speed vs the standard library</span>
-              </span>
-              <span v-if="card.memoryText !== null" class="headline-stat">
-                <strong>{{ card.memoryText }}</strong>
-                <span>extra memory<template v-if="card.referenceMemoryText !== null"
-                    >, vs
-                    <span class="nowrap">{{ card.referenceMemoryText }}</span></template
-                  ></span>
-              </span>
-            </span>
-          </a>
-        </div>
         <p class="lead">
           <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,
           and further right is faster. Speed is relative to the reference the figure names, so 2× takes
@@ -292,73 +260,6 @@ function clearOnEscape(event: KeyboardEvent) {
   max-width: 100%;
   margin: 8px 0 32px;
 }
-.proof-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-@media (max-width: 959px) {
-  .proof-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 559px) {
-  .proof-strip {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.proof-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 18px;
-  border: 1px solid var(--tsr-line);
-  border-radius: 12px;
-  background: var(--tsr-panel);
-  color: var(--vp-c-text-1);
-  text-decoration: none;
-  transition:
-    border-color 0.2s ease,
-    transform 0.15s ease;
-}
-.proof-card:hover {
-  border-color: var(--vp-c-brand-1);
-  transform: translateY(-1px);
-}
-.proof-op {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.proof-claim {
-  color: var(--vp-c-brand-1);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-.proof-metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-top: 8px;
-}
-.proof-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.proof-metric strong {
-  color: var(--vp-c-text-1);
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-.proof-metric span {
-  color: var(--vp-c-text-2);
-  font-size: 12px;
-  line-height: 1.35;
-}
 .proof-foot {
   display: flex;
   flex-wrap: wrap;
@@ -380,18 +281,18 @@ function clearOnEscape(event: KeyboardEvent) {
   line-height: 1.3;
   font-weight: 600;
 }
-.headlines {
+.cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin: 16px 0 24px;
 }
 @media (max-width: 639px) {
-  .headlines {
+  .cards {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.headline {
+.card {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -404,43 +305,43 @@ function clearOnEscape(event: KeyboardEvent) {
   overflow-wrap: anywhere;
   transition: border-color 0.2s;
 }
-.headline:hover {
+.card:hover {
   border-color: var(--vp-c-brand-1);
 }
-.headline-operation {
+.card-operation {
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
 }
-.headline-claim {
+.card-claim {
   color: var(--vp-c-brand-1);
   font-size: 14px;
   font-weight: 600;
 }
-.headline-stats {
+.card-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin: 12px 0 0;
 }
-.headline-stat {
+.card-stat {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.headline-stat strong {
+.card-stat strong {
   color: var(--vp-c-brand-1);
   font-size: 30px;
   font-weight: 600;
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
-.headline-stat span {
+.card-stat span {
   color: var(--vp-c-text-2);
   font-size: 13px;
   line-height: 1.45;
 }
-.headline-stat .nowrap {
+.card-stat .nowrap {
   white-space: nowrap;
 }
 .subject {
@@ -629,4 +530,15 @@ function clearOnEscape(event: KeyboardEvent) {
   color: var(--vp-c-text-2);
   font-size: 14px;
 }
+.is-strip .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.is-strip .card { gap: 4px; padding: 16px 18px; transition: border-color 0.2s ease, transform 0.15s ease; }
+.is-strip .card:hover { transform: translateY(-1px); }
+.is-strip .card-operation { font-size: 14px; }
+.is-strip .card-claim { font-size: 12px; line-height: 1.35; }
+.is-strip .card-stats { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px; }
+.is-strip .card-stat { gap: 1px; }
+.is-strip .card-stat strong { color: var(--vp-c-text-1); font-size: 22px; font-weight: 700; }
+.is-strip .card-stat span { font-size: 12px; line-height: 1.35; }
+@media (max-width: 959px) { .is-strip .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 559px) { .is-strip .cards { grid-template-columns: minmax(0, 1fr); } }
 </style>

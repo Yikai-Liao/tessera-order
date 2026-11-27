@@ -22,8 +22,13 @@ export function chosenBlockSize(records: number, buckets: number, recordBytes: n
   );
 }
 
-export function blockPartitionMemory(records: number, buckets: number, recordBytes: number) {
-  const blockSize = chosenBlockSize(records, buckets, recordBytes);
+/** Memory at a candidate block size, or at the engine's chosen size when omitted. */
+export function blockPartitionMemory(
+  records: number,
+  buckets: number,
+  recordBytes: number,
+  blockSize = chosenBlockSize(records, buckets, recordBytes),
+) {
   const scratchBytes = 2 * buckets * blockSize * recordBytes;
   const ledgerBytes = (DESCRIPTOR_BYTES * records) / blockSize;
   const totalBytes = scratchBytes + ledgerBytes;

@@ -3,6 +3,7 @@
 import { computed, ref } from "vue";
 import {
   balancedBlockSize,
+  blockPartitionMemory,
   formatBytesBinary as bytes,
   chosenBlockSize,
   DESCRIPTOR_BYTES,
@@ -17,12 +18,13 @@ const radix = ref(8);
 
 const n = computed(() => Math.round(10 ** logN.value));
 const R = computed(() => 2 ** radix.value);
-const scratch = (b: number) => 2 * R.value * b * recordBytes.value;
-const tables = (b: number) => (DESCRIPTOR_BYTES * n.value) / b;
-const total = (b: number) => scratch(b) + tables(b);
+const memory = (b: number) => blockPartitionMemory(n.value, R.value, recordBytes.value, b);
+const scratch = (b: number) => memory(b).scratchBytes;
+const tables = (b: number) => memory(b).ledgerBytes;
+const total = (b: number) => memory(b).totalBytes;
 const balanced = computed(() => balancedBlockSize(n.value, R.value, recordBytes.value));
 const chosen = computed(() => chosenBlockSize(n.value, R.value, recordBytes.value));
-const lsdBuffer = computed(() => n.value * recordBytes.value);
+const lsdBuffer = computed(() => memory(chosen.value).lsdBytes);
 
 // Log-log axes: both cost terms are straight lines and the total is a V.
 const W = 640;

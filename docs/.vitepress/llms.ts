@@ -7,18 +7,22 @@
  * page-summary table), and sections group automatically by path and chapter.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import type { HeadConfig } from "vitepress";
-import { COMPARISON_DATA_URL, type ComparisonView } from "./comparisonMarkdown.ts";
+import { parseHTML } from "linkedom";
+import { createLogger } from "vite";
+import { createMarkdownRenderer, type HeadConfig, type PageData, resolvePages } from "vitepress";
+import { COMPARISON_DATA_URL, type ComparisonView, markdownTable } from "./comparisonMarkdown.ts";
+
+import { scenarios } from "./theme/sim/pipeline.ts";
 
 export const REPOSITORY_URL = "https://github.com/Yikai-Liao/tessera-order";
 export const HISTORY_DATA_URL = `${REPOSITORY_URL}/tree/benchmark-data/tessera`;
 const DEFAULT_ORIGIN = "https://yikai-liao.github.io";
 const DEFAULT_DESC = "Stable radix ordering with O(√n) auxiliary memory.";
 
-export const SHARED_PAGES = new Set([
+const SHARED_PAGES = new Set([
   "conformance/semantics.md",
   "ROADMAP.md",
   "RELEASING.md",
@@ -30,19 +34,13 @@ const VUE_TAG_RE = /^<([A-Z][A-Za-z0-9]*)(?:\s+([^>]*?))?\s*\/?>(?:\s*<\/\1>)?$/
 const NOISE_LINE_RE =
   /^(?:<!--\s*SPDX-License-Identifier:[^>]*-->|<\/?div\b[^>]*>|<a\s+id="[^"]*"\s*>\s*<\/a>)$/i;
 
-export type ComparisonRenderer = (view: ComparisonView) => string | null | undefined;
-export type ResolvedRepositoryLink =
-  | { kind: "page"; sitePath: string; anchor: string }
-  | { kind: "repository"; repoPath: string; entryKind: "blob" | "tree"; anchor: string }
-  | { kind: "passthrough" };
-
-export const isPage = (repoPath: string): boolean =>
+const isPage = (repoPath: string): boolean =>
   repoPath.endsWith(".md") &&
   !NOT_PAGES.has(repoPath) &&
   (SHARED_PAGES.has(repoPath) ||
     (repoPath.startsWith("docs/") && !repoPath.startsWith("docs/.vitepress/")));
 
-export const sitePath = (repoPath: string): string =>
+const sitePath = (repoPath: string): string =>
   (repoPath.startsWith("docs/") ? repoPath.slice(5) : repoPath).replace(
     /(^|\/)README\.md$/,
     "$1index.md",
@@ -55,214 +53,106 @@ export function canonicalSiteUrl(docsBase = "/tessera-order/"): string {
   return `${DEFAULT_ORIGIN}${path === "//" ? "/" : path}`;
 }
 
-export function discoverSitePages(repoRoot: string) {
-  const allMarkdown: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir)) {
-      if (entry === "node_modules" || entry === "target" || entry.startsWith(".git")) continue;
-      const full = join(dir, entry);
-      if (statSync(full).isDirectory()) {
-        if (entry !== ".vitepress") walk(full);
-      } else if (entry.endsWith(".md")) {
-        allMarkdown.push(relative(repoRoot, full).split(sep).join("/"));
-      }
-    }
+export async function discoverSitePages(repoRoot: string) {
+  // Use VitePress's discovery and exclusions for both HTML and Markdown exports.
+  const { pages: allMarkdown } = await resolvePages(
+    repoRoot,
+    { srcExclude: ["target/**", ".*/**"] },
+    createLogger(),
+  );
+  const pages = await Promise.all(
+    allMarkdown.filter(isPage).map(async (sourcePath) => {
+      const raw = await readFile(resolve(repoRoot, sourcePath), "utf8");
+      return { sourcePath, sitePath: sitePath(sourcePath), ...(await extractPageMetadata(raw)) };
+    }),
+  );
+  return {
+    pages,
+    sitePageSet: new Set(pages.map((p) => p.sitePath)),
+    rewrites: Object.fromEntries(pages.map((p) => [p.sourcePath, p.sitePath])),
+    srcExclude: ["target/**", ".*/**", ...allMarkdown.filter((path) => !isPage(path))],
   };
-  walk(repoRoot);
-  allMarkdown.sort();
-
-  const pages: { sourcePath: string; sitePath: string }[] = [];
-  const sitePageSet = new Set<string>();
-  const rewrites: Record<string, string> = {};
-  const srcExclude: string[] = [];
-  for (const repoPath of allMarkdown) {
-    if (isPage(repoPath)) {
-      const served = sitePath(repoPath);
-      pages.push({ sourcePath: repoPath, sitePath: served });
-      sitePageSet.add(served);
-      if (served !== repoPath) rewrites[repoPath] = served;
-    } else srcExclude.push(repoPath);
-  }
-  return { allMarkdown, pages, sitePageSet, rewrites, srcExclude };
 }
 
+/** Resolve existing repository targets to site paths or GitHub; leave missing targets to VitePress. */
 export function resolveRepositoryLink(
   repoRoot: string,
   sourceAbsPath: string,
   href: string,
-): ResolvedRepositoryLink {
-  if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") || href.startsWith("/")) {
-    return { kind: "passthrough" };
-  }
+): string {
+  if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") || href.startsWith("/"))
+    return href;
   const [rawPath, hash] = href.split("#", 2);
-  const anchor = hash !== undefined ? `#${hash}` : "";
-  if (!rawPath) return { kind: "passthrough" };
+  const anchor = hash === undefined ? "" : `#${hash}`;
   let decoded: string;
   try {
     decoded = decodeURIComponent(rawPath);
   } catch {
-    return { kind: "passthrough" };
+    return href;
   }
   const target = resolve(dirname(sourceAbsPath), decoded);
   const rel = relative(repoRoot, target).split(sep).join("/");
-  if (rel.startsWith("..") || !existsSync(target)) return { kind: "passthrough" };
-  if (isPage(rel)) return { kind: "page", sitePath: sitePath(rel), anchor };
-  return {
-    kind: "repository",
-    repoPath: rel,
-    entryKind: statSync(target).isDirectory() ? "tree" : "blob",
-    anchor,
-  };
+  if (rel.startsWith("..") || !existsSync(target)) return href;
+  if (isPage(rel)) return `/${sitePath(rel)}${anchor}`;
+  return `${REPOSITORY_URL}/${statSync(target).isDirectory() ? "tree" : "blob"}/main/${rel}${anchor}`;
 }
 
-export const formatRepositoryUrl = (
-  r: Extract<ResolvedRepositoryLink, { kind: "repository" }>,
-): string => `${REPOSITORY_URL}/${r.entryKind}/main/${r.repoPath}${r.anchor}`;
+let renderer: ReturnType<typeof createMarkdownRenderer> | undefined;
 
-function parseFrontmatter(raw: string) {
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!m) return { fm: {} as Record<string, string>, body: raw };
-  const fm: Record<string, string> = {};
-  let prefix = "";
-  for (const line of m[1].split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const kv = t.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!kv) continue;
-    const indent = line.length - line.trimStart().length;
-    if (indent === 0) {
-      prefix = kv[2] ? "" : `${kv[1]}.`;
-      if (kv[2]) fm[kv[1]] = kv[2].trim().replace(/^(['"])(.*)\1$/, "$2");
-    } else if (prefix && indent === 2 && kv[2]) {
-      fm[`${prefix}${kv[1]}`] = kv[2].trim().replace(/^(['"])(.*)\1$/, "$2");
-    }
-  }
-  return { fm, body: raw.slice(m[0].length) };
-}
-
-function scanLines(body: string, visit: (line: string, kind: "code" | "script" | "prose") => void) {
-  let fence: { char: string; len: number } | null = null;
-  let inScript = false;
-  let prevBlank = true;
-  let inIndented = false;
-  for (const line of body.split(/\r?\n/)) {
-    const t = line.trim();
-    if (fence) {
-      visit(line, "code");
-      const close = t.match(/^(`{3,}|~{3,})\s*$/);
-      if (close && close[1][0] === fence.char && close[1].length >= fence.len) fence = null;
-      prevBlank = false;
-    } else if (inScript) {
-      visit(line, "script");
-      if (/<\/script\s*>/i.test(t)) inScript = false;
-    } else if (/^\s*(`{3,}|~{3,})/.test(line)) {
-      const open = line.match(/^\s*(`{3,}|~{3,})/)!;
-      fence = { char: open[1][0], len: open[1].length };
-      visit(line, "code");
-      prevBlank = inIndented = false;
-    } else if (!t) {
-      visit(line, "prose");
-      prevBlank = true;
-      inIndented = false;
-    } else if ((prevBlank || inIndented) && (line.startsWith("\t") || line.startsWith("    "))) {
-      inIndented = true;
-      visit(line, "code");
-      prevBlank = false;
-    } else {
-      inIndented = false;
-      if (/^<script\b/i.test(t)) {
-        visit(line, "script");
-        if (!/<\/script\s*>/i.test(t)) inScript = true;
-      } else {
-        visit(line, "prose");
-        prevBlank = false;
-      }
-    }
-  }
-}
-
-function stripInline(text: string): string {
-  const codes: string[] = [];
-  return text
-    .replace(/`([^`]+)`/g, (_m, s: string) => `\uE000${codes.push(s) - 1}\uE001`)
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*/g, "$1$2$3")
-    .replace(/(^|\W)_([^_]+)_(?=\W|$)/g, "$1$2")
-    .replace(/<\/?[a-zA-Z][^>]*>/g, "")
-    .replace(/\uE000(\d+)\uE001/g, (_m, i: string) => codes[Number(i)] ?? "")
+/** VitePress owns frontmatter, heading and paragraph syntax; keep the raw body for mirrors. */
+async function parsePage(raw: string) {
+  renderer ??= createMarkdownRenderer(process.cwd());
+  const md = await renderer;
+  const env: {
+    content?: string;
+    title?: string;
+    frontmatter?: {
+      title?: string;
+      description?: string;
+      hero?: { name?: string; text?: string; tagline?: string };
+    };
+  } = {};
+  const { document } = parseHTML(md.render(raw, env));
+  const fm = env.frontmatter ?? {};
+  const hero = [fm.hero?.name, fm.hero?.text].filter(Boolean).join(" — ");
+  const paragraph = [...document.querySelectorAll("p")].find(
+    (p) =>
+      !p.closest("li, blockquote, table") &&
+      !(p.textContent!.endsWith(":") && p.textContent!.length < 60),
+  );
+  const description = String(
+    fm.description || fm.hero?.tagline || paragraph?.textContent || DEFAULT_DESC,
+  )
     .replace(/\s+/g, " ")
     .trim();
+  return {
+    md,
+    fm,
+    body: env.content ?? raw,
+    title: String(fm.title || env.title || hero || "Tessera"),
+    description:
+      description.length <= 240
+        ? description
+        : `${description.slice(0, 240).replace(/\s+\S*$/, "")}…`,
+  };
 }
 
-export function extractPageMetadata(raw: string, fallback = "Tessera") {
-  const { fm, body } = parseFrontmatter(raw);
-  let heading = "";
-  let firstPara = "";
-  const buf: string[] = [];
-  const flush = () => {
-    if (!firstPara && buf.length) {
-      const plain = stripInline(buf.join(" "));
-      if (plain && !(plain.endsWith(":") && plain.length < 60)) firstPara = plain;
-    }
-    buf.length = 0;
-  };
-  scanLines(body, (line, kind) => {
-    const t = line.trim();
-    if (kind !== "prose" || !t || NOISE_LINE_RE.test(t) || VUE_TAG_RE.test(t)) return flush();
-    if (t.startsWith("# ")) {
-      flush();
-      if (!heading) heading = stripInline(t.slice(2));
-    } else if (/^(?:#{1,6}\s|[-*+]\s|\d+\.\s|[-*_]{3,}$|[|>]|\$\$)/.test(t)) {
-      flush();
-    } else if (!firstPara) buf.push(t);
-  });
-  flush();
-
-  const hero =
-    fm["hero.name"] && fm["hero.text"]
-      ? `${fm["hero.name"]} — ${fm["hero.text"]}`
-      : fm["hero.name"];
-  const title = fm.title || heading || hero || fallback;
-  const rawDesc = fm.description || fm["hero.tagline"] || firstPara || DEFAULT_DESC;
-  const description =
-    rawDesc.length <= 240
-      ? rawDesc
-      : (() => {
-          const s = rawDesc.slice(0, 240);
-          const dot = s.lastIndexOf(". ");
-          if (dot >= 120) return s.slice(0, dot + 1);
-          const sp = s.lastIndexOf(" ");
-          return `${(sp > 0 ? s.slice(0, sp) : s).trimEnd()}…`;
-        })();
+export async function extractPageMetadata(raw: string) {
+  const { title, description } = await parsePage(raw);
   return { title, description };
 }
 
-export function buildPageHeadMeta(p: {
-  relativePath: string;
-  filePath: string;
-  title: string;
-  description: string;
-  frontmatter: Record<string, unknown>;
-  srcDir: string;
-  siteUrl: string;
-}): { description: string; head: HeadConfig[] } {
-  let description = p.description?.trim() ?? "";
-  let title = p.title?.trim() ?? "";
-  if ((!description || !title) && p.filePath) {
-    const abs = resolve(p.srcDir, p.filePath);
-    if (existsSync(abs)) {
-      const meta = extractPageMetadata(readFileSync(abs, "utf8"), title || "Tessera");
-      description ||= meta.description;
-      title ||= meta.title;
-    }
-  }
-  description ||= DEFAULT_DESC;
-
-  const canonical = `${p.siteUrl}${p.relativePath.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, "")}`;
-  const isHome = p.relativePath === "index.md";
+export async function addPageMetadata(page: PageData, repoRoot: string, siteUrl: string) {
+  const { title, description } = await extractPageMetadata(
+    readFileSync(resolve(repoRoot, page.filePath), "utf8"),
+  );
+  const canonical = `${siteUrl}${page.relativePath.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, "")}`;
+  const isHome = page.relativePath === "index.md";
   const ogTitle =
     isHome || !title || title === "Tessera" ? title || "Tessera" : `${title} | Tessera`;
-  const head = Array.isArray(p.frontmatter.head) ? ([...p.frontmatter.head] as HeadConfig[]) : [];
+  const head = Array.isArray(page.frontmatter.head)
+    ? ([...page.frontmatter.head] as HeadConfig[])
+    : [];
   const add = (tag: string, attrs: Record<string, string>, matchKey: string) => {
     if (!head.some(([t, a]) => t === tag && a[matchKey] === attrs[matchKey]))
       head.push([tag, attrs]);
@@ -270,138 +160,184 @@ export function buildPageHeadMeta(p: {
   add("link", { rel: "canonical", href: canonical }, "rel");
   add(
     "link",
-    { rel: "alternate", type: "text/markdown", href: `${p.siteUrl}${p.relativePath}` },
+    { rel: "alternate", type: "text/markdown", href: `${siteUrl}${page.relativePath}` },
     "type",
   );
   add("meta", { property: "og:title", content: ogTitle }, "property");
   add("meta", { property: "og:description", content: description }, "property");
   add("meta", { property: "og:url", content: canonical }, "property");
   add("meta", { property: "og:type", content: isHome ? "website" : "article" }, "property");
-  return { description, head };
+  page.description = description;
+  page.frontmatter.head = head;
 }
 
-export function renderPageMarkdown(p: {
+export async function renderPageMarkdown(p: {
   raw: string;
   sourceAbsPath: string;
   repoRoot: string;
   siteUrl: string;
   sitePages: ReadonlySet<string>;
-  renderComparison?: ComparisonRenderer;
-}): string {
-  const { fm, body } = parseFrontmatter(p.raw);
+  renderComparison?: (view: ComparisonView) => string;
+}): Promise<string> {
+  const { md, fm, body } = await parsePage(p.raw);
   const out: string[] = [];
-  if (fm["hero.name"] || fm["hero.text"]) {
+  if (fm.hero) {
     out.push(
-      `# ${fm["hero.name"] && fm["hero.text"] ? `${fm["hero.name"]} — ${fm["hero.text"]}` : fm["hero.name"] || fm["hero.text"]}`,
+      `# ${[fm.hero.name, fm.hero.text].filter(Boolean).join(" — ")}`,
+      "",
+      fm.hero.tagline ?? "",
+      "",
     );
-    if (fm["hero.tagline"]) out.push("", fm["hero.tagline"]);
-    out.push("");
   }
 
   const rewriteHref = (href: string) => {
-    if (href.startsWith("/") && !href.startsWith("//")) {
-      const [rawPath, hash] = href.slice(1).split("#", 2);
-      const candidates = !rawPath
-        ? ["index.md"]
-        : rawPath.endsWith("/")
-          ? [`${rawPath}index.md`]
-          : rawPath.endsWith(".md")
-            ? [rawPath]
-            : [`${rawPath}.md`, `${rawPath}/index.md`];
-      const hit = candidates.find((c) => p.sitePages.has(c));
-      if (hit) return `${p.siteUrl}${hit}${hash !== undefined ? `#${hash}` : ""}`;
-    }
-    const r = resolveRepositoryLink(p.repoRoot, p.sourceAbsPath, href);
-    if (r.kind === "page") return `${p.siteUrl}${r.sitePath}${r.anchor}`;
-    if (r.kind === "repository") return formatRepositoryUrl(r);
-    return href;
+    const resolved = resolveRepositoryLink(p.repoRoot, p.sourceAbsPath, href);
+    if (!resolved.startsWith("/") || resolved.startsWith("//")) return resolved;
+    const [path, hash] = resolved.slice(1).split("#", 2);
+    const candidates = !path
+      ? ["index.md"]
+      : path.endsWith("/")
+        ? [`${path}index.md`]
+        : path.endsWith(".md")
+          ? [path]
+          : [`${path}.md`, `${path}/index.md`];
+    const hit = candidates.find((c) => p.sitePages.has(c));
+    return hit ? `${p.siteUrl}${hit}${hash === undefined ? "" : `#${hash}`}` : resolved;
   };
-  const wrap = (d: string) =>
-    d.startsWith("<") && d.endsWith(">") ? `<${rewriteHref(d.slice(1, -1))}>` : rewriteHref(d);
-
-  scanLines(body, (line, kind) => {
-    if (kind === "script") return;
-    if (kind === "code") return void out.push(line);
-    const t = line.trim();
-    if (NOISE_LINE_RE.test(t)) return;
-    const vue = t.match(VUE_TAG_RE);
-    if (vue) {
-      if (vue[1] === "ImplementationComparison") {
-        const view =
-          (vue[2]?.match(/\bview\s*=\s*["'](headlines|overview|all)["']/)?.[1] as
-            | ComparisonView
-            | undefined) ?? "all";
-        const rendered = p.renderComparison?.(view)?.trim();
-        if (rendered) out.push(rendered);
-        else if (view !== "headlines")
-          out.push(`Live benchmark comparison data: [comparison.json](${COMPARISON_DATA_URL}).`);
-      } else if (vue[1] === "PerformanceHistory") {
-        out.push(
-          `Interactive main-branch benchmark history data: [benchmark-data/tessera](${HISTORY_DATA_URL}).`,
-        );
+  const env = {};
+  const tokens = md.parse(body, env);
+  const lines = body.split("\n");
+  const protectedLines = new Set<number>();
+  for (const token of tokens) {
+    if (
+      !token.map ||
+      !["fence", "code_block", "math_block", "html_block", "html_inline"].includes(token.type)
+    )
+      continue;
+    for (let i = token.map[0]; i < token.map[1]; i++) protectedLines.add(i);
+  }
+  // Repository prose uses one-line paragraphs. Parse destinations on those lines,
+  // including reference definitions, and patch only their source spans. This keeps
+  // code, inline examples and raw LaTeX intact without a Markdown serializer.
+  const parseDestination = md.helpers.parseLinkDestination;
+  try {
+    for (let i = 0; i < lines.length; i++) {
+      if (protectedLines.has(i)) continue;
+      const line = lines[i];
+      const edits = new Map<number, { end: number; text: string }>();
+      md.helpers.parseLinkDestination = (source, start, end) => {
+        const result = parseDestination(source, start, end);
+        const offset = line.indexOf(source.trimEnd());
+        if (result.ok && offset >= 0) {
+          const href = rewriteHref(result.str);
+          if (href !== result.str)
+            edits.set(offset + start, {
+              end: offset + result.pos,
+              text: source[start] === "<" ? `<${href}>` : href,
+            });
+        }
+        return result;
+      };
+      md.parseInline(line, env);
+      md.block.parse(line, md, {}, []);
+      for (const [start, edit] of [...edits].sort(([a], [b]) => b - a)) {
+        lines[i] = lines[i].slice(0, start) + edit.text + lines[i].slice(edit.end);
       }
-      return;
     }
-    const refDef = line.match(/^(\s*\[[^\]]+\]:\s*)(<[^>]+>|\S+)(\s*.*)$/);
-    out.push(
-      refDef
-        ? `${refDef[1]}${wrap(refDef[2])}${refDef[3]}`
-        : line.replace(
-            /(`+)[^\n]*?\1|(\[(?:[^[\]`]|`[^`]*`|\[[^\]]*\])*\])\((<[^>]+>|[^()\s]+(?:\([^()\s]*\)[^()\s]*)*)([^)]*)\)/g,
-            (full, ticks, label, dest, tail) => (ticks ? full : `${label}(${wrap(dest)}${tail})`),
-          ),
+  } finally {
+    md.helpers.parseLinkDestination = parseDestination;
+  }
+  for (const token of tokens) {
+    if (!token.map || !["html_block", "html_inline"].includes(token.type)) continue;
+    const [start, end] = token.map;
+    const html = token.content.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, (script) =>
+      script.replace(/[^\n]/g, ""),
     );
-  });
+    const htmlLines = html.split("\n");
+    for (let i = start; i < end; i++) {
+      const tag = (htmlLines[i - start] ?? "").trim();
+      if (!tag || NOISE_LINE_RE.test(tag)) {
+        lines[i] = "";
+        continue;
+      }
+      const vue = tag.match(VUE_TAG_RE);
+      if (!vue) continue;
+      let replacement = "";
+      if (vue[1] === "ImplementationComparison") {
+        const view = (vue[2]?.match(/\bview\s*=\s*["'](headlines|overview|all)["']/)?.[1] ??
+          "all") as ComparisonView;
+        replacement =
+          p.renderComparison?.(view)?.trim() ||
+          (view === "headlines"
+            ? ""
+            : `Live benchmark comparison data: [comparison.json](${COMPARISON_DATA_URL}).`);
+      } else if (vue[1] === "PipelineMap") {
+        replacement = markdownTable(
+          ["Workload", "Runs", "Skips", "Extra memory (vs LSD buffer)"],
+          scenarios.map((s) => [s.label, s.runs, s.skips, s.memory]),
+        );
+      } else if (vue[1] === "PerformanceHistory") {
+        replacement = `Interactive main-branch benchmark history data: [benchmark-data/tessera](${HISTORY_DATA_URL}).`;
+      }
+      lines[i] = replacement;
+    }
+  }
+  out.push(...lines);
   return `${out
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()}\n`;
 }
 
-type Page = { sitePath: string; title: string; description: string; markdown: string };
+type SitePage = Awaited<ReturnType<typeof discoverSitePages>>["pages"][number];
 
-function groupPages(pages: readonly Page[]) {
-  const rank = (s: string) =>
-    s === "index.md"
-      ? 0
-      : s.startsWith("guide/")
-        ? 1
-        : s.startsWith("conformance/")
-          ? 2
-          : s === "benchmarks/implementations.md"
-            ? 3
-            : s.startsWith("benchmarks/")
-              ? 4
-              : -1;
-  const chapter = (p: Page) =>
-    p.sitePath === "explain/index.md" ? 0 : Number(p.title.match(/^(\d+)\./)?.[1] ?? 999);
-  return {
-    using: pages
-      .filter((p) => rank(p.sitePath) >= 0)
-      .sort((a, b) => rank(a.sitePath) - rank(b.sitePath) || a.sitePath.localeCompare(b.sitePath)),
-    explain: pages
-      .filter((p) => p.sitePath.startsWith("explain/"))
-      .sort((a, b) => chapter(a) - chapter(b) || a.sitePath.localeCompare(b.sitePath)),
-    optional: pages
-      .filter((p) => rank(p.sitePath) < 0 && !p.sitePath.startsWith("explain/"))
-      .sort((a, b) => a.sitePath.localeCompare(b.sitePath)),
+/** Path groups are shared by navigation and AI bundles; chapter order comes from page titles. */
+export function pageSections<P extends SitePage>(pages: readonly P[]) {
+  const group = (p: SitePage) => {
+    const path = p.sitePath;
+    if (path === "index.md") return "home";
+    if (/^(guide|conformance)\//.test(path)) return "guide";
+    if (path.startsWith("benchmarks/")) return "benchmarks";
+    if (path.startsWith("explain/")) return "explain";
+    if (/proposal|python-binding|ROADMAP/.test(path)) return "proposals";
+    return path.startsWith("design/") ? "design" : "development";
   };
+  const order = (p: SitePage) =>
+    p.sitePath.endsWith("/index.md") ? 0 : Number(p.title.match(/^(\d+)\./)?.[1] ?? 999);
+  return [
+    ["home", "Overview"],
+    ["guide", "User guide"],
+    ["benchmarks", "Benchmarks"],
+    ["explain", "How Tessera works"],
+    ["design", "Engine & Architecture"],
+    ["development", "Contributor Guides"],
+    ["proposals", "Proposals & Roadmap"],
+  ].map(([id, text]) => ({
+    id,
+    text,
+    pages: pages
+      .filter((p) => group(p) === id)
+      .sort((a, b) =>
+        id === "benchmarks"
+          ? a.sitePath.localeCompare(b.sitePath)
+          : order(a) - order(b) || a.sitePath.localeCompare(b.sitePath),
+      ),
+  }));
 }
 
 export async function exportLlmsArtifacts(opts: {
   repoRoot: string;
   outDir: string;
   siteUrl: string;
-  catalog?: ReturnType<typeof discoverSitePages>;
-  renderComparison?: ComparisonRenderer;
+  catalog: Awaited<ReturnType<typeof discoverSitePages>>;
+  renderComparison?: (view: ComparisonView) => string;
 }) {
-  const catalog = opts.catalog ?? discoverSitePages(opts.repoRoot);
-  const pages: Page[] = await Promise.all(
+  const catalog = opts.catalog;
+  const pages = await Promise.all(
     catalog.pages.map(async (entry) => {
       const sourceAbsPath = resolve(opts.repoRoot, entry.sourcePath);
       const raw = await readFile(sourceAbsPath, "utf8");
-      const meta = extractPageMetadata(raw, entry.sitePath);
-      const markdown = renderPageMarkdown({
+      const markdown = await renderPageMarkdown({
         raw,
         sourceAbsPath,
         repoRoot: opts.repoRoot,
@@ -412,44 +348,50 @@ export async function exportLlmsArtifacts(opts: {
       const dest = join(opts.outDir, entry.sitePath);
       await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, markdown, "utf8");
-      return { sitePath: entry.sitePath, ...meta, markdown };
+      return { ...entry, markdown };
     }),
   );
 
-  const { using, explain, optional } = groupPages(pages);
+  const sections = pageSections(pages);
+  const using = sections
+    .filter((s) => ["home", "guide", "benchmarks"].includes(s.id))
+    .flatMap((s) => s.pages);
+  const explain = sections.find((s) => s.id === "explain")!.pages;
+  const optional = sections
+    .filter((s) => ["design", "development", "proposals"].includes(s.id))
+    .flatMap((s) => s.pages);
   const firstSentence = (s: string) => {
     const m = s.match(/^(.+?[.!?])(?:\s|$)/);
     return m && m[1].length >= 25 ? m[1] : s;
   };
-  const item = (p: Page) =>
+  const item = (p: SitePage) =>
     `- [${p.title}](${opts.siteUrl}${p.sitePath}): ${firstSentence(p.description)}`;
-  const bundle = (title: string, summary: string, list: readonly Page[]) =>
+  const bundle = (title: string, summary: string, list: typeof pages) =>
     [
       `# ${title}\n\n> ${summary}`,
       ...list.map((p) => `---\n\nSource: ${opts.siteUrl}${p.sitePath}\n\n${p.markdown.trim()}`),
     ].join("\n\n") + "\n";
 
-  const llmsTxt = `${[
-    "# Tessera",
-    "",
-    `> ${DEFAULT_DESC}`,
-    "",
-    `For single-fetch AI consumption, use [llms-full.txt](${opts.siteUrl}llms-full.txt) (user guide, semantics, benchmarks, and overview) or [llms-explain.txt](${opts.siteUrl}llms-explain.txt) (algorithm deep-dive in reading order). Every page is also published as clean Markdown at its \`.md\` URL below.`,
-    "",
-    "## Using Tessera",
-    "",
-    ...using.map(item),
-    "",
-    "## How Tessera Works",
-    "",
-    ...explain.map(item),
-    "",
-    "## Optional",
-    "",
-    "Internal contributor documentation, benchmark engineering notes, and unimplemented design proposals. External integration agents can skip this section.",
-    "",
-    ...optional.map(item),
-  ].join("\n")}\n`;
+  const llmsTxt = `# Tessera
+
+> ${DEFAULT_DESC}
+
+For single-fetch AI consumption, use [llms-full.txt](${opts.siteUrl}llms-full.txt) (user guide, semantics, benchmarks, and overview) or [llms-explain.txt](${opts.siteUrl}llms-explain.txt) (algorithm deep-dive in reading order). Every page is also published as clean Markdown at its \`.md\` URL below.
+
+## Using Tessera
+
+${using.map(item).join("\n")}
+
+## How Tessera Works
+
+${explain.map(item).join("\n")}
+
+## Optional
+
+Internal contributor documentation, benchmark engineering notes, and unimplemented design proposals. External integration agents can skip this section.
+
+${optional.map(item).join("\n")}
+`;
 
   const explainOverview = explain.find((p) => p.sitePath === "explain/index.md");
   const llmsFullTxt = bundle(

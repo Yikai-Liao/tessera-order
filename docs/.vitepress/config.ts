@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: BSD-2-Clause
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig, type MarkdownRenderer } from "vitepress";
-import { loadComparisonSnapshot, renderComparisonMarkdown } from "./comparisonMarkdown.ts";
+import { createMarkdownRenderer, defineConfig, type MarkdownRenderer } from "vitepress";
+import { renderComparisonMarkdown } from "./comparisonMarkdown.ts";
 import {
-  buildPageHeadMeta,
+  addPageMetadata,
   canonicalSiteUrl,
   discoverSitePages,
   exportLlmsArtifacts,
-  formatRepositoryUrl,
+  pageSections,
   REPOSITORY_URL,
   resolveRepositoryLink,
 } from "./llms.ts";
+import { loadComparisonSnapshot } from "./theme/components/comparisonSnapshot.data.ts";
 
 // The site renders the Markdown files of the repository in place, so the
 // same files read correctly on GitHub, in an editor, and on the site. Page
@@ -19,7 +20,21 @@ import {
 // share one authority.
 const vitepressDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(vitepressDir, "../..");
-const catalog = discoverSitePages(repoRoot);
+const base = process.env.DOCS_BASE ?? "/";
+const markdown = { math: true, config: repositoryLinks };
+await createMarkdownRenderer(repoRoot, markdown, base);
+const catalog = await discoverSitePages(repoRoot);
+const sections = pageSections(catalog.pages);
+const sidebar = (ids: string[]) =>
+  sections
+    .filter((s) => ids.includes(s.id))
+    .map((s) => ({
+      text: s.text,
+      items: s.pages.map((p) => ({
+        text: p.sitePath === "benchmarks/implementations.md" ? "vs Other Sorts" : p.title,
+        link: `/${p.sitePath.replace(/index\.md$/, "").replace(/\.md$/, "")}`,
+      })),
+    }));
 const siteUrl = canonicalSiteUrl(process.env.DOCS_BASE);
 
 /**
@@ -37,12 +52,7 @@ function repositoryLinks(md: MarkdownRenderer) {
         if (token.type !== "link_open") continue;
         const href = token.attrGet("href");
         if (!href) continue;
-        const resolved = resolveRepositoryLink(repoRoot, source, href);
-        if (resolved.kind === "page") {
-          token.attrSet("href", `/${resolved.sitePath}${resolved.anchor}`);
-        } else if (resolved.kind === "repository") {
-          token.attrSet("href", formatRepositoryUrl(resolved));
-        }
+        token.attrSet("href", resolveRepositoryLink(repoRoot, source, href));
         // A missing target is left alone, so the dead-link check reports it.
       }
     };
@@ -55,7 +65,7 @@ export default defineConfig({
   description: "Stable radix ordering with O(√n) auxiliary memory",
   lang: "en-US",
   // GitHub Pages serves the project under /<repository>/; the workflow sets it.
-  base: process.env.DOCS_BASE ?? "/",
+  base,
   srcDir: "..",
   srcExclude: catalog.srcExclude,
   rewrites: catalog.rewrites,
@@ -64,29 +74,9 @@ export default defineConfig({
   sitemap: {
     hostname: siteUrl,
   },
-  head: [
-    [
-      "link",
-      { rel: "icon", type: "image/svg+xml", href: `${process.env.DOCS_BASE ?? "/"}logo.svg` },
-    ],
-  ],
-  markdown: {
-    math: true,
-    config: repositoryLinks,
-  },
-  transformPageData(pageData, { siteConfig }) {
-    const meta = buildPageHeadMeta({
-      relativePath: pageData.relativePath,
-      filePath: pageData.filePath,
-      title: pageData.title,
-      description: pageData.description,
-      frontmatter: pageData.frontmatter,
-      srcDir: siteConfig.srcDir,
-      siteUrl,
-    });
-    pageData.description = meta.description;
-    pageData.frontmatter.head = meta.head;
-  },
+  head: [["link", { rel: "icon", type: "image/svg+xml", href: `${base}logo.svg` }]],
+  markdown,
+  transformPageData: (page) => addPageMetadata(page, repoRoot, siteUrl),
   async buildEnd(siteConfig) {
     const snapshot = await loadComparisonSnapshot();
     await exportLlmsArtifacts({
@@ -116,33 +106,11 @@ export default defineConfig({
       },
     ],
     sidebar: {
-      "/guide/": guideSidebar(),
-      "/conformance/": guideSidebar(),
-      "/explain/": [
-        {
-          text: "How Tessera works",
-          items: [
-            { text: "Overview", link: "/explain/" },
-            { text: "1. Radix sort in one pass", link: "/explain/radix-sort" },
-            { text: "2. Keys as unsigned integers", link: "/explain/keys" },
-            { text: "3. Routing an input", link: "/explain/routing" },
-            { text: "4. The block partition", link: "/explain/block-partition" },
-            { text: "5. Finishing tiles", link: "/explain/tiles" },
-            { text: "6. Ownership and panics", link: "/explain/safety" },
-            { text: "7. Beyond sorting", link: "/explain/operations" },
-          ],
-        },
-      ],
-      "/benchmarks/": [
-        {
-          text: "Benchmarks",
-          items: [
-            { text: "vs Other Sorts", link: "/benchmarks/implementations" },
-            { text: "Main History", link: "/benchmarks/" },
-          ],
-        },
-      ],
-      "/": developmentSidebar(),
+      "/guide/": sidebar(["guide"]),
+      "/conformance/": sidebar(["guide"]),
+      "/explain/": sidebar(["explain"]),
+      "/benchmarks/": sidebar(["benchmarks"]),
+      "/": sidebar(["design", "development", "proposals"]),
     },
     outline: { level: [2, 3] },
     search: { provider: "local" },
@@ -157,50 +125,3 @@ export default defineConfig({
     },
   },
 });
-
-function guideSidebar() {
-  return [
-    {
-      text: "User guide",
-      items: [
-        { text: "Getting started", link: "/guide/getting-started" },
-        { text: "Ordering semantics", link: "/conformance/semantics" },
-      ],
-    },
-  ];
-}
-
-function developmentSidebar() {
-  return [
-    {
-      text: "Engine & Architecture",
-      items: [
-        { text: "Engine reference", link: "/design/engine" },
-        { text: "Engine evidence", link: "/design/evidence" },
-        { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
-      ],
-    },
-    {
-      text: "Contributor Guides",
-      items: [
-        { text: "Contributing", link: "/CONTRIBUTING" },
-        { text: "Benchmark protocol", link: "/development/benchmarking" },
-        { text: "Benchmark figures", link: "/development/benchmark-figures" },
-        { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
-        { text: "Continuous integration", link: "/development/ci" },
-        { text: "Documentation site", link: "/development/docs-site" },
-        { text: "Releasing", link: "/RELEASING" },
-      ],
-    },
-    {
-      text: "Proposals & Roadmap",
-      items: [
-        { text: "Roadmap", link: "/ROADMAP" },
-        { text: "Operation extensions proposal", link: "/design/operation-extensions-proposal" },
-        { text: "Python binding design", link: "/design/python-binding" },
-        { text: "CI scaling proposal", link: "/design/ci-scaling-proposal" },
-        { text: "Comparison model proposal", link: "/design/comparison-model-proposal" },
-      ],
-    },
-  ];
-}

@@ -10,14 +10,7 @@ import ImplementationComparison from "../.vitepress/theme/components/Implementat
 
 How Tessera compares with other Rust and C++ implementations of the same operation, on the same inputs and the same kind of machine.
 
-In the current measurements:
-
-- **Large random inputs:** Tessera is the fastest stable sort for most key and record types. On `u32` keys, unstable SIMD and radix sorts are faster.
-- **Sorted and nearly sorted inputs:** sorted inputs are faster than with `slice::sort`, and nearly sorted ones many times faster.
-- **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
-- **Memory:** a serial `sort` needs extra memory that grows as $\sqrt{n}$, while `slice::sort`, `radsort` and `glidesort` allocate buffers proportional to the input. Parallel sorting, argsort and cached-key sorting have [their own bounds](../../conformance/semantics.md#space).
-
-The summary below gives each operation's main result; the sections after it break each result down by input length, input pattern, element type and memory.
+The generated summary below gives each operation's current standing; the figures break it down by input length, input pattern, element type and memory. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks retained measured losses. Parallel sorting, argsort and cached-key sorting have [their own memory bounds](../../conformance/semantics.md#space).
 
 <ImplementationComparison />
 

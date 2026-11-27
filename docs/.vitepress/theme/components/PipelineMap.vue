@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { useRouter, withBase } from "vitepress";
 import { computed, ref } from "vue";
-import { blockPartitionMemory, formatBytesBinary, TILE_BYTES } from "../sim/blockSize.ts";
+import { formatBytesBinary, TILE_BYTES } from "../sim/blockSize.ts";
+import { scenarios } from "../sim/pipeline.ts";
 
 // Interactive route & scale explorer for `engine/refine.rs`. Every box links to
 // the chapter that explains it; boxes navigate with the router instead of SVG
@@ -25,21 +26,6 @@ interface Edge {
   dashed?: boolean;
 }
 
-interface Scenario {
-  id: string;
-  label: string;
-  boxes: readonly string[];
-  edges: readonly string[];
-  runs: string;
-  skips: string;
-  memory: string;
-}
-
-const N = 10_000_000;
-const u64Digit = blockPartitionMemory(N, 256, 8);
-const u64Equality = blockPartitionMemory(N, 4, 8);
-const row128Lsd = N * 128;
-
 const boxes: Box[] = [
   { id: "probe", x: 200, y: 10, w: 280, title: "Order probe", detail: "unit stride: adjacent scan; otherwise sample", link: "/explain/routing#order-probe" },
   { id: "sorted", x: 530, y: 10, w: 160, title: "Done", detail: "or reverse stably", link: "/explain/routing#order-probe", kind: "exit" },
@@ -48,7 +34,7 @@ const boxes: Box[] = [
   { id: "constant", x: 530, y: 150, w: 160, title: "Done", detail: "all keys equal", link: "/explain/keys#varying-bits", kind: "exit" },
   { id: "childOrder", x: 200, y: 230, w: 280, title: "Confirm child order", detail: "confirm first; scan variation if needed", link: "/explain/routing#nodes-and-tiles" },
   { id: "childDone", x: 530, y: 230, w: 160, title: "Done", detail: "or reverse stably", link: "/explain/routing#nodes-and-tiles", kind: "exit" },
-  { id: "node", x: 200, y: 300, w: 280, title: "Larger than a tile?", detail: "64 KiB of records", link: "/explain/routing#nodes-and-tiles" },
+  { id: "node", x: 200, y: 300, w: 280, title: "Larger than a tile?", detail: `${formatBytesBinary(TILE_BYTES)} of records`, link: "/explain/routing#nodes-and-tiles" },
   { id: "mode", x: 30, y: 390, w: 190, title: "Repeated key", detail: "equality partition", link: "/explain/routing#repeated-key", kind: "node" },
   { id: "bucket", x: 260, y: 390, w: 190, title: "Bucket order", detail: "digit route: split where order is", link: "/explain/routing#already-in-bucket-order", kind: "node" },
   { id: "digit", x: 490, y: 390, w: 190, title: "Top digit", detail: "stable block partition", link: "/explain/block-partition", kind: "node" },
@@ -79,92 +65,9 @@ const edges: Edge[] = [
   { id: "child-return", d: "M585,462 H12 V253 H196", marker: "node", dashed: true },
 ];
 
-const scenarios: Scenario[] = [
-  {
-    id: "random-u64",
-    label: "10M random u64",
-    boxes: ["probe", "insertion", "varying", "node", "digit", "childOrder", "leafM", "leafI"],
-    edges: [
-      "probe-insertion", "insertion-varying", "varying-node", "node-digit",
-      "digit-loop", "child-return", "child-node", "node-tile-rail", "tile-leafM", "tile-leafI",
-    ],
-    runs: "Order probe rejects quickly, budgeted insertion aborts on a tile copy, varying-bit scan sees 64 bits, top-digit block partition splits to 256 bands, then tiles finish with Tile MSD / insertion.",
-    skips: "Sorted/reversed/constant exits, equality partition, and bucket-order split.",
-    memory: `${formatBytesBinary(u64Digit.totalBytes + TILE_BYTES)} (${formatBytesBinary(u64Digit.totalBytes)} block partition at b = ${u64Digit.blockSize} + 64 KiB tile) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-  {
-    id: "nearly-sorted",
-    label: "10M nearly sorted",
-    boxes: ["probe", "insertion", "sorted"],
-    edges: ["probe-insertion", "insertion-sorted"],
-    runs: "Order probe sees an inversion; budgeted insertion estimates swaps on one tile copy and finishes the whole slice in linear time.",
-    skips: "Varying-bit scan, all node block partitions, and all tile radix passes.",
-    memory: `64 KiB (one-tile key probe copy; no block scratch) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-  {
-    id: "reversed-ties",
-    label: "10M reversed + ties",
-    boxes: ["probe", "sorted"],
-    edges: ["probe-sorted"],
-    runs: "Order probe confirms descending order across all 10M keys, reverses the slice in place, and reverses each equal-key run back to keep stability.",
-    skips: "Insertion, varying-bit scan, every block partition, and every tile pass.",
-    memory: `0 B (no allocation) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-  {
-    id: "zipf",
-    label: "10M Zipf / repeated key",
-    boxes: ["probe", "insertion", "varying", "node", "mode", "childOrder", "childDone", "digit", "leafM", "leafL", "leafI"],
-    edges: [
-      "probe-insertion", "insertion-varying", "varying-node", "node-mode",
-      "mode-loop", "child-return", "child-done", "child-node", "node-digit",
-      "node-tile-rail", "tile-leafM", "tile-leafL", "tile-leafI",
-    ],
-    runs: "128-key sample spots a frequent key (>= 25%); equality partition isolates the equal band in one pass and routes only the remaining bands.",
-    skips: "Re-scattering the dominant key across every remaining radix digit.",
-    memory: `${formatBytesBinary(u64Equality.totalBytes)} for the 4-bucket equality split (up to ${formatBytesBinary(u64Digit.totalBytes + TILE_BYTES)} if a sub-band takes an 8-bit digit) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-  {
-    id: "narrow-20",
-    label: "10M 20-bit narrow keys",
-    boxes: ["probe", "insertion", "varying", "node", "digit", "childOrder", "leafL"],
-    edges: [
-      "probe-insertion", "insertion-varying", "varying-node", "node-digit",
-      "digit-loop", "child-return", "child-node", "node-tile-rail", "tile-leafL",
-    ],
-    runs: "Varying-bit scan drops 44 constant high bits; one 8-bit block partition leaves 12 bits, which finish inside each tile via flat Tile LSD.",
-    skips: "44 constant high key bits (no empty passes) and multi-level MSD recursion.",
-    memory: `${formatBytesBinary(u64Digit.totalBytes + TILE_BYTES)} (${formatBytesBinary(u64Digit.totalBytes)} block partition + 64 KiB tile) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-  {
-    id: "argsort-128b",
-    label: "10M argsort (128B rows)",
-    boxes: ["probe", "insertion", "varying", "node", "digit", "childOrder", "leafM", "leafL"],
-    edges: [
-      "probe-insertion", "insertion-varying", "varying-node", "node-digit",
-      "digit-loop", "child-return", "child-node", "node-tile-rail", "tile-leafM", "tile-leafL",
-    ],
-    runs: "Counting pass splits 64-bit indices into 256 bands and packs the next key bits into each index word so dense bands sort integers directly.",
-    skips: `Moving any of the ${formatBytesBinary(row128Lsd)} of 128-byte source records; source lookups occur only on packed-bit ties.`,
-    memory: `${formatBytesBinary(u64Digit.lsdBytes)} index output + ${formatBytesBinary(u64Digit.totalBytes + TILE_BYTES)} index workspace vs ${formatBytesBinary(row128Lsd)} full-record LSD buffer`,
-  },
-  {
-    id: "select-median",
-    label: "10M median select_nth",
-    boxes: ["probe", "varying", "node", "digit", "childOrder", "leafM", "leafL", "leafI"],
-    edges: [
-      "probe-insertion", "insertion-varying", "varying-node", "node-digit",
-      "digit-loop", "child-return", "child-node", "node-tile-rail", "tile-leafM", "tile-leafL", "tile-leafI",
-    ],
-    runs: "Root block partition completes every band stably, then descends only into the single bucket containing rank 5,000,000 until its tile finishes.",
-    skips: "Refining all ~255 non-target buckets (over 99% of the slice after pass 1).",
-    memory: `${formatBytesBinary(u64Digit.totalBytes + TILE_BYTES)} (no output allocation) vs ${formatBytesBinary(u64Digit.lsdBytes)} LSD buffer`,
-  },
-];
 
 const selectedId = ref<string>("random-u64");
 const active = computed(() => scenarios.find((s) => s.id === selectedId.value) ?? null);
-const activeBoxes = computed(() => (active.value ? new Set(active.value.boxes) : null));
-const activeEdges = computed(() => (active.value ? new Set(active.value.edges) : null));
 
 const H = 46;
 const stroke = (b: Box) =>
@@ -230,18 +133,18 @@ const go = (link: string) => router.go(withBase(link));
           :key="edge.id"
           :d="edge.d"
           :stroke="
-            activeEdges?.has(edge.id)
+            active?.edges.includes(edge.id)
               ? 'var(--vp-c-brand-1)'
               : edge.dashed
                 ? '#5CA4F8'
                 : 'var(--vp-c-text-3)'
           "
-          :stroke-width="activeEdges?.has(edge.id) ? 2.2 : 1.5"
+          :stroke-width="active?.edges.includes(edge.id) ? 2.2 : 1.5"
           :stroke-dasharray="edge.dashed ? '5 4' : undefined"
-          :opacity="activeEdges ? (activeEdges.has(edge.id) ? 1 : 0.18) : 1"
+          :opacity="active ? (active.edges.includes(edge.id) ? 1 : 0.18) : 1"
           :marker-end="
             edge.marker
-              ? activeEdges?.has(edge.id)
+              ? active?.edges.includes(edge.id)
                 ? 'url(#tsr-arrow-active)'
                 : edge.marker === 'node'
                   ? 'url(#tsr-arrow-node)'
@@ -267,7 +170,7 @@ const go = (link: string) => router.go(withBase(link));
         v-for="b in boxes"
         :key="b.id"
         class="tsr-link"
-        :class="{ 'is-dim': activeBoxes && !activeBoxes.has(b.id), 'is-active': activeBoxes?.has(b.id) }"
+        :class="{ 'is-dim': active && !active.boxes.includes(b.id), 'is-active': active?.boxes.includes(b.id) }"
         role="link"
         tabindex="0"
         :aria-label="`${b.title}: ${b.detail}`"
@@ -280,18 +183,27 @@ const go = (link: string) => router.go(withBase(link));
           :width="b.w"
           :height="H"
           rx="8"
-          :fill="activeBoxes?.has(b.id) ? 'var(--vp-c-brand-soft)' : 'var(--vp-c-bg)'"
+          :fill="active?.boxes.includes(b.id) ? 'var(--vp-c-brand-soft)' : 'var(--vp-c-bg)'"
           :stroke="stroke(b)"
-          :stroke-width="activeBoxes?.has(b.id) ? 2.5 : 2"
+          :stroke-width="active?.boxes.includes(b.id) ? 2.5 : 2"
         />
         <text :x="b.x + b.w / 2" :y="b.y + 20" text-anchor="middle" font-size="13" font-weight="600">{{ b.title }}</text>
         <text :x="b.x + b.w / 2" :y="b.y + 36" text-anchor="middle" font-size="10" style="fill: var(--vp-c-text-2)">{{ b.detail }}</text>
       </g>
     </svg>
+    <details open>
+      <summary>Workload routes at 10 million records</summary>
+      <table class="tsr-table">
+        <thead><tr><th>Workload</th><th>Runs</th><th>Skips</th><th>Extra memory (vs LSD buffer)</th></tr></thead>
+        <tbody><tr v-for="s in scenarios" :key="s.id">
+          <td>{{ s.label }}</td><td>{{ s.runs }}</td><td>{{ s.skips }}</td><td>{{ s.memory }}</td>
+        </tr></tbody>
+      </table>
+    </details>
     <div class="tsr-legend">
       <span><span class="swatch" style="border: 2px solid #1baf7a"></span>early exit</span>
       <span><span class="swatch" style="border: 2px solid #5CA4F8"></span>node partitions (O(√n) scratch)</span>
-      <span><span class="swatch" style="border: 2px solid #B482F8"></span>tile leaves (64 KiB scratch)</span>
+      <span><span class="swatch" style="border: 2px solid #B482F8"></span>tile leaves ({{ formatBytesBinary(TILE_BYTES) }} scratch)</span>
       <span>Click any box to open its chapter.</span>
     </div>
   </figure>

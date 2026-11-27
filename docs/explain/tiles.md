@@ -1,51 +1,56 @@
 # 5. Finishing tiles
 
-A **tile** holds at most 64 KiB of records and at most 65,535 records, so that a `u16` can address any position in it. Its scratch buffer has the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes. What remains to decide is which digits to use, and whether to finish with MSD or LSD.
+**The core idea:** once a node splits the input into buckets small enough to fit inside a **64 KiB tile**, the whole working set stays in L2 cache. Inside L2, a 64 KiB second buffer is practically free — so Tessera switches back to ordinary counting passes and picks the cheapest leaf for the remaining varying bits.
 
 ## Three leaves
 
+Every tile holds at most **64 KiB of records** and at most **65,535 records** (so every slot index fits in a `u16`). Depending on length and remaining key variation, the tile finishes with one of three leaves:
+
 | Leaf | Used when | How it works |
 |---|---|---|
-| <span id="insertion">**Insertion sort**</span> | the tile fits the short-leaf limit below | stable insertion on encoded keys |
-| <span id="tile-lsd">**Tile LSD**</span> | the [digit planner](#digit-planning) chooses a one- or two-pass flat plan | one counting pass per digit, lowest digit first, alternating between the tile and scratch |
-| <span id="tile-msd">**Tile MSD**</span> | otherwise (including the [SIMD MSD override](#digit-planning)) | one counting pass on the top digit, then either a whole-tile finisher (restore-only when every bucket has at most one record, [in-place SIMD](#inside-a-pass) for eligible direct keys within the overlap limit, or one whole-tile insertion sweep when every bucket is insertion-sized) or nested tile leaves per bucket |
-
-For an inline record width of $w$ bytes, the insertion limit is $\max(16, \lfloor 48 \times 16 / (16 + w) \rfloor)$ records. A random permutation of $n$ distinct keys averages $n(n-1)/4$ inversions. Insertion holds each moving record once and shifts each predecessor right, so each inversion still pays a comparison plus movement proportional to $w$ (and counts toward the same logical swap budget) while avoiding repeated three-move swaps; insertion work per record grows roughly as $n(16+w)$. The model charges comparison and loop overhead 16 equivalent bytes and keeps at least 16 records on insertion to amortize radix setup. These are tuning estimates. See [short insertion leaves](../design/evidence.md#short-insertion-leaves).
+| <span id="insertion">**Insertion sort**</span> | Tile fits the short-leaf cutoff below | Stable insertion over encoded keys; zero radix setup. |
+| <span id="tile-lsd">**Tile LSD**</span> | All varying bits fit in 1–2 flat passes | Branch-free counting passes from lowest digit to highest, alternating between tile and scratch. |
+| <span id="tile-msd">**Tile MSD**</span> | More than 2 passes needed, or SIMD MSD override applies | One top-digit counting pass, then either a whole-tile finisher or nested tile leaves per bucket. |
 
 ## Digit planning
 
-A digit's width is limited by its cursor table, one `u16` per bucket. The widest allowed table
+Instead of hardcoding 8-bit bytes, Tessera chooses digit widths dynamically from the tile's actual varying bits and cursor-table budget (one `u16` per bucket):
 
-- is no larger than the tile itself in bytes (a 14-bit table is already 32 KiB);
-- has at most 4 buckets per record, so empty buckets cannot dominate;
-- is between 6 and 14 bits wide.
+- **One pass:** if all remaining varying bits fit inside one digit, one pass finishes the tile.
+- **Two balanced passes:** if they fit in two passes, Tessera chooses the split with the **fewest total cursor-table slots**. For 20 adjacent varying bits with a 14-bit table cap, it picks **10 + 10 bits** (2,048 table slots) rather than 14 + 6 (16,448 slots) — same two record moves, 8× smaller histogram! Non-adjacent varying bits need not be contiguous: two scattered varying bits take two 1-bit passes.
+- **SIMD MSD override:** when direct-key SIMD finishing is available and one top digit already gives at least one bucket per record using fewer table slots than two-pass LSD, Tessera overrides two-pass LSD with that single MSD pass.
+- **Otherwise, partition and inspect:** run one top-digit MSD pass and let each child bucket re-plan from the bits that actually vary inside it. Small buckets drop straight to insertion without scanning; constant buckets finish immediately. (This favors skewed/concentrated tiles and can occasionally lose to a longer LSD plan; [engine evidence](../design/evidence.md#landed-with-open-losses) tracks those cases.)
 
-**One or two passes.** If all varying bits fit one digit, one pass finishes the tile. If they fit two, the planner picks the split with the smallest total table. For 20 adjacent varying bits and a 14-bit limit, it uses 10 + 10 bits rather than 14 + 6: both move each record twice, but the balanced tables have 2,048 slots instead of 16,448. Varying bits need not be adjacent: two far-apart varying bits take two one-bit passes. When direct-key SIMD MSD finishing is available on the active CPU backend and one top digit's bucket capacity already provides at least one bucket per record with fewer table slots than the two-pass split, the planner overrides two-pass LSD with that single MSD pass (for example, 25 remaining bits on an 8,000-record `u32` tile choose one MSD pass with SIMD finishing support and two LSD passes without it).
-
-**Otherwise, partition and look.** One MSD pass consumes the highest digit, and each bucket plans again from the bits that actually vary in it. There is no cost estimate: an insertion-sized bucket needs no scan, and a larger one scans its remaining bits and is done if they are constant. Concentrated distributions thus get recursive finishing for free. This can choose MSD where a longer LSD plan would have been faster; [engine evidence](../design/evidence.md#landed-with-open-losses) lists the measured cases.
-
-The figure shows the chosen flat plan, or the first MSD partition without its children's passes.
+Click any preset or toggle individual bits below to compare Tessera's digit plan against naive fixed-width windows:
 
 <DigitPlanner />
 
-| Tile | Varying bits | Decision |
-|---|---|---|
-| 8,192 random u64 keys | 64 | Partition the highest 14-bit digit, then finish each bucket |
-| 8,192 u64 keys in 0..2²⁰ | 20 | Two LSD passes of 10 bits |
-| 1,000 u64 keys with a dominant repeated key | broad span | Partition; the dominant key's bucket is constant after its scan |
-
 ## Inside a pass
 
-Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass), with three refinements:
+Tile passes use the classic [counting pass](radix-sort.md#the-counting-pass) with three practical refinements:
 
-- **No pass for keys that are their own records.** A single-digit plan on `sort` first tries the [counted window](routing.md#counted-window): count, then write each run from its count, without scratch or record moves.
-- **The key function runs once per pass.** With `sort_by_key`, the histogram stores each record's bucket as a `u16` after the records in scratch, and the scatter reads it back instead of calling the key function again.
-- **A guard knows where the records are.** After each pass the complete set is either in the tile or in scratch. If the plan ends in scratch, or the key function panics, the guard copies the records back. [Ownership and panics](safety.md) explains why this matters.
+- **Direct-key counted fill:** for a single-digit `sort` plan, equal keys are bit-identical — count occurrences and write each run directly from counts and shared constant bits, moving nothing.
+- **One key evaluation per pass:** for `sort_by_key`, the histogram stores each record's `u16` bucket ID in scratch so scatter never calls the user's key function a second time (which also makes inconsistent key functions memory-safe; see [6. Ownership and panics](safety.md)).
+- **Zero-cost tracking of live buffer:** a guard remembers whether the live records sit in the tile or in scratch, copying them back if a plan ends in scratch or unwinds on panic.
 
-A bucket's remaining varying bits are scanned only within the parent's remaining bits. A digit that has been partitioned cannot reappear, even if the key function changes its answers, so each level removes key bits.
+After an MSD pass, boundaries are read directly from the finished cursor table (recomputing them measured 48% slower at ~1 bucket per record). When the buckets are tiny, Tessera finishes the whole tile in one sweep instead of recursing bucket by bucket:
 
-An MSD pass reads its bucket boundaries from the finished cursor table instead of recomputing them; recomputing measured 48% slower at about one bucket per record. When every bucket holds at most one record, restoring from scratch already finishes the tile. For direct primitive keys (including `Reverse` wrappers) on real SIMD backends with at least 8 vector lanes, when the tile has at least `max(64, 2 * lanes)` records and the largest bucket fits within one vector of overlap (`<= lanes + 1`), a branchless odd-even vector network finishes the restored tile in place instead of insertion. Tiles long enough for two vectors per stream (`>= 8 * lanes` records across four streams) repair four independent streams, then their seams and any remaining tail; shorter eligible tiles use one overlapping repair sweep. The counting pass restores records before either finisher starts, so both use the same record ownership and panic recovery as other tile leaves. Otherwise, if every bucket is insertion-sized, one adjacent-inversion sweep over the whole tile finishes it without walking the boundaries.
+- **Every bucket ≤ 1 record:** restoring from scratch already finishes the tile.
+- **Tiny buckets on direct SIMD keys:** a branchless odd-even vector sorting network repairs the restored tile in place.
+- **All buckets insertion-sized:** one contiguous insertion sweep across the tile finishes it without walking bucket boundaries.
 
 ## Parallel child allowance
 
-A complete child of a parallel root may use a larger tile: up to 1 MiB of records, within the same 65,535-record limit. It applies only when the whole child fits; a larger child keeps the ordinary tile size for its descendants. The budget is empirical, not a cache-size claim.
+A complete child of a parallel root may use a larger tile — up to **1 MiB of records** (still capped at 65,535 records) — when the entire child fits. Larger children keep the ordinary 64 KiB tile budget for their descendants. This is an empirical threshold, not a cache-size claim.
+
+## Exact rules & thresholds
+
+| Rule | Value / formula |
+|---|---|
+| Tile capacity | `≤ 64 KiB` of records and `≤ 65,535` records (`u16` positions). |
+| Short-leaf insertion cutoff | For inline record width $w$ bytes: $\max(16, \lfloor 48 \times 16 / (16 + w) \rfloor)$ records (models comparison + loop overhead as 16 equivalent bytes per inversion; keeps ≥ 16 records to amortize radix setup; see [short insertion leaves](../design/evidence.md#short-insertion-leaves)). |
+| Max digit width (cursor table) | Clamped to `6–14` bits, bounded by cursor table bytes ≤ tile bytes (14 bits = 32 KiB) and ≤ 4 buckets per record. |
+| Direct-key SIMD MSD repair | Requires a real SIMD backend with ≥ 8 vector lanes, tile length `≥ max(64, 2 * lanes)`, and max bucket size `≤ lanes + 1` (one vector of overlap). Tiles with `≥ 8 * lanes` records run four independent repair streams, then stitch seams and tail; shorter tiles run one overlapping sweep. Counting pass restores records before finishing so ownership/panic guards stay shared. |
+| Varying-bit progress | Child scans mask against parent's remaining candidate bits, so a partitioned digit can never reappear even under inconsistent key closures. |
+
+Next: [6. Ownership and panics](safety.md) explains how raw bitwise record movement stays safe for arbitrary Rust types even if a key closure panics.

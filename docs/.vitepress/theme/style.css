@@ -121,73 +121,54 @@
   transition: transform 0.35s ease;
 }
 
-/* Step controls */
-.tsr-controls {
-  display: flex;
+/* Segmented stage/preset tabs shared across interactive figures. */
+.tsr-seg {
+  display: inline-flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  font-size: 13px;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 3px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 9px;
+  background: var(--vp-c-bg);
 }
 
-.tsr-controls:focus-visible {
-  outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: 4px;
+.tsr-seg button {
+  padding: 4px 11px;
+  border: 1px solid transparent;
   border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.tsr-controls button,
-.tsr-controls select,
+.tsr-seg button:hover {
+  color: var(--vp-c-text-1);
+}
+
+.tsr-seg button.active {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+}
+
 .tsr-input select,
 .tsr-input input[type="text"],
 .tsr-input input[type="number"],
 .tsr-input textarea {
-  padding: 3px 9px;
+  padding: 4px 10px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 6px;
   background: var(--vp-c-bg);
   color: var(--vp-c-text-1);
   font-size: 13px;
-}
-
-.tsr-controls button:hover {
-  border-color: var(--vp-c-brand-1);
-}
-
-.tsr-controls .tsr-play {
-  min-width: 84px;
-  font-weight: 600;
-}
-
-.tsr-scrub {
-  flex: 1 1 140px;
-  accent-color: var(--vp-c-brand-1);
-}
-
-.tsr-count {
-  min-width: 64px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--vp-c-text-2);
-}
-
-.tsr-marks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-}
-
-.tsr-controls .tsr-mark {
-  padding: 1px 10px;
-  border-radius: 999px;
-  color: var(--vp-c-text-2);
-}
-
-.tsr-controls .tsr-mark.active {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
 }
 
 /* Form rows of the interactive figures */

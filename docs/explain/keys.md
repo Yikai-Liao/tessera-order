@@ -1,51 +1,44 @@
 # 2. Keys as unsigned integers
 
-A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into the narrowest unsigned integer that covers its encoded bits, and the engine only ever sees the encoded key. The exact representations and padding rules are defined in the [ordering semantics](../../conformance/semantics.md#key-encoding).
+**The core idea:** a radix pass indexes buckets directly with bits, so every supported Rust key type is first mapped to an unsigned integer whose numerical order matches the requested sort order — and any bit that never changes across the input is dropped before sorting starts.
 
-## Encodings
+## Turning any key into an unsigned integer
 
-Each rule in the [key-encoding contract](../../conformance/semantics.md#key-encoding) preserves the type's order as an unsigned integer:
+Unsigned integers (`u8` through `u128`) already sort identically by bit pattern and by value. Every other key type needs only a tiny branchless bit transform so the engine never needs type-specific comparisons:
 
-| Key | Why it works |
-|---|---|
-| `bool`, `char`, `NonZero<T>` | Each already orders like an unsigned or underlying integer (`false < true`, Unicode scalar values, and integer order with zero absent). |
-| `u8` … `u128`, `usize` | Unsigned bit patterns already sort by value. |
-| `i8` … `i128`, `isize` | Two's complement puts negative numbers above positive ones when read as unsigned; flipping the sign bit moves negative values below positive ones while keeping order within each sign. |
-| `f32`, `f64` | Positive IEEE 754 floats sort like unsigned integers while negative ones sort backwards; inverting negative bits and flipping positive sign bits produces `total_cmp` order. |
-| Byte arrays | Big-endian byte order aligns unsigned integer order with lexicographical byte order, while zeroed unused high bits keep `Reverse` and tuple packing exact. |
-| `Reverse<K>` | Inverting the effective bits reverses unsigned order while keeping equal keys equal, preserving stability. |
-| Tuples | Placing earlier fields in higher bits aligns unsigned integer order with lexicographical tuple order while preserving each field's encoding, including floats and `Reverse`. |
+| Key family | Bit transform | Why it preserves order |
+|---|---|---|
+| `bool`, `char`, `NonZero<T>` | Identity | Bit patterns already sort by value (`false < true`, Unicode scalar order, zero absent). |
+| Signed integers (`i8`…`i128`) | Flip the sign bit | Two's complement puts negatives above positives when read as unsigned; flipping the top bit swaps the halves cleanly. |
+| Floats (`f32`, `f64`) | Negative: invert all bits; positive: flip sign bit | IEEE 754 positives already sort like unsigned integers while negatives run backwards; this produces exact `total_cmp` order, including subnormals, `-0.0 < +0.0`, and NaNs. |
+| Byte arrays `[u8; 1..=16]` | Big-endian pack, zero high padding | First byte sits in the highest bits, matching lexicographical order. |
+| Tuples (2–16 fields, ≤128 bits) | Concatenate fields high-to-low, zero high padding | Earlier fields dominate higher bits, matching lexicographical order while preserving each field's own encoding. |
+| `Reverse<K>` | Invert all effective bits of `K` | Reverses bucket order while keeping equal keys equal, so descending sort stays **stable** (reversing an ascending result would invert equal keys). |
 
-Try it: type keys, switch the type, and read the encoded integers. Sorting by them gives the order Tessera produces.
+Switch key types or toggle `Reverse` below — highlighted bits mark every bit flipped by the encoder, and the rows reorder immediately by their resulting unsigned integer:
 
 <KeyEncoder />
 
-What to notice:
-
-- `-0.0` and `+0.0` encode to different integers. `-0.0` sorts first, as in `f64::total_cmp`.
-- `NaN` with the sign bit clear sorts after `+inf`. A NaN with the sign bit set would sort before `-inf`.
-- Subnormal floats such as `3e-39` need no special case.
-- `Reverse` turns an ascending sort into a descending one *without* reversing equal keys, which reversing an ascending result would do.
-
-Normalize the key in the key function if you want every NaN equal, or both zeros equal.
+To treat all NaNs as equal or `-0.0` as equal to `+0.0`, normalize the key inside your key closure. The formal contract for every supported type lives in [ordering semantics](../../conformance/semantics.md#key-encoding).
 
 ## Varying bits
 
-Real keys rarely use all of their bits. Timestamps share their high bits, small IDs in a `u64` have dozens of leading zeros, and a flag stored in bit 40 is the only bit that changes. A bit that has the same value in every key cannot affect the order.
+Real keys rarely use all 64 bits. Timestamps share their upper bits, small IDs carry dozens of leading zeros, and composite tuples often pack flags into a few positions. Any bit that has the same value in every record cannot distinguish two keys.
 
-Tessera finds these bits with one scan:
+Tessera finds the active bits with two bitwise reductions in one pass:
 
-- the **union** (bitwise OR) of all keys has a 1 wherever *some* key has a 1;
-- the **intersection** (bitwise AND) has a 1 wherever *every* key has a 1;
-- `union XOR intersection` is 1 exactly where the keys disagree.
+- **Union (`OR`)** has a `1` wherever *any* key has a `1`.
+- **Intersection (`AND`)** has a `1` wherever *every* key has a `1`.
+- **`varying = OR ^ AND`** has a `1` strictly at the bit positions where keys disagree.
 
 <VaryingBits />
 
-The result, `varying`, is used everywhere later:
+### Exact rules & thresholds
 
-- If `varying` is 0, every key is equal and the input is already sorted.
-- Every digit is placed over varying bits only. A digit never spends a pass on constant bits ([digit planning](tiles.md#digit-planning)). In a tile, a `u64` key that varies in only 20 bits takes two 10-bit counting passes instead of eight byte passes.
-- For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64`, which halves the work per key.
-- After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states.
+- **Zero varying bits (`varying == 0`):** every key in the slice is equal, so the sort finishes immediately without allocating scratch.
+- **Digit placement:** every digit window is placed strictly over varying bits; constant gaps cost zero passes (for example, a `u64` varying only in 20 bits takes two 10-bit tile passes instead of eight byte passes).
+- **128-bit narrowing:** if a 128-bit key's variation fits entirely within its low or high 64-bit half, the engine drops the constant half and sorts it as a 64-bit key.
+- **Effective candidate masks:** the scan ignores guaranteed-constant padding bits (the top 8 zero bits of `(u16, u8)` or `[u8; 3]`, bits 1–7 of `bool`, bits 21–31 of `char`, and their `1`-filled complements under `Reverse`).
+- **Doubling-batch early exit:** after reading the first key, the scan reads batches of `64, 128, 256, …` keys and stops as soon as every candidate bit has been seen in both `0` and `1` states — random narrow or padded keys typically saturate in the first 65 records. Inside every recursive child, partitioned parent bits are excluded from the candidate mask so they can never reappear.
 
-The scan considers only bits that can vary across valid keys, not guaranteed-constant high bits of the integer that stores them. A `(u16, u8)` tuple key or `[u8; 3]` key is stored in a `u32`, but its top eight bits are always 0; likewise `bool` only varies in bit 0 and `char` only varies in its low 21 bits (and `Reverse` flips those constant bits to 1 without making them vary). The scan reads the first key and then batches of 64, 128, 256 and so on, doubling each time, and checks after every batch whether all candidate bits have varied. If they have, it stops: a random `(u16, u8)` or `(bool, u64)` key often stops after the first 65 records, even though the constant bits never change. While some candidate bit has not varied and input remains, the scan keeps reading.
+Next: [3. Routing an input](routing.md) shows how Tessera skips radix passes altogether on sorted, reversed, nearly sorted, or skewed data.

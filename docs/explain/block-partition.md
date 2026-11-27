@@ -1,99 +1,81 @@
 # 4. The block partition
 
-The block partition splits a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke. Tessera runs one pass per node, on the digit or equality classification the [planner](routing.md#nodes-and-tiles) chose.
+**The core idea:** a normal counting pass needs an $O(n)$ output buffer because each bucket writes into a fixed contiguous slice that still holds unread input. Tessera drops that requirement by cutting memory into fixed-size **blocks**: each bucket writes into a linked chain of blocks, and as the input is read left to right, **every finished input block immediately becomes free output space** for whichever bucket fills next.
 
-## The idea
-
-A counting pass needs an output buffer because each bucket must be contiguous while it is written. The block partition drops that requirement during the pass:
-
-- Memory is cut into **blocks** of b records. Each bucket writes a **chain** of blocks, one block at a time.
-- When a bucket's block fills, the bucket links the next **input block that has already been read**. The input is read front to back, so read blocks appear as fast as buckets need them.
-- After the pass, a **completion ledger** copies each bucket's chain into its final range of the input, moving any block that is still needed out of the way first.
-
-The extra memory is 2R scratch blocks plus per-block metadata, O(√n) when b is chosen well (see [below](#choosing-the-block-size)).
+This mechanism is adapted from Robert Clausecker's `radixsort_permuted.c` ([*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302), Clausecker & Schintke), running one pass per node on the digit or equality classification chosen by the [planner](routing.md#nodes-and-tiles).
 
 ## Step by step
 
-A bucket is not an array of its own. Each record's bucket is one digit of its key, and a pass with a d-bit digit has R = 2^d buckets, numbered by the digit's value; the [planner](routing.md#nodes-and-tiles) chooses d for each node. A bucket is a singly linked list of fixed-size blocks: its records sit in the blocks it has filled, in input order. The head is the bucket's scratch block, each full block's link names the next block, and the bucket keeps a write cursor in its last block. The links live in one side array indexed by physical block, not inside the blocks, so a block holds only records. After the pass the ledger records which blocks each list holds.
-
-The figure runs the engine's own serial block partition, compiled to WebAssembly, on two-digit keys 0–39. The digit is the tens place, so R = 4 and a key's tens digit is its bucket. It calls the partition directly, past the [routing](routing.md#budgeted-insertion) that would send an input this short to insertion sort, and its blocks hold 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
+Explore the real Rust engine compiled to WebAssembly below. Drag the **Read frontier** across the input during scatter to watch read input blocks turn green and get recycled by filling buckets, hover any bucket row to trace its physical blocks, then switch to **Write back** to see the chains move into their final contiguous ranges:
 
 <BlockPartitionDemo />
 
-How to read the figure:
-
-- **Rows.** The top row is the input slice with each position's index. `I0`, `I1`, … are its full blocks; the last, partial block is the *tail*, which is read but never becomes an output block. `S0`–`S3` are the first block of each bucket and `S4`–`S7` the reserve that completion needs: 2R scratch blocks in all. The bottom rows show each bucket's chain, the same records as above in chain order. Hovering a block marks it in both views.
-- **Cells.** A coloured cell is a live record: its key, with the tens digit in bold, and its input position below. A grey cell is a stale copy left behind after the record moved. Stale bytes are never read as a record again.
-- **Labels.** Each tinted box is one block of b slots. During scatter, `k writes` marks bucket k's last block, the one it is filling, and `next X` under a full block is its link to the next block of the same bucket. From the ledger on, a block is a `source` (coloured by its bucket), `free`, or `final` (no unread source remains in it), and coloured bars under the input mark each bucket's final band, whose positions the bucket's row lists.
-- **Steps.** The phase buttons jump to scatter, the ledger or completion; Play steps on its own at the chosen speed. Clicking an input position jumps to the step that reads it, and clicking a block in a bucket row during completion jumps to the step that copies it.
+Every grey cell is a **stale copy** left behind after its record moved — stale bytes are never read or dropped again. Only the live prefix of each block holds active records (checked on every frame by [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) against the engine's real output).
 
 ## Scatter
 
-Each bucket k starts its chain in scratch block `Sk`; blocks `SR`…`S(2R−1)` stay free for completion. The input is read front to back. Each record is classified and copied to the next slot of its bucket's current block. When the block fills, the bucket links the next input block in order (`I0`, then `I1`, …) and continues there.
+Each of the $R$ buckets starts its chain in its own scratch block (`S0`…`S(R−1)`), while `SR`…`S(2R−1)` stay empty as the completion reserve. The engine reads the input strictly front to back, appending each record to its bucket's current block. Whenever a bucket's block fills, it links the next input block (`I0`, then `I1`, …) in a side link array and keeps writing there.
 
-Why that block has always been read: a bucket links the k-th input block only when k blocks have filled, so at least k·b records have been read, and the first k input blocks are therefore read completely. Records enter their bucket's chain in input order, which makes the partition stable. Every record moves once.
+**Why that input block is guaranteed already read:** a bucket can claim the $k$-th input block only after $k$ blocks have filled across all buckets, which requires reading at least $k \cdot b$ input records — meaning the first $k$ input blocks (`I0`…`I(k−1)`) have already been read completely. Because records enter each bucket's chain in input order, every record moves once and the scatter is **stable**.
 
 ## Completion
 
-The ledger turns the chains into a flat list of **sources**, one per nonempty block prefix, bucket by bucket. Bucket k's **final band** starts where bucket k−1's ends. Every block that holds no source is free. Then each bucket copies its sources, in chain order, into its band:
+After scatter, the **completion ledger** turns the linked chains into a flat list of nonempty block prefixes (**sources**) and computes each bucket's **final band** in the input array. Every physical block without a live source is marked **free**. Each bucket then writes its sources in chain order into its final band:
 
-1. **Protect.** Every full input block the next copy will overwrite is made safe first. A free block becomes final. A block still holding another source has that source moved into a free block, then becomes final.
-2. **Copy.** The source is copied into the band and its block becomes free. If the source's own block lies inside its destination, it is skipped by protection and copied with one overlapping move, after which the block is final.
+1. **Protect.** Before writing into destination blocks, any unread source sitting in those blocks is evacuated to a free block, marking the destination block *final*.
+2. **Copy.** The source prefix is copied into its final band and its old block becomes free (if the source's own block overlaps its destination, one overlap-safe move places it and marks that block final).
 
-Once a bucket's sources are all copied, its band is contiguous and the callback receives it. A serial partition finishes a tile-sized band right then, while its records are still in cache; larger bands are routed after the partition returns.
-
-Each copy writes at most a block of records, so after g copies a bucket has touched at most g + 2 destination blocks. The R free scratch blocks cover that slack: protection never runs out of free blocks.
+**Why completion never runs out of free blocks:** each source holds at most one block of records, so after $g$ copies a bucket has touched at most $g + 2$ destination blocks. The $R$ reserve blocks always cover that slack. In serial execution, any completed band small enough for a [tile](tiles.md) is finished immediately while still cache-hot.
 
 ## Parallel roots
 
-The optional Rayon path uses the serial engine below 1 MiB of records or in a one-thread pool. A larger root scatters disjoint input shards independently, one per 256 KiB of records up to the pool width, clamped to the number of full blocks. Each shard has its own 2R scratch blocks. One ledger joins the chains bucket by bucket in original shard order, so the result is stable whichever worker finishes first.
-
-Each bucket completes as an independent task: it protects and copies its own sources, then finishes its band while peers keep moving disjoint records. A root with a frequent sampled key uses the same sharded scatter and completion with the [equality classification](routing.md#repeated-key); the complete equal band skips its callback. The figure shows the serial path; the Rust parallel tests cover sharded ledgers and every bucket order. Locking, recovery and the progress argument belong to the [engine reference](../design/engine.md#parallel-root-completion).
+With the `rayon` feature, large roots divide the input into disjoint shards, each scattering into its own $2R$ scratch blocks in parallel. One shared ledger then joins the chains bucket by bucket in original shard order — guaranteeing identical **stability** regardless of thread scheduling. Each bucket completes and sorts its own final band independently while peers keep moving disjoint records. Equality-partitioned roots reuse the exact same sharded scatter and completion, skipping the finished equal band. Locking, recovery, and deadlock-freedom proofs live in the [engine reference](../design/engine.md#parallel-root-completion).
 
 ## Choosing the block size
 
-The block size b trades scratch against metadata. Each full input block costs d bytes of ledger metadata (`finish::serial_descriptor_bytes`): its chain link, address, owner cell, source entry and free-cache slot. For n records of s bytes and R buckets:
+Choosing block size $b$ balances two competing costs for $n$ records of $s$ bytes, $R$ buckets, and $d$ bytes of per-block ledger metadata (`finish::serial_descriptor_bytes`):
 
 $$
 \text{memory}(b) = \underbrace{2 R\, b\, s}_{\text{scratch blocks}} + \underbrace{\frac{d\, n}{b}}_{\text{ledger}}
 $$
 
-The sum is smallest where the two terms are equal:
+The sum is minimized where both terms are equal:
 
 $$
 b^{*} = \sqrt{\frac{d\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{2 d\, R\, s\, n} = O(\sqrt{n}).
 $$
 
-With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `block_size` therefore takes **2·b\*** (rounded up), at 1.25 times the minimum memory, with two floors. The multiple was 4 (2.1 times the minimum) until [#202](https://github.com/Yikai-Liao/tessera-order/pull/202) halved it to cut scratch by about 40% at a million records and more: the PR benchmark measured up to 8.8% more time for `{u64, u32}` records at 65,536 and 1,000,000, and 2–5% on most large random inputs. The cost was accepted for memory closer to the original Block LSD's.
-
-The floors:
-
-- at least **1,024 bytes** of records per block, so one copy is worth its overhead;
-- at least **32 records** per block, because a block's bookkeeping costs the same whatever the record width.
-
-Neither floor depends on n, so the bound stays O(√n). The floors' scratch grows with R instead: 2R·max(1024, 32s) bytes, so a 12-bit digit reserves 8 MiB at any n. [Routing](routing.md) therefore widens a digit only over bits some key varies in. A parallel root balances the same metadata against the scratch of all shards, b\* = √(dn / (2qRs)) for q shards, with the same scale and floors.
-
 <BlockSizeChart />
 
-The chart uses d for 64-bit targets. At small n the 1,024-byte floor decides b and scratch dominates; from a few million records on, b\* takes over and both terms grow as √n.
+Because smaller blocks add per-block copy and lock overhead, `block_size` uses **$2 \cdot b^{*}$** (rounded up) — only $1.25\times$ minimum memory while cutting per-block overhead in half. At small $n$, fixed floors dominate; above a few million records, $b^*$ takes over and both terms grow as $\sqrt{n}$.
 
 ## What the port adds to the C reference
 
-| C reference | Tessera |
+| Clausecker's C Block LSD | Tessera |
 |---|---|
-| sorts integer pairs, so scratch can be zero-initialized | any record type: scratch is `MaybeUninit<T>`, and only a block's live prefix is ever read |
-| all digits, LSD | one pass per node, on the top digit or an equality classification, with a callback for each finished band |
-| scatters every digit | the engine has already removed [constant bits](keys.md#varying-bits) |
-| no unwinding | on a key-function panic, scatter appends the unread suffix to bucket 0 without calling the key function again, the ledger completes every band, and the panic resumes ([ownership and panics](safety.md)) |
+| Integer pairs (zero-initialized scratch) | Arbitrary Rust types (`MaybeUninit<T>`, only live prefixes read) |
+| Full LSD over all digits | Single-pass MSD / equality split per node with per-band callbacks |
+| Scatters every digit | Skips [constant bits](keys.md#varying-bits) before partitioning |
+| No unwinding | On panic, appends unread suffix to bucket 0 without calling the key closure, completes all bands, and resumes unwinding ([6. Ownership and panics](safety.md)) |
 
-The paper's future work (Section 7) reports that an MSD use of the scheme runs into partial blocks: each recursion level consumes one partial block but can produce up to R new ones, so the overhead grows. It proposes compacting the partial blocks into dense ones after each level. Tessera instead completes every partition before its buckets go further: the ledger copies each bucket into a contiguous band of the input, so no partial block outlives its pass.
+The paper's future work (Section 7) notes that naive MSD recursion accumulates partial blocks across levels. Tessera avoids that completely by running completion at the end of every node pass: every bucket becomes a contiguous slice of the input before recursing, so no partial block ever outlives its pass.
+
+## Exact rules & thresholds
+
+| Rule | Value / contract |
+|---|---|
+| Block-size scale | `2 * b*` (halved from `4 * b*` in [#202](https://github.com/Yikai-Liao/tessera-order/pull/202), cutting scratch ~40% at ≥1M records for 2–5% runtime on large random inputs, up to 8.8% on `{u64, u32}`). |
+| Block-size floors | At least **1,024 bytes** and at least **32 records** per block (independent of $n$, keeping $O(\sqrt{n})$ asymptotics; a 12-bit digit reserves 8 MiB, which is why [routing](routing.md) widens only over varying bits). |
+| Parallel root gate | Uses serial engine below **1 MiB** of records or in a 1-thread pool; above that, spawns 1 shard per **256 KiB** up to pool width, clamped to full input blocks. Parallel block sizing uses $b^* = \sqrt{dn / (2qRs)}$ for $q$ shards with the same scale and floors. |
 
 ## Invariants
 
-Debug builds check the first two in `Partition::validate` after scatter; the model checks every frame.
+Debug builds assert the first two in `Partition::validate` after scatter; the replay tests verify all five on every frame:
 
-1. Each physical block appears in at most one chain.
-2. The chains, read with their prefix lengths, hold every record exactly once.
-3. A block becomes an output block only after every record in it has been read.
-4. Inside each bucket, records appear in input order.
-5. A destination block is final before any record is copied into it, so a copy never overwrites an unread source.
+1. Each physical block belongs to at most one bucket chain.
+2. The chains, read with their prefix lengths, contain every input record exactly once.
+3. No input block becomes an output block until every record in it has been read.
+4. Within every bucket, records stay in original input order.
+5. Every destination block is marked *final* before any copy writes into it, so no unread source is ever overwritten.
+
+Next: [5. Finishing tiles](tiles.md) explains how cache-resident buckets finish quickly inside a 64 KiB buffer.

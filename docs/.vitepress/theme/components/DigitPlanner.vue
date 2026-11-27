@@ -6,41 +6,25 @@ import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
 
 const BITS = 32;
 const RECORDS = 8192;
-const varying = ref((1n << 32n) - 1n);
+const varying = ref((1n << 20n) - 1n);
 const width = ref(14);
 const simdMsd = ref(true);
+
+const presets: [string, bigint][] = [
+  ["20-bit range", (1n << 20n) - 1n],
+  ["25-bit range", (1n << 25n) - 1n],
+  ["All 32 bits", (1n << 32n) - 1n],
+  ["Two bytes + gap", 0xff00ffn],
+  ["Scattered", 0x80f0_0f01n],
+];
+
 const tileLeaf = computed(() =>
   chooseTileLeaf(RECORDS, varying.value, width.value, BITS, 4, simdMsd.value),
 );
-const tileLeafLabel = computed(() =>
-  ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
+const tileLeafLabel = computed(
+  () => ({ done: "done (all equal)", insertion: "insertion sort", msd: "1-pass MSD", lsd: "flat LSD" })[tileLeaf.value],
 );
-const presets: [string, bigint][] = [
-  ["all 32 bits", (1n << 32n) - 1n],
-  ["low 25 bits", (1n << 25n) - 1n],
-  ["low 20 bits", (1n << 20n) - 1n],
-  ["two bytes with a gap", 0xff00ffn],
-  ["scattered", 0x80f0_0f01n],
-];
-
-function toggle(bit: number) {
-  varying.value ^= 1n << BigInt(bit);
-}
-const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
-
-const plan = computed(() =>
-  planDigits(varying.value, width.value, BITS, RECORDS, simdMsd.value),
-);
-const tileLeafReason = computed(() => {
-  if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  if (tileLeaf.value === "lsd") {
-    return "At most two flat passes finish this tile; their split minimizes table slots.";
-  }
-  return simdMsd.value
-    ? "One top-digit partition exposes child variation. Direct-key SIMD finishing is a whole-tile option only when every bucket fits within the overlap limit; if any bucket exceeds it, buckets finish ordinarily by insertion or nested tile plans."
-    : "One top-digit partition exposes child variation, and each bucket finishes ordinarily by insertion or nested tile plans with SIMD finishing unavailable.";
-});
-/** Fixed windows of the full width from the top bit down, for comparison. */
+const plan = computed(() => planDigits(varying.value, width.value, BITS, RECORDS, simdMsd.value));
 const fixed = computed<Digit[]>(() => {
   const out: Digit[] = [];
   let remaining = varying.value;
@@ -53,32 +37,46 @@ const fixed = computed<Digit[]>(() => {
   return out;
 });
 const slots = (digits: Digit[]) => digits.reduce((sum, d) => sum + 2 ** d.width, 0);
+const toggle = (bit: number) => {
+  varying.value ^= 1n << BigInt(bit);
+};
+const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
 const CW = 19;
-const LEFT = 80;
+const LEFT = 74;
 const svgWidth = LEFT + BITS * CW + 8;
 const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
 </script>
 
 <template>
   <figure class="tsr-figure">
-    <div class="tsr-input">
-      <label>
-        Widest digit (cursor table): {{ width }} bits
-        <input v-model.number="width" type="range" min="6" max="14" />
-      </label>
-      <label>
-        <input v-model="simdMsd" type="checkbox" />
-        Direct-key SIMD MSD (8+ lanes)
-      </label>
-      <span>Presets:</span>
-      <button v-for="[name, mask] in presets" :key="name" type="button" class="preset" @click="varying = mask">
-        {{ name }}
-      </button>
+    <div class="dp-top">
+      <fieldset class="tsr-seg" aria-label="Varying bit presets">
+        <button
+          v-for="[name, mask] in presets"
+          :key="name"
+          type="button"
+          :class="{ active: varying === mask }"
+          @click="varying = mask"
+        >
+          {{ name }}
+        </button>
+      </fieldset>
+      <div class="dp-opts">
+        <label>
+          Max digit: <strong>{{ width }}b</strong>
+          <input v-model.number="width" type="range" min="6" max="14" />
+        </label>
+        <label>
+          <input v-model="simdMsd" type="checkbox" />
+          SIMD MSD (8+ lanes)
+        </label>
+      </div>
     </div>
-    <svg :viewBox="`0 0 ${svgWidth} 168`" :width="svgWidth" role="img" aria-label="Digit plan over 32 key bits">
-      <text x="0" y="24" font-size="11">varying</text>
-      <text x="0" y="36" font-size="9" opacity="0.6">click a bit</text>
+
+    <svg :viewBox="`0 0 ${svgWidth} 166`" :width="svgWidth" role="img" aria-label="Digit plan over 32 key bits">
+      <text x="0" y="24" font-size="11" font-weight="600">varying</text>
+      <text x="0" y="36" font-size="9" opacity="0.6">click bits</text>
       <!-- biome-ignore lint/a11y/useSemanticElements: SVG has no `<button>`; the group takes its role. -->
       <g
         v-for="bit in BITS"
@@ -96,31 +94,31 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
           y="12"
           :width="CW - 2"
           height="26"
-          rx="3"
+          rx="4"
           :fill="isSet(bit - 1) ? 'var(--vp-c-brand-soft)' : 'transparent'"
           :stroke="isSet(bit - 1) ? 'var(--vp-c-brand-1)' : 'var(--tsr-line)'"
         />
-        <text :x="xOf(bit - 1) + CW / 2" y="30" text-anchor="middle" font-size="11">{{ isSet(bit - 1) ? 1 : 0 }}</text>
-        <text v-if="(bit - 1) % 4 === 0" :x="xOf(bit - 1) + CW / 2" y="52" text-anchor="middle" font-size="9" opacity="0.6">
+        <text :x="xOf(bit - 1) + CW / 2" y="29" text-anchor="middle" font-size="11">{{ isSet(bit - 1) ? 1 : 0 }}</text>
+        <text v-if="(bit - 1) % 4 === 0" :x="xOf(bit - 1) + CW / 2" y="51" text-anchor="middle" font-size="9" opacity="0.55">
           {{ bit - 1 }}
         </text>
       </g>
 
-      <template v-for="(row, r) in [{ name: 'Tessera', digits: plan }, { name: 'fixed', digits: fixed }]" :key="row.name">
-        <text x="0" :y="84 + r * 50" font-size="11">{{ row.name }}</text>
+      <template v-for="(row, r) in [{ name: 'Tessera', digits: plan }, { name: 'Fixed', digits: fixed }]" :key="row.name">
+        <text x="0" :y="84 + r * 48" font-size="11" font-weight="600">{{ row.name }}</text>
         <g v-for="(d, i) in row.digits" :key="`${row.name}${i}`">
           <rect
             :x="xOf(d.shift + d.width - 1) + 1"
-            :y="68 + r * 50"
+            :y="68 + r * 48"
             :width="d.width * CW - 2"
             height="26"
-            rx="5"
+            rx="6"
             :fill="bucketColor(i, Math.max(row.digits.length, 2))"
-            opacity="0.85"
+            opacity="0.88"
           />
           <text
             :x="xOf(d.shift + d.width - 1) + (d.width * CW) / 2"
-            :y="85 + r * 50"
+            :y="85 + r * 48"
             text-anchor="middle"
             font-size="11"
             font-weight="600"
@@ -131,45 +129,62 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
         </g>
       </template>
     </svg>
-    <table class="tsr-table">
-      <thead>
-        <tr><th>Plan</th><th>Selected passes</th><th>Digit widths, execution order</th><th>Selected bucket slots</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Tessera (<code>plan_digits</code>)</td>
-          <td>{{ plan.length }}</td>
-          <td>{{ [...plan].reverse().map((d) => d.width).join(' + ') || '—' }}</td>
-          <td>{{ slots(plan).toLocaleString('en-US') }}</td>
-        </tr>
-        <tr>
-          <td>Fixed windows of {{ width }} bits</td>
-          <td>{{ fixed.length }}</td>
-          <td>{{ [...fixed].reverse().map((d) => d.width).join(' + ') || '—' }}</td>
-          <td>{{ slots(fixed).toLocaleString('en-US') }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p class="tsr-note">
-      LSD passes run from the lowest window to the highest. An MSD plan shows only its first partition,
-      not the unknown child work. Windows may contain constant gaps, but their endpoints vary.
-    </p>
-    <p class="tsr-note">
-      For 8,192 <code>u32</code> keys with the selected {{ width }}-bit table limit, the planner selects
-      <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
-      {{ tileLeafReason }}
-    </p>
+
+    <div class="dp-summary">
+      <div><span>Selected leaf (8,192 u32)</span><strong>{{ tileLeafLabel }}</strong></div>
+      <div>
+        <span>Tessera plan</span>
+        <strong>{{ [...plan].reverse().map((d) => `${d.width}b`).join(' + ') || 'none' }} ({{ slots(plan).toLocaleString('en-US') }} slots)</strong>
+      </div>
+      <div>
+        <span>Fixed {{ width }}b windows</span>
+        <strong>{{ [...fixed].reverse().map((d) => `${d.width}b`).join(' + ') || 'none' }} ({{ slots(fixed).toLocaleString('en-US') }} slots)</strong>
+      </div>
+    </div>
   </figure>
 </template>
 
 <style scoped>
-.preset {
-  padding: 1px 9px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 999px;
-  font-size: 12px;
+.dp-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin-bottom: 10px;
 }
-.preset:hover {
-  border-color: var(--vp-c-brand-1);
+.dp-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--vp-c-text-2);
+}
+.dp-opts label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dp-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.dp-summary div {
+  padding: 8px 10px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+}
+.dp-summary span {
+  display: block;
+  font-size: 11px;
+  color: var(--vp-c-text-3);
+}
+.dp-summary strong {
+  font-size: 13px;
+  font-family: var(--vp-font-family-mono);
 }
 </style>

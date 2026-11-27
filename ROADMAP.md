@@ -14,7 +14,7 @@ The [0.2 scope decision](docs/design/operation-extensions-proposal.md#release-su
 
 Post-0.2 cleanup and capabilities (new capabilities require a concrete consumer and per-PR acceptance):
 
-- **Parallel argsort at 10M:** compare whole `par_argsort` and `par_argsort_by_key` calls, including output allocation, against serial `argsort` and `par_sort` at 10M records in a focused local plan (hosted cases stop at 1M), with serial `argsort` regression checks.
+- **Parallel argsort at 10M:** compare whole `par_argsort` and `par_argsort_by_key` calls, including output allocation, against serial `argsort` and `par_sort` at 10M records in a focused local plan beyond the [hosted cases](docs/development/continuous-benchmarks.md#cases), with serial `argsort` regression checks.
 - Remove the revision benchmarks' use of the deprecated 0.1 `stable_*` names once no compared baseline needs them.
 - **Exact cached-key facts:** reuse order/variation facts produced during `sort_by_cached_key` collection without regressing `sort`'s root codegen (closure-routed reuse was [closed](docs/design/evidence.md#rejected-or-on-hold)) while preserving descending/near-order completion and the exactly-once contract.
 - **Full-key counts:** let complete-key histograms support unique/count outputs without refilling duplicate keys first, preserving outside-bit proofs and float encoding semantics.

@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
-import { verifyRustRelease } from "../.github/scripts/release.ts";
+import { readTagNotes, verifyRustRelease } from "../.github/scripts/release.ts";
 import { checkImplementations } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
@@ -59,4 +59,12 @@ export function repositoryCommands(program: Command) {
     .action(async (options: { tag: string }) =>
       console.log(JSON.stringify(await verifyRustRelease(options.tag, await repositoryRoot()))),
     );
+  release
+    .command("notes")
+    .description("Print the release notes held in an annotated tag's message")
+    .requiredOption("--tag <tag>", "release tag")
+    .option("--commit <commit>", "commit the tag must point at")
+    .action(async (options: { tag: string; commit?: string }) => {
+      process.stdout.write(readTagNotes(options.tag, await repositoryRoot(), options.commit));
+    });
 }

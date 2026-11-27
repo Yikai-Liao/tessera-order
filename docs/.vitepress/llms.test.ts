@@ -6,9 +6,9 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { COMPARISON_DATA_URL } from "./comparisonMarkdown.ts";
 import {
   buildPageHeadMeta,
-  COMPARISON_JSON_URL,
   canonicalSiteUrl,
   discoverSitePages,
   exportLlmsArtifacts,
@@ -134,7 +134,7 @@ test("renderPageMarkdown falls back to comparison.json link when comparison snap
     sitePages: catalog.sitePageSet,
     renderComparison: () => null,
   });
-  assert.ok(rendered.includes(COMPARISON_JSON_URL));
+  assert.ok(rendered.includes(COMPARISON_DATA_URL));
   assert.ok(!rendered.includes("<ImplementationComparison"));
 });
 

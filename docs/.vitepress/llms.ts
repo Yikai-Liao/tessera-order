@@ -24,9 +24,10 @@
  *   and `rewrites`, `resolveRepositoryLink` inside its markdown-it plugin,
  *   `buildPageHeadMeta` inside `transformPageData`, and `exportLlmsArtifacts`
  *   inside `buildEnd`.
- * - Benchmark comparison rendering is injected via `ComparisonRenderer` (loaded
- *   from `comparisonMarkdown.ts` when present) so this module does not duplicate
- *   `comparison.json` fetching, schema validation, or table formatting.
+ * - Benchmark comparison rendering is injected via `ComparisonRenderer` (backed by
+ *   `comparisonMarkdown.ts`) so this module does not duplicate `comparison.json`
+ *   fetching, schema validation, or table formatting, and imports
+ *   `COMPARISON_DATA_URL` directly from `comparisonMarkdown.ts`.
  *
  * Failure semantics:
  * - Unresolved or out-of-repo link targets return `{ kind: "passthrough" }` so
@@ -43,12 +44,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { HeadConfig } from "vitepress";
+import { COMPARISON_DATA_URL, type ComparisonView } from "./comparisonMarkdown.ts";
 
 export const REPOSITORY_URL = "https://github.com/Yikai-Liao/tessera-order";
 export const DEFAULT_SITE_ORIGIN = "https://yikai-liao.github.io";
 export const DEFAULT_DOCS_BASE = "/tessera-order/";
-export const COMPARISON_JSON_URL =
-  "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json";
 export const HISTORY_DATA_URL = `${REPOSITORY_URL}/tree/benchmark-data/tessera`;
 
 export const SHARED_PAGES: ReadonlySet<string> = new Set([
@@ -61,7 +61,7 @@ export const SHARED_PAGES: ReadonlySet<string> = new Set([
 // The task index is for repository readers; the site has its own home page.
 export const NOT_PAGES: ReadonlySet<string> = new Set(["docs/README.md"]);
 
-export type ComparisonView = "overview" | "all";
+export type { ComparisonView };
 export type ComparisonRenderer = (view: ComparisonView) => string | null | undefined;
 
 export interface SitePageEntry {
@@ -114,7 +114,6 @@ export interface ExportLlmsOptions {
   siteUrl: string;
   catalog?: SiteCatalog;
   renderComparison?: ComparisonRenderer;
-  comparisonSourceUrl?: string;
 }
 
 export interface ExportLlmsResult {
@@ -913,10 +912,8 @@ export function renderPageMarkdown(params: {
   siteUrl: string;
   sitePages: ReadonlySet<string>;
   renderComparison?: ComparisonRenderer;
-  comparisonSourceUrl?: string;
 }): string {
   const { raw, sourceAbsPath, repoRoot, siteUrl, sitePages, renderComparison } = params;
-  const comparisonUrl = params.comparisonSourceUrl ?? COMPARISON_JSON_URL;
   const { frontmatter, body } = parseFrontmatter(raw);
 
   const outputLines: string[] = [];
@@ -994,7 +991,9 @@ export function renderPageMarkdown(params: {
         if (rendered) {
           outputLines.push(rendered);
         } else {
-          outputLines.push(`Live benchmark comparison data: [comparison.json](${comparisonUrl}).`);
+          outputLines.push(
+            `Live benchmark comparison data: [comparison.json](${COMPARISON_DATA_URL}).`,
+          );
         }
       } else if (tagName === "PerformanceHistory") {
         outputLines.push(
@@ -1100,7 +1099,7 @@ export function buildLlmsBundle(params: {
 
 /** Emits per-page `.md` mirrors, `llms.txt`, `llms-full.txt`, and `llms-explain.txt` into `outDir`. */
 export async function exportLlmsArtifacts(options: ExportLlmsOptions): Promise<ExportLlmsResult> {
-  const { repoRoot, outDir, siteUrl, renderComparison, comparisonSourceUrl } = options;
+  const { repoRoot, outDir, siteUrl, renderComparison } = options;
   const catalog = options.catalog ?? discoverSitePages(repoRoot);
   const renderedPages = new Map<string, RenderedPage>();
 
@@ -1116,7 +1115,6 @@ export async function exportLlmsArtifacts(options: ExportLlmsOptions): Promise<E
         siteUrl,
         sitePages: catalog.sitePageSet,
         renderComparison,
-        comparisonSourceUrl,
       });
       renderedPages.set(entry.sitePath, {
         sourcePath: entry.sourcePath,

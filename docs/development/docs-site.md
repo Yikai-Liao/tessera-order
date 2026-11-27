@@ -7,9 +7,9 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 | Path | Contents |
 |---|---|
 | `docs/**/*.md` | Pages. `docs/index.md` serves as `/`; `docs/explain/index.md` serves as `/explain/`. `docs/README.md` is the repository task index, not a site page. |
-| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
+| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`SHARED_PAGES` in `docs/.vitepress/llms.ts`) |
 | `docs/.vitepress/config.ts` | Site configuration, navigation, link handling, per-page metadata, sitemap and `buildEnd` export hook |
-| `docs/.vitepress/llms.ts` | Build-time generator for per-page `.md` mirrors and `llms*.txt` bundles, with `llms.test.ts` |
+| `docs/.vitepress/llms.ts` | Single authority for site page discovery (`SHARED_PAGES`), repository link resolution, per-page metadata, and build-time `.md` mirrors and `llms*.txt` bundles, with `llms.test.ts` |
 | `docs/.vitepress/comparisonMarkdown.ts` | Build-time `comparison.json` snapshot loader and Markdown renderer, with `comparisonMarkdown.test.ts` |
 | `docs/.vitepress/theme/components/` | Vue components for figures, benchmark views (`ImplementationComparison.vue`, `PerformanceHistory.vue`), build-time data loaders (`comparisonSnapshot.data.ts`, `implementationChoices.data.ts`) and `PageMarkdownBar.vue` |
 | `docs/.vitepress/theme/sim/` | The figures' models and engine replays, with their tests |
@@ -42,7 +42,7 @@ Pull requests that touch the site, its pages or the library source run the same 
 
 The build emits machine-readable artifacts alongside the HTML site so external AI agents fetching published URLs receive complete, noise-free documentation without executing client-side JavaScript:
 
-- **Per-page `.md` mirrors:** emitted in `docs/.vitepress/dist/` next to every served page (`index.md`, `guide/getting-started.md`, `conformance/semantics.md`, `benchmarks/implementations.md`, etc.). Each mirror strips frontmatter (expanding the home page's `hero` and `features` into Markdown), removes `<script>` blocks and SPDX comments, replaces `<ImplementationComparison>` with rendered Markdown tables from the build-time snapshot, strips interactive figure tags whose content is already stated in prose, preserves raw LaTeX math, and rewrites relative links to canonical `.md` site URLs or GitHub `blob`/`tree` URLs.
+- **Per-page `.md` mirrors:** emitted in `docs/.vitepress/dist/` next to every served page (`index.md`, `guide/getting-started.md`, `conformance/semantics.md`, `benchmarks/implementations.md`, etc.). Each mirror strips frontmatter (expanding the home page's `hero` and `features` into Markdown), removes `<script>` blocks and SPDX comments, replaces `<ImplementationComparison>` with rendered Markdown tables from the build-time snapshot, links `<PerformanceHistory>` to `benchmark-data/tessera`, strips interactive figure tags whose content is already stated in prose, preserves raw LaTeX math, and rewrites relative links to canonical `.md` site URLs or GitHub `blob`/`tree` URLs.
 - **Audience-tiered indices:** `/llms.txt` lists site pages by audience (`Using Tessera`, `How Tessera Works`, and internal contributor docs and unimplemented proposals isolated under `## Optional`); `/llms-full.txt` bundles only the external-user core (`index`, getting started, ordering semantics, performance overview, implementation comparison and explanation overview), excluding `evidence.md` and unimplemented proposals; `/llms-explain.txt` bundles the explanation overview and chapters in reading order.
 - **Discovery metadata and UI:** `config.ts` generates `sitemap.xml` and injects per-page `<meta name="description">`, canonical URLs, Open Graph title/description, and `<link rel="alternate" type="text/markdown">` tags. `docs/public/robots.txt` advertises `sitemap.xml`. `PageMarkdownBar.vue` adds compact Copy Markdown, View Markdown and `llms.txt` controls to documentation pages.
 

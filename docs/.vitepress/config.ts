@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
+import { loadComparisonSnapshot, renderComparisonMarkdown } from "./comparisonMarkdown.ts";
 import {
   buildPageHeadMeta,
-  type ComparisonRenderer,
-  type ComparisonView,
   canonicalSiteUrl,
   discoverSitePages,
   exportLlmsArtifacts,
@@ -52,33 +50,6 @@ function repositoryLinks(md: MarkdownRenderer) {
   });
 }
 
-interface ComparisonMarkdownModule {
-  loadComparisonSnapshot?: () => Promise<unknown>;
-  renderComparisonMarkdown?: (data: unknown, view: ComparisonView) => string;
-  COMPARISON_DATA_URL?: string;
-}
-
-/** Loads build-time comparison snapshot rendering from `comparisonMarkdown.ts` when present. */
-async function loadOptionalComparisonRenderer(): Promise<{
-  renderComparison?: ComparisonRenderer;
-  comparisonSourceUrl?: string;
-}> {
-  const modulePath = resolve(vitepressDir, "comparisonMarkdown.ts");
-  if (!existsSync(modulePath)) return {};
-  const mod = (await import(pathToFileURL(modulePath).href)) as ComparisonMarkdownModule;
-  const comparisonSourceUrl = mod.COMPARISON_DATA_URL;
-  if (!mod.loadComparisonSnapshot || !mod.renderComparisonMarkdown) {
-    return { comparisonSourceUrl };
-  }
-  const snapshot = await mod.loadComparisonSnapshot();
-  if (!snapshot) return { comparisonSourceUrl };
-  const render = mod.renderComparisonMarkdown;
-  return {
-    renderComparison: (view) => render(snapshot, view),
-    comparisonSourceUrl,
-  };
-}
-
 export default defineConfig({
   title: "Tessera",
   description: "Stable radix ordering with O(√n) auxiliary memory",
@@ -117,14 +88,13 @@ export default defineConfig({
     pageData.frontmatter.head = meta.head;
   },
   async buildEnd(siteConfig) {
-    const { renderComparison, comparisonSourceUrl } = await loadOptionalComparisonRenderer();
+    const snapshot = await loadComparisonSnapshot();
     await exportLlmsArtifacts({
       repoRoot,
       outDir: siteConfig.outDir,
       siteUrl,
       catalog,
-      renderComparison,
-      comparisonSourceUrl,
+      renderComparison: snapshot ? (view) => renderComparisonMarkdown(snapshot, view) : undefined,
     });
   },
   vite: {

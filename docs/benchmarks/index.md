@@ -2,6 +2,7 @@
 # Give the interactive figures the full document width, without an outline column.
 aside: false
 pageClass: performance-page
+description: Performance summary for Tessera across random, sorted, nearly sorted, and skewed inputs, with O(√n) serial extra memory and main-branch benchmark history.
 ---
 
 # Performance

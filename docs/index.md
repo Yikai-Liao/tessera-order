@@ -33,15 +33,15 @@ import ImplementationComparison from "./.vitepress/theme/components/Implementati
 
 ## Compare at a glance
 
-| Property | **Tessera** | `slice::sort` (std) | `radsort` | `glidesort` |
+All four libraries are stable and move arbitrary `T` without `Copy` or `Clone`; they differ in complexity, extra memory, key contract, and operations:
+
+| | **Tessera** | slice::sort (std) | radsort | glidesort |
 |---|---|---|---|---|
-| **Time complexity** | $O(n)$ (fixed-width key) | $O(n \log n)$ | $O(n)$ (fixed-width key) | $O(n \log n)$ |
-| **Extra memory (serial sort)** | $O(\sqrt{n})$ block scratch | $O(n)$ | $O(n)$ | $O(n)$ (adaptive) |
-| **Stable** | Yes | Yes | Yes | Yes |
-| **Key contract** | Fixed-width `RadixKey` (`u*`, `i*`, `f*`, `[u8; 1..=16]`, tuples, `Reverse`) | Any `Ord` or comparator | Fixed-width `Key` | Any `Ord` or comparator |
-| **Record bounds** | None (moves any `T`; no `Copy`/`Clone`/`Default`) | None | None | None |
-| **Parallel (`rayon`)** | `par_sort*`, `par_argsort*` ($O(P\sqrt{n})$ extra) | Separate (`rayon::par_sort`) | No | No |
-| **Operations** | `sort*`, `sort_by_cached_key`, `argsort*`, `select_nth*` | `sort*`, unstable `select_nth` | `sort`, `sort_by_key` | `sort*` |
+| **Time** | **O(n)** | O(n log n) | O(n) | O(n log n) |
+| **Extra memory** | **O(√n)** | O(n) | O(n) | O(n) |
+| **Keys** | Fixed-width keys | Any Ord or comparator | Fixed-width keys | Any Ord or comparator |
+| **Parallel** | Rayon, O(P√n) | Separate (rayon) | No | No |
+| **Operations** | Sort, cached key, argsort, select_nth | Sort, unstable select_nth | Sort | Sort |
 
 ## One engine, zero record-trait bounds
 

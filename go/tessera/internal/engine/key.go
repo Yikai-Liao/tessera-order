@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
@@ -21,8 +20,11 @@ type Codec[K any] struct {
 }
 
 func newCodec[K any](width uint, encode func(K) Uint128, decode func(Uint128) K) Codec[K] {
-	storageBits := uint(8) << bits.Len((width-1)/8)
-	return Codec[K]{width, storageBits, lowMask(width), encode, decode}
+	return Codec[K]{width, storageBits(width), lowMask(width), encode, decode}
+}
+
+func storageBits(width uint) uint {
+	return uint(8) << bits.Len((width-1)/8)
 }
 
 type sealedKey[K any] interface {
@@ -199,23 +201,7 @@ type byteArray interface {
 
 func byteArrayCodec[K byteArray]() Codec[K] {
 	var zero K
-	return newCodec(uint(len(zero))*8, func(value K) Uint128 {
-		var buf [16]byte
-		// Start with zeroed high bytes, then pack the key in big-endian order.
-		for i := 0; i < len(value); i++ {
-			buf[16-len(value)+i] = value[i]
-		}
-		return Uint128{Hi: binary.BigEndian.Uint64(buf[:8]), Lo: binary.BigEndian.Uint64(buf[8:])}
-	}, func(encoded Uint128) K {
-		var buf [16]byte
-		binary.BigEndian.PutUint64(buf[:8], encoded.Hi)
-		binary.BigEndian.PutUint64(buf[8:], encoded.Lo)
-		var value K
-		for i := 0; i < len(value); i++ {
-			value[i] = buf[16-len(value)+i]
-		}
-		return value
-	})
+	return newCodec(uint(len(zero))*8, packArray[K], unpackArray[K])
 }
 
 type ReverseKey[K any] struct {

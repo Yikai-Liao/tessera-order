@@ -55,3 +55,7 @@ func (value Uint128) xor(other Uint128) Uint128 {
 func lowMask(width uint) Uint128 {
 	return (Uint128{Hi: ^uint64(0), Lo: ^uint64(0)}).rsh(128 - width)
 }
+
+func (value Uint128) andNot(other Uint128) Uint128 {
+	return Uint128{Hi: value.Hi &^ other.Hi, Lo: value.Lo &^ other.Lo}
+}

@@ -52,7 +52,7 @@ func TestKeyBindingRejectsUnsupportedTypeBeforeCallback(t *testing.T) {
 	record := []uint64{42}
 	called := false
 	expectKeyPanic(t, "unsupported key type", func() {
-		keyedEncoding(record, func(value *uint64) named {
+		SortByKey(record, func(value *uint64) named {
 			called = true
 			*value = 0
 			return named(*value)
@@ -61,17 +61,17 @@ func TestKeyBindingRejectsUnsupportedTypeBeforeCallback(t *testing.T) {
 	if called || record[0] != 42 {
 		t.Fatal("unsupported key reached the callback")
 	}
-	expectKeyPanic(t, "unsupported key type", func() { directCodec([]string{}) })
-	expectKeyPanic(t, "unsupported key type", func() { directCodec([][0]byte{}) })
-	expectKeyPanic(t, "unsupported key type", func() { directCodec([][17]byte{}) })
-	expectKeyPanic(t, "unsupported key type", func() { directCodec([]any{uint64(1)}) })
-	expectKeyPanic(t, "unsupported key type", func() { directCodec([]PairKey[uint8, string]{}) })
+	expectKeyPanic(t, "unsupported key type", func() { Sort([]string{}) })
+	expectKeyPanic(t, "unsupported key type", func() { Argsort([][0]byte{}) })
+	expectKeyPanic(t, "unsupported key type", func() { Sort([][17]byte{}) })
+	expectKeyPanic(t, "unsupported key type", func() { SelectNth([]any{uint64(1)}, 0) })
+	expectKeyPanic(t, "unsupported key type", func() { Sort([]PairKey[uint8, string]{}) })
 }
 
 func TestKeyBindingRejectsWidthOver128(t *testing.T) {
 	called := false
 	expectKeyPanic(t, "exceeds 128 encoded bits", func() {
-		keyedEncoding([]int{1}, func(*int) PairKey[Uint128, bool] {
+		SortByCachedKey([]int{1}, func(*int) PairKey[Uint128, bool] {
 			called = true
 			return Pair(Uint128{}, false)
 		})

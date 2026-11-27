@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"slices"
 	"testing"
 
 	. "github.com/Yikai-Liao/tessera-order/go/tessera"
@@ -33,7 +34,7 @@ type rankSelection struct {
 	After  []int `json:"after"`
 }
 
-func readOrderingVectors(t *testing.T) []orderingVector {
+func readOrderingVectors(t testing.TB) []orderingVector {
 	t.Helper()
 	data, err := os.ReadFile("../../conformance/vectors/ordering.json")
 	if err != nil {
@@ -94,8 +95,94 @@ func checkVector[K comparable](t *testing.T, vector orderingVector, fromRaw func
 			t.Errorf("decoding %s failed to recover the original key bits %s", vector.Encoded[i], vector.Input[i])
 		}
 	}
-	// StableOrder, Argsort and Selections are loaded for milestone 2, when
-	// the Go ordering operations can check these results.
+	checkGoldenOrdering(t, vector, keys, codec.Encode, same)
+}
+
+func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys []K, encode func(K) Uint128, same func(K, K) bool) {
+	t.Helper()
+	if got := Argsort(keys); !slices.Equal(got, vector.Argsort) {
+		t.Fatalf("argsort = %v, want %v", got, vector.Argsort)
+	}
+	sorted := slices.Clone(keys)
+	Sort(sorted)
+	for i, source := range vector.StableOrder {
+		if !same(sorted[i], keys[source]) {
+			t.Fatalf("sort differs at position %d", i)
+		}
+	}
+	for _, want := range vector.Selections {
+		selected := slices.Clone(keys)
+		before, nth, after := SelectNth(selected, want.Rank)
+		if !same(*nth, keys[want.Nth]) {
+			t.Fatalf("rank %d did not select input %d", want.Rank, want.Nth)
+		}
+		for _, region := range []struct {
+			actual []K
+			ids    []int
+		}{{before, want.Before}, {after, want.After}} {
+			counts := make(map[Uint128]int)
+			for _, id := range region.ids {
+				counts[encode(keys[id])]++
+			}
+			for _, key := range region.actual {
+				counts[encode(key)]--
+			}
+			for _, n := range counts {
+				if n != 0 {
+					t.Fatalf("wrong membership at rank %d", want.Rank)
+				}
+			}
+		}
+	}
+
+	// Key by encoded bits so record identity remains observable across ties
+	// even for input key types such as floating-point NaNs.
+	bits := make([]Uint128, len(keys))
+	for i, key := range keys {
+		bits[i] = encode(key)
+	}
+	checkGoldenIDs(t, vector, bits)
+}
+
+func checkGoldenIDs(t *testing.T, vector orderingVector, bits []Uint128) {
+	t.Helper()
+	ids := make([]int, len(bits))
+	for i := range ids {
+		ids[i] = i
+	}
+	key := func(id *int) Uint128 { return bits[*id] }
+	if got := ArgsortByKey(ids, key); !slices.Equal(got, vector.Argsort) {
+		t.Fatal("keyed argsort changed tie order")
+	}
+	for _, operation := range []func([]int, func(*int) Uint128){SortByKey[int, Uint128], SortByCachedKey[int, Uint128]} {
+		got := slices.Clone(ids)
+		operation(got, key)
+		if !slices.Equal(got, vector.StableOrder) {
+			t.Fatal("keyed sort changed tie order")
+		}
+	}
+	for _, want := range vector.Selections {
+		got := slices.Clone(ids)
+		before, nth, after := SelectNthByKey(got, want.Rank, key)
+		checkRankIDs(t, got, before, *nth, after, want, bits)
+	}
+}
+
+func checkRankIDs(t testing.TB, all, before []int, nth int, after []int, want rankSelection, keys []Uint128) {
+	t.Helper()
+	left, right := slices.Clone(before), slices.Clone(after)
+	slices.Sort(left)
+	slices.Sort(right)
+	if nth != want.Nth || !slices.Equal(left, want.Before) || !slices.Equal(right, want.After) {
+		t.Fatalf("wrong stable rank %d: %v / %d / %v", want.Rank, left, nth, right)
+	}
+	last := make(map[Uint128]int)
+	for _, id := range all {
+		if previous, ok := last[keys[id]]; ok && previous >= id {
+			t.Fatalf("rank %d changed tie order: %d before %d", want.Rank, previous, id)
+		}
+		last[keys[id]] = id
+	}
 }
 
 type word interface {

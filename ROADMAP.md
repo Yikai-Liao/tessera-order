@@ -12,9 +12,8 @@ Pull-request performance acceptance is governed by hosted PR paired benchmarks (
 
 The [0.2 scope decision](docs/design/operation-extensions-proposal.md#release-surface-alignment) is implemented on `main`: full and cached-key sorting, optional Rayon full sorting and argsort (`par_argsort`, `par_argsort_by_key`), serial argsort, single-rank selection, and fixed-width keys including `bool`, `char`, `NonZero`, byte arrays and tuples up to 128 bits.
 
-Remaining 0.2 benchmark integration and post-0.2 capabilities (new capabilities require a concrete consumer and per-PR acceptance):
+Post-0.2 cleanup and capabilities (new capabilities require a concrete consumer and per-PR acceptance):
 
-- **Parallel argsort benchmarking:** wire `par_argsort` and `par_argsort_by_key` into the maintained benchmark pipeline, continuous plan and parallel argsort composition baseline under the [comparison model](docs/design/comparison-model-proposal.md#plan), and complete the maintained whole-call 1M and 10M comparisons against serial `argsort` and `par_sort` (including output allocation and checks for serial `argsort` regressions; 10M stays in a focused local plan rather than expanding hosted CI).
 - Remove the revision benchmarks' use of the deprecated 0.1 `stable_*` names once no compared baseline needs them.
 - **Exact cached-key facts:** reuse order/variation facts produced during `sort_by_cached_key` collection without regressing `sort`'s root codegen (closure-routed reuse was [closed](docs/design/evidence.md#rejected-or-on-hold)) while preserving descending/near-order completion and the exactly-once contract.
 - **Full-key counts:** let complete-key histograms support unique/count outputs without refilling duplicate keys first, preserving outside-bit proofs and float encoding semantics.

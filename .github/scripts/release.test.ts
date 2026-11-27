@@ -30,21 +30,14 @@ test("tag notes keep quoted markers and leading indentation", () => {
   assert.equal(tagNotes(`${header}${indented}`), indented);
 });
 
-test("tag notes reject empty messages and messages without a heading outside code", () => {
+test("tag notes reject empty messages and messages that lost every # line", () => {
   assert.throws(() => tagNotes(`${header}\n  \n`), /empty/);
   assert.throws(() => tagNotes("object 0123\ntype commit\n"), /empty/);
-  assert.throws(() => tagNotes(`${header}- one\n`), /no `#` heading/);
-  assert.throws(() => tagNotes(`${header}\`\`\`sh\n# example\n\`\`\`\n`), /no `#` heading/);
-  assert.equal(
-    tagNotes(`${header}\`\`\`sh\n# example\n\`\`\`\n\n# Fixes\n`),
-    "```sh\n# example\n```\n\n# Fixes\n",
-  );
-  const nested = "```text\n```sh\n```\n\n## Fixes\n";
-  assert.equal(tagNotes(`${header}${nested}`), nested);
-  assert.throws(
-    () => tagNotes(`${header}\`\`\`text\n\`\`\`sh\n## Fixes\n\`\`\`\n`),
-    /no `#` heading/,
-  );
+  assert.throws(() => tagNotes(`${header}- one\n`), /no line starting with #/);
+  const crlf = "~~~sh\r\necho ready\r\n~~~\r\n\r\n## Fixes\r\n";
+  assert.equal(tagNotes(`${header}${crlf}`), `${crlf.trimEnd()}\n`);
+  const span = "```cargo add tessera-order```\n\n## Fixes\n";
+  assert.equal(tagNotes(`${header}${span}`), span);
 });
 
 test("release notes come only from an annotated tag at the published commit", () => {
@@ -78,7 +71,7 @@ test("release notes come only from an annotated tag at the published commit", ()
     assert.throws(() => readTagNotes("rust/v9.0.0", root, "HEAD"), /does not point at/);
     assert.throws(() => readTagNotes("rust/v9.0.1", root), /not an annotated tag/);
     // Git's default cleanup strips headings as comments.
-    assert.throws(() => readTagNotes("rust/v9.0.2", root), /no `#` heading/);
+    assert.throws(() => readTagNotes("rust/v9.0.2", root), /no line starting with #/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

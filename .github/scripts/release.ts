@@ -49,25 +49,10 @@ export function tagNotes(tagObject: string): string {
   // Keep leading indentation: an indented first line is a Markdown code block.
   const notes = (signed ? message.slice(0, last.index) : message).replace(/^\n+/, "").trimEnd();
   if (notes === "") throw new Error("release tag message is empty; it holds the release notes");
-  // The checklist groups notes under `#` headings; none means git's default
-  // `--cleanup=strip` removed them as comments.
-  if (!hasAtxHeading(notes))
-    throw new Error("release notes have no `#` heading; tag with --cleanup=whitespace");
+  // Git's default `--cleanup=strip` deletes every line that starts with `#`,
+  // headings and code alike. Notes grouped under `##` headings always keep
+  // one, so none left means the cleanup ran. This is not a Markdown check.
+  if (!/^#/m.test(notes))
+    throw new Error("release notes have no line starting with #; tag with --cleanup=whitespace");
   return `${notes}\n`;
-}
-
-/** Whether a line outside fenced code blocks is an ATX (`#`) heading. */
-function hasAtxHeading(markdown: string): boolean {
-  let fence: string | undefined;
-  for (const line of markdown.split("\n")) {
-    if (fence === undefined) {
-      fence = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-      if (fence === undefined && /^ {0,3}#{1,6}(?: |$)/.test(line)) return true;
-    } else {
-      // A closing fence repeats the opening character at least as often, with no info string.
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
-      if (close?.[0] === fence[0] && close.length >= fence.length) fence = undefined;
-    }
-  }
-  return false;
 }

@@ -5,8 +5,16 @@ import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
 import { computed, onMounted, onUnmounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
 import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
-import { formatBytes, ordinal, times } from "../../../../bench/report/format.ts";
-import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
+import type { ComparisonData } from "../../../../bench/tracking/result.ts";
+import {
+  COMPARISON_DATA_URL,
+  type ComparisonFigure,
+  comparisonHeadlines,
+  comparisonSections,
+  parseComparisonData,
+  parseMarkdownTable,
+} from "../../comparisonMarkdown.ts";
+import { data as snapshot } from "./comparisonSnapshot.data.ts";
 import { useFigureSelection } from "./figureSelection.ts";
 import { data as implementationChoices } from "./implementationChoices.data.ts";
 
@@ -14,20 +22,24 @@ import { data as implementationChoices } from "./implementationChoices.data.ts";
 const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
   view: "all",
   source:
-    (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) ||
-    "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json",
+    (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL,
 });
 
-const data = shallowRef<ComparisonData | null>(null);
+const defaultSource =
+  (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL;
+// Initialize from the build-time snapshot when using the default source so SSR emits real
+// cards, SVGs, provenance, and tables; `onMounted` refreshes live without erasing SSR data.
+const data = shallowRef<ComparisonData | null>(props.source === defaultSource ? snapshot : null);
 const error = shallowRef("");
-// The headings appear only after the fetch, so the page's outline and a link's fragment are
-// resolved again once they render. `contentUpdatedCallbacks` is a private VitePress 1.6 export
-// (declared in env.d.ts); after a VitePress upgrade, check that both outlines list these headings.
+// When data arrives after mount (offline build or custom source), refresh the outline and
+// resolve any URL fragment once headings render. `contentUpdatedCallbacks` is a private
+// VitePress 1.6 export (declared in env.d.ts); after an upgrade, verify both outlines list these headings.
 watch(
   data,
-  () => {
-    if (props.view !== "all") return;
+  (current, previous) => {
+    if (props.view !== "all" || !current) return;
     for (const refresh of contentUpdatedCallbacks) refresh();
+    if (previous) return;
     const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
     // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
     if (target)
@@ -43,42 +55,42 @@ watch(
 );
 
 // Each card names the operation, Tessera's standing and the two numbers behind it.
-const cards = computed(() =>
-  (data.value?.operations ?? []).flatMap(({ id, headline }) => {
-    if (!headline) return [];
-    const { rank, of, noun } = headline;
-    const standing = rank === 1 ? "Fastest" : `Ranked ${ordinal(rank)}`;
-    return [{ id, headline, claim: `${standing} of ${of} stable ${noun}` }];
-  }),
-);
+const cards = computed(() => (data.value ? comparisonHeadlines(data.value) : []));
 
 onMounted(async () => {
   window.addEventListener("keydown", clearOnEscape);
+  if (props.view === "all" && data.value) {
+    for (const refresh of contentUpdatedCallbacks) refresh();
+  }
   let response: Response;
   try {
     response = await fetch(props.source, { cache: "no-cache" });
   } catch (cause) {
     console.error("Implementation comparison:", cause);
-    error.value = "The comparison data could not be reached. Check the connection and reload.";
+    if (!data.value)
+      error.value = "The comparison data could not be reached. Check the connection and reload.";
     return;
   }
   if (!response.ok) {
-    error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
+    if (!data.value)
+      error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
     return;
   }
   try {
-    data.value = comparisonSchema.parse(await response.json());
+    const next = parseComparisonData(await response.json());
+    error.value = "";
+    if (!data.value || JSON.stringify(next) !== JSON.stringify(data.value)) data.value = next;
   } catch (cause) {
     console.error("Implementation comparison:", cause);
-    error.value = "The published comparison data has a format this page cannot read.";
+    if (!data.value)
+      error.value = "The published comparison data has a format this page cannot read.";
   }
 });
 onUnmounted(() => window.removeEventListener("keydown", clearOnEscape));
 
 // Inline SVG follows the page's light or dark class; each chart needs its own element ids.
 const id = useId();
-type Figure = ComparisonData["operations"][number]["figures"][number];
-const rendered = (operation: string, figure: Figure) => {
+const rendered = (operation: string, figure: ComparisonFigure) => {
   const key = `${id}-${operation}-${figure.name}`;
   return {
     // Section anchors keep figure names unique across operations.
@@ -90,33 +102,18 @@ const rendered = (operation: string, figure: Figure) => {
         ? renderCurves({ ...(figure.chart as CurveChart), id: key })
         : renderRows({ ...(figure.chart as RowChart), id: key }),
     selection: figure.selection,
-    table: cells(figure.table),
+    table: parseMarkdownTable(figure.table),
   };
 };
 // The overview is the sort ranking; the full page shows each operation's section in order.
-const sections = computed(() => {
-  const value = data.value;
-  if (!value) return [];
-  if (props.view === "overview") {
-    const sort = value.operations.find((operation) => operation.id === "sort");
-    return value.overview && sort
-      ? [
-          {
-            id: sort.id,
-            label: sort.label,
-            provenance: provenance(sort.runs),
-            figures: [rendered(sort.id, value.overview)],
-          },
-        ]
-      : [];
-  }
-  return value.operations.map((operation) => ({
-    id: operation.id,
-    label: operation.label,
-    provenance: provenance(operation.runs),
-    figures: operation.figures.map((figure) => rendered(operation.id, figure)),
-  }));
-});
+const sections = computed(() =>
+  data.value
+    ? comparisonSections(data.value, props.view).map((section) => ({
+        ...section,
+        figures: section.figures.map((figure) => rendered(section.id, figure)),
+      }))
+    : [],
+);
 const root = shallowRef<HTMLElement | null>(null);
 const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
   () => root.value,
@@ -125,37 +122,6 @@ const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
 );
 function clearOnEscape(event: KeyboardEvent) {
   if (event.key === "Escape") clear();
-}
-
-// The figure's Markdown table as rows of plain-text cells, rendered by Vue as text.
-function cells(markdown: string) {
-  const rows = markdown
-    .trim()
-    .split("\n")
-    .filter((line) => !/^\|\s*-/.test(line))
-    .map((line) =>
-      line
-        .replace(/^\|/, "")
-        .replace(/\|$/, "")
-        .split("|")
-        .map((cell) => cell.trim()),
-    );
-  return { head: rows[0] ?? [], body: rows.slice(1) };
-}
-type Run = ComparisonData["operations"][number]["runs"][number];
-// Which runs a section's figures come from: the dates, Tessera's commit and sorts without memory.
-function provenance(runs: Run[]) {
-  const days = runs.map((run) => run.time.slice(0, 10)).toSorted();
-  const span = days[0] === days.at(-1) ? days[0] : `${days[0]} to ${days.at(-1)}`;
-  const tessera = runs.find((run) => run.implementation === "tessera");
-  return {
-    text: `Latest run of each implementation on Bencher Intel v1 bare metal, ${span}${tessera ? "; Tessera at" : ""}`,
-    tessera: tessera && {
-      short: tessera.hash.slice(0, 7),
-      link: `https://github.com/Yikai-Liao/tessera-order/commit/${tessera.hash}`,
-    },
-    unmeasured: runs.filter((run) => !run.memory).map((run) => run.label),
-  };
 }
 </script>
 
@@ -175,16 +141,14 @@ function provenance(runs: Run[]) {
             <span class="headline-claim">{{ card.claim }}</span>
             <span class="headline-stats">
               <span class="headline-stat">
-                <strong>{{ times(card.headline.speed) }}</strong>
+                <strong>{{ card.speedText }}</strong>
                 <span>speed vs the standard library</span>
               </span>
-              <span v-if="card.headline.memoryBytes !== null" class="headline-stat">
-                <strong>{{ formatBytes(card.headline.memoryBytes) }}</strong>
-                <span>extra memory<template v-if="card.headline.referenceMemoryBytes !== null"
+              <span v-if="card.memoryText !== null" class="headline-stat">
+                <strong>{{ card.memoryText }}</strong>
+                <span>extra memory<template v-if="card.referenceMemoryText !== null"
                     >, vs
-                    <span class="nowrap">{{
-                      formatBytes(card.headline.referenceMemoryBytes)
-                    }}</span></template
+                    <span class="nowrap">{{ card.referenceMemoryText }}</span></template
                   ></span>
               </span>
             </span>
@@ -208,10 +172,10 @@ function provenance(runs: Run[]) {
       <section v-for="section in sections" :key="section.id" class="operation">
         <template v-if="view === 'all'">
           <h2 :id="section.id" class="operation-title" tabindex="-1">{{ section.label }}</h2>
-          <p class="provenance">
+          <p v-if="section.provenance" class="provenance">
             {{ section.provenance.text }}
-            <a v-if="section.provenance.tessera" :href="section.provenance.tessera!.link">{{
-              section.provenance.tessera!.short
+            <a v-if="section.provenance.tessera" :href="section.provenance.tessera.link">{{
+              section.provenance.tessera.short
             }}</a
             >.<template v-if="section.provenance.unmeasured.length">
               Memory not yet recorded for
@@ -251,10 +215,10 @@ function provenance(runs: Run[]) {
           </details>
         </section>
         <template v-if="view === 'overview'">
-          <p class="provenance">
+          <p v-if="section.provenance" class="provenance">
             {{ section.provenance.text }}
-            <a v-if="section.provenance.tessera" :href="section.provenance.tessera!.link">{{
-              section.provenance.tessera!.short
+            <a v-if="section.provenance.tessera" :href="section.provenance.tessera.link">{{
+              section.provenance.tessera.short
             }}</a
             >.<template v-if="section.provenance.unmeasured.length">
               Memory not yet recorded for

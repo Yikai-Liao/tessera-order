@@ -22,6 +22,7 @@ const vitepressDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(vitepressDir, "../..");
 const base = process.env.DOCS_BASE ?? "/";
 const markdown = { math: true, config: repositoryLinks };
+// Prime VitePress's shared renderer cache before `discoverSitePages` calls it without site plugins.
 await createMarkdownRenderer(repoRoot, markdown, base);
 const catalog = await discoverSitePages(repoRoot);
 const sections = pageSections(catalog.pages);

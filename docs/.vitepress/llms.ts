@@ -49,7 +49,7 @@ const sitePath = (repoPath: string): string =>
 export function canonicalSiteUrl(docsBase = "/tessera-order/"): string {
   const t = docsBase.trim();
   if (/^https?:\/\//i.test(t)) return t.endsWith("/") ? t : `${t}/`;
-  const path = `${t.startsWith("/") ? "" : "/"}${t}`.replace(/\/+$/, "") + "/";
+  const path = `${`${t.startsWith("/") ? "" : "/"}${t}`.replace(/\/+$/, "")}/`;
   return `${DEFAULT_ORIGIN}${path === "//" ? "/" : path}`;
 }
 
@@ -303,7 +303,9 @@ export function pageSections<P extends SitePage>(pages: readonly P[]) {
     return path.startsWith("design/") ? "design" : "development";
   };
   const order = (p: SitePage) =>
-    p.sitePath.endsWith("/index.md") ? 0 : Number(p.title.match(/^(\d+)\./)?.[1] ?? 999);
+    p.sitePath.endsWith("/index.md") || p.sitePath.startsWith("guide/")
+      ? 0
+      : Number(p.title.match(/^(\d+)\./)?.[1] ?? 999);
   return [
     ["home", "Overview"],
     ["guide", "User guide"],
@@ -367,10 +369,10 @@ export async function exportLlmsArtifacts(opts: {
   const item = (p: SitePage) =>
     `- [${p.title}](${opts.siteUrl}${p.sitePath}): ${firstSentence(p.description)}`;
   const bundle = (title: string, summary: string, list: typeof pages) =>
-    [
+    `${[
       `# ${title}\n\n> ${summary}`,
       ...list.map((p) => `---\n\nSource: ${opts.siteUrl}${p.sitePath}\n\n${p.markdown.trim()}`),
-    ].join("\n\n") + "\n";
+    ].join("\n\n")}\n`;
 
   const llmsTxt = `# Tessera
 

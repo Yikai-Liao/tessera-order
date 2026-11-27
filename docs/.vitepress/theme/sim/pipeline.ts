@@ -135,7 +135,17 @@ export const scenarios: Scenario[] = [
   {
     id: "select-median",
     label: "10M median select_nth",
-    boxes: ["probe", "varying", "node", "digit", "childOrder", "leafM", "leafL", "leafI"],
+    boxes: [
+      "probe",
+      "insertion",
+      "varying",
+      "node",
+      "digit",
+      "childOrder",
+      "leafM",
+      "leafL",
+      "leafI",
+    ],
     edges: [
       "probe-insertion",
       "insertion-varying",

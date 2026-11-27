@@ -9,6 +9,7 @@ import type { ComparisonData } from "../../../../bench/tracking/result.ts";
 import {
   COMPARISON_DATA_URL,
   type ComparisonFigure,
+  type ComparisonView,
   comparisonHeadlines,
   comparisonSections,
   parseComparisonData,
@@ -18,8 +19,9 @@ import { data as snapshot } from "./comparisonSnapshot.data.ts";
 import { useFigureSelection } from "./figureSelection.ts";
 import { data as implementationChoices } from "./implementationChoices.data.ts";
 
-// `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
-const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
+// `headlines` renders compact proof cards linking to `/benchmarks/implementations#<op>`;
+// `overview` shows the sort ranking figure; `all` shows every operation's figures.
+const props = withDefaults(defineProps<{ view?: ComparisonView; source?: string }>(), {
   view: "all",
   source:
     (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL,
@@ -126,8 +128,43 @@ function clearOnEscape(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div ref="root" class="implementation-comparison">
-    <p v-if="error" class="notice" role="alert">{{ error }}</p>
+  <div ref="root" class="implementation-comparison" :class="{ 'is-strip': view === 'headlines' }">
+    <template v-if="view === 'headlines'">
+      <div v-if="cards.length" class="proof-strip">
+        <a
+          v-for="card in cards"
+          :key="card.id"
+          class="proof-card"
+          :href="withBase(`/benchmarks/implementations#${card.id}`)"
+        >
+          <span class="proof-op">{{ card.headline.operation }}</span>
+          <span class="proof-claim">{{ card.claim }}</span>
+          <span class="proof-metrics">
+            <span class="proof-metric">
+              <strong>{{ card.speedText }}</strong>
+              <span>vs std</span>
+            </span>
+            <span v-if="card.memoryText !== null" class="proof-metric">
+              <strong>{{ card.memoryText }}</strong>
+              <span
+                >extra<template v-if="card.referenceMemoryText !== null">
+                  (vs <span class="nowrap">{{ card.referenceMemoryText }}</span
+                  >)</template
+                ></span
+              >
+            </span>
+          </span>
+        </a>
+      </div>
+      <p class="proof-foot">
+        <template v-if="cards.length"
+          >Measured on Bencher Intel v1 bare metal against Rust &amp; C++ sorts.</template
+        >
+        <template v-else>Live benchmark measurements are published on the comparison page.</template>
+        <a :href="withBase('/benchmarks/implementations')">Full comparison →</a>
+      </p>
+    </template>
+    <p v-else-if="error" class="notice" role="alert">{{ error }}</p>
     <p v-else-if="!data" class="notice" role="status">Loading the latest measurements…</p>
     <p v-else-if="!sections.length" class="notice">
       No cross-implementation figure is published yet.
@@ -250,6 +287,89 @@ function clearOnEscape(event: KeyboardEvent) {
 .implementation-comparison {
   max-width: 960px;
   margin: 24px 0;
+}
+.implementation-comparison.is-strip {
+  max-width: 100%;
+  margin: 8px 0 32px;
+}
+.proof-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 959px) {
+  .proof-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 559px) {
+  .proof-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.proof-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  transition:
+    border-color 0.2s ease,
+    transform 0.15s ease;
+}
+.proof-card:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-1px);
+}
+.proof-op {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.proof-claim {
+  color: var(--vp-c-brand-1);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.proof-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 8px;
+}
+.proof-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.proof-metric strong {
+  color: var(--vp-c-text-1);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.proof-metric span {
+  color: var(--vp-c-text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.proof-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  margin: 10px 2px 0;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+}
+.proof-foot a {
+  font-weight: 500;
 }
 .figure {
   margin: 0 0 40px;

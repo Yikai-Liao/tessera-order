@@ -302,3 +302,73 @@
 .tsr-md-link:hover {
   color: var(--vp-c-brand-1);
 }
+
+/* Home page: crisp hero spacing and two-column code + fit layout. */
+.VPHome .VPHero {
+  padding-bottom: 32px;
+}
+
+.tsr-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  margin: 16px 0 32px;
+  align-items: stretch;
+}
+
+@media (max-width: 859px) {
+  .tsr-home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tsr-card {
+  padding: 20px 22px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+}
+
+.tsr-card > h3:first-child {
+  margin-top: 0;
+}
+
+.tsr-card div[class*="language-"] {
+  margin: 12px 0 8px;
+}
+
+.tsr-fit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tsr-fit-block {
+  padding-left: 14px;
+  border-left: 3px solid var(--vp-c-divider);
+}
+
+.tsr-fit-block.is-good {
+  border-left-color: #1baf7a;
+}
+
+.tsr-fit-block h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.tsr-card .tsr-fit-block p,
+.tsr-card .tsr-fit-block ul {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-card .tsr-fit-block ul {
+  padding-left: 18px;
+}
+
+.tsr-card .tsr-fit-block li + li {
+  margin-top: 4px;
+}

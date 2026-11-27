@@ -1,31 +1,16 @@
 ---
-# Give the interactive figures the full document width, without an outline column.
+# Give the interactive history dashboard the full document width, without an outline column.
 aside: false
 pageClass: performance-page
-description: Performance summary for Tessera across random, sorted, nearly sorted, and skewed inputs, with O(√n) serial extra memory and main-branch benchmark history.
 ---
 
-# Performance
+# Main history
 
 <script setup lang="ts">
-import ImplementationComparison from "../.vitepress/theme/components/ImplementationComparison.vue";
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
-In the current measurements:
-
-- **Large random inputs:** Tessera is the fastest stable sort for most key and record types. On `u32` keys, unstable SIMD and radix sorts are faster.
-- **Sorted and nearly sorted inputs:** sorted inputs are faster than with `slice::sort`, and nearly sorted ones many times faster.
-- **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
-- **Memory:** a serial `sort` needs extra memory that grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input. Parallel sorting, argsort and cached-key sorting have [their own bounds](../../conformance/semantics.md#space).
-
-The [implementation comparison](implementations.md) shows every figure behind these statements.
-
-<ImplementationComparison view="overview" />
-
-## Main history
-
-How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners: whether main is getting faster, which cases moved at which commit, and how long each case takes now.
+How long Tessera takes to sort fixed inputs on `main`, measured on Bencher's Intel v1 Bare Metal runners: whether `main` is getting faster, which cases moved at which commit, and how long each case takes now. For standings and memory comparisons against other Rust and C++ sorting libraries, see [vs Other Sorts](implementations.md).
 
 <PerformanceHistory />
 

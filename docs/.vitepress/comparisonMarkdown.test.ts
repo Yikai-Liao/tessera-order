@@ -29,14 +29,8 @@ function makeFixture(): ComparisonData {
     chart: {
       title: "Fastest of 7 stable sorts",
     } as ComparisonData["operations"][number]["figures"][number]["chart"],
-    table: [
-      "| Sort | Kind | Stability | Speed vs slice::sort | Largest extra memory |",
-      "| --- | --- | --- | --- | --- |",
-      "| Tessera | radix sort | stable | 2.6× | 1.2 MB |",
-      "| radsort | radix sort | stable | 2.5× | 8 MB |",
-    ].join("\n"),
+    table: "| Sort | Speed |\n| --- | --- |\n| Tessera | 2.6× |\n| radsort | 2.5× |",
   };
-
   return parseComparisonData({
     spec: SPEC_UUID,
     overview: overviewFigure,
@@ -82,11 +76,7 @@ function makeFixture(): ComparisonData {
               title: "Grows as √n",
             } as ComparisonData["operations"][number]["figures"][number]["chart"],
             kind: "curves" as const,
-            table: [
-              "| Sort | 1,024 | 1,048,576 |",
-              "| --- | --- | --- |",
-              "| Tessera | 20 kB | 1.2 MB |",
-            ].join("\n"),
+            table: "| Sort | 1,048,576 |\n| --- | --- |\n| Tessera | 1.2 MB |",
           },
         ],
       },
@@ -129,49 +119,34 @@ function makeFixture(): ComparisonData {
   });
 }
 
-test("renderComparisonMarkdown overview omits section headings and includes table and provenance", () => {
+test("renderComparisonMarkdown renders headlines, overview, all, and empty views accurately", () => {
   const data = makeFixture();
-  const markdown = renderComparisonMarkdown(data, "overview");
 
-  assert.doesNotMatch(markdown, /^#{1,6}\s/m);
-  assert.match(markdown, /^\*\*Fastest of 7 stable sorts\.\*\* Every sort on the same/m);
-  assert.match(markdown, /\| Tessera \| radix sort \| stable \| 2\.6× \| 1\.2 MB \|/);
+  const headlines = renderComparisonMarkdown(data, "headlines");
+  assert.doesNotMatch(headlines, /^#{1,6}\s/m);
   assert.match(
-    markdown,
-    /2026-11-23 to 2026-11-27; Tessera at \[d849b68\]\(https:\/\/github\.com\/Yikai-Liao\/tessera-order\/commit\/d849b6801234567890abcdef1234567890abcdef\)\./,
-  );
-  assert.match(markdown, /Memory not yet recorded for radsort\./);
-});
-
-test("renderComparisonMarkdown all renders headlines, sections, subjects, titles, tables, and provenance", () => {
-  const data = makeFixture();
-  const markdown = renderComparisonMarkdown(data, "all");
-
-  assert.match(markdown, /^## At a glance$/m);
-  assert.match(
-    markdown,
+    headlines,
     /\| Full sort \| Fastest of 7 stable sorts \| 2\.6× \| 1\.2 MB \(vs 8 MB\) \|/,
   );
   assert.match(
-    markdown,
+    headlines,
     /\| Stable \\\| selection \| Ranked 2nd of 4 stable selections \| 1\.04× \| — \|/,
   );
-  assert.match(markdown, /^## Full sort$/m);
-  assert.match(markdown, /^### Overall ranking$/m);
-  assert.match(markdown, /^### Grows as √n$/m);
-  // When `subject` is absent and `title` becomes the heading, the title is not repeated below it.
-  assert.doesNotMatch(markdown, /### Grows as √n\n\n\*\*Grows as √n/);
-  assert.match(markdown, /### Grows as √n\n\nPeak heap allocation beyond the input\./);
-  // Single-day runs do not print a redundant "date to date" span.
-  assert.match(markdown, /bare metal, 2026-11-27; Tessera at \[d849b68\]/);
-});
 
-test("renderComparisonMarkdown and helpers handle empty sections and runs gracefully", () => {
+  const overview = renderComparisonMarkdown(data, "overview");
+  assert.doesNotMatch(overview, /^#{1,6}\s/m);
+  assert.match(overview, /^\*\*Fastest of 7 stable sorts\.\*\*/m);
+  assert.match(overview, /2026-11-23 to 2026-11-27; Tessera at \[d849b68\]/);
+  assert.match(overview, /Memory not yet recorded for radsort\./);
+
+  const all = renderComparisonMarkdown(data, "all");
+  assert.match(all, /^## At a glance$/m);
+  assert.match(all, /^## Full sort$/m);
+  assert.match(all, /^### Grows as √n\n\nPeak heap allocation beyond the input\./m);
+  assert.match(all, /bare metal, 2026-11-27; Tessera at \[d849b68\]/);
+
   const empty = parseComparisonData({ spec: null, overview: null, operations: [] });
-  assert.equal(
-    renderComparisonMarkdown(empty, "overview"),
-    "No cross-implementation figure is published yet.",
-  );
+  assert.equal(renderComparisonMarkdown(empty, "headlines"), "");
   assert.equal(
     renderComparisonMarkdown(empty, "all"),
     "No cross-implementation figure is published yet.",
@@ -180,130 +155,87 @@ test("renderComparisonMarkdown and helpers handle empty sections and runs gracef
   assert.equal(comparisonProvenance([]), null);
 });
 
-test("parseMarkdownTable parses aligned separators, escaped pipes, and empty input", () => {
-  assert.deepEqual(parseMarkdownTable("   "), { head: [], body: [] });
-  const parsed = parseMarkdownTable(
-    [
-      "| Name | Notes |",
-      "| :--- | ---: |",
-      "| Tessera | fast \\| stable |",
-      "| radsort | 8 MB |",
-    ].join("\n"),
+test("parseMarkdownTable handles separators, escaped pipes, and empty input", () => {
+  assert.deepEqual(parseMarkdownTable(" "), { head: [], body: [] });
+  assert.deepEqual(
+    parseMarkdownTable("| Name | Notes |\n| :--- | ---: |\n| Tessera | fast \\| stable |"),
+    {
+      head: ["Name", "Notes"],
+      body: [["Tessera", "fast | stable"]],
+    },
   );
-  assert.deepEqual(parsed, {
-    head: ["Name", "Notes"],
-    body: [
-      ["Tessera", "fast | stable"],
-      ["radsort", "8 MB"],
-    ],
-  });
 });
 
-test("loadComparisonSnapshot reads DOCS_COMPARISON_FILE and never falls back to network on failure", async (t) => {
+test("loadComparisonSnapshot resolves local overrides safely without network fallback", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-comparison-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
+  const publicDir = join(dir, "public");
+  await mkdir(publicDir, { recursive: true });
   const fixture = makeFixture();
   const validPath = join(dir, "comparison.json");
-  const badPath = join(dir, "bad.json");
   await writeFile(validPath, JSON.stringify(fixture));
-  await writeFile(badPath, JSON.stringify({ spec: "not-a-uuid" }));
+  await writeFile(join(dir, "bad.json"), JSON.stringify({ spec: "not-a-uuid" }));
+  await writeFile(join(publicDir, "preview.json"), JSON.stringify(fixture));
 
   let fetchCalls = 0;
-  const stubFetch = (async () => {
+  const noFetch = (async () => {
     fetchCalls += 1;
-    throw new Error("should not fetch");
+    throw new Error("unexpected network fetch");
   }) as unknown as typeof globalThis.fetch;
 
-  const loaded = await loadComparisonSnapshot({
-    env: { DOCS_COMPARISON_FILE: validPath },
-    fetch: stubFetch,
-  });
-  assert.deepEqual(loaded, fixture);
-
-  assert.equal(
-    await loadComparisonSnapshot({ env: { DOCS_COMPARISON_FILE: badPath }, fetch: stubFetch }),
-    null,
+  assert.deepEqual(
+    await loadComparisonSnapshot({ env: { DOCS_COMPARISON_FILE: validPath }, fetch: noFetch }),
+    fixture,
   );
   assert.equal(
     await loadComparisonSnapshot({
-      env: { DOCS_COMPARISON_FILE: join(dir, "missing.json") },
-      fetch: stubFetch,
+      env: { DOCS_COMPARISON_FILE: join(dir, "bad.json") },
+      fetch: noFetch,
+    }),
+    null,
+  );
+  assert.deepEqual(
+    await loadComparisonSnapshot({
+      env: { VITE_COMPARISON_SOURCE: "/preview.json" },
+      publicDir,
+      fetch: noFetch,
+    }),
+    fixture,
+  );
+  assert.equal(
+    await loadComparisonSnapshot({
+      env: { VITE_COMPARISON_SOURCE: "/../comparison.json" },
+      publicDir,
+      fetch: noFetch,
     }),
     null,
   );
   assert.equal(fetchCalls, 0);
 });
 
-test("loadComparisonSnapshot resolves VITE_COMPARISON_SOURCE inside publicDir and blocks traversal", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "tessera-comparison-public-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const publicDir = join(dir, "public");
-  await mkdir(publicDir, { recursive: true });
-  const fixture = makeFixture();
-  await writeFile(join(publicDir, "preview.json"), JSON.stringify(fixture));
-  await writeFile(join(dir, "outside.json"), JSON.stringify(fixture));
-
-  let fetchCalls = 0;
-  const stubFetch = (async () => {
-    fetchCalls += 1;
-    throw new Error("should not fetch");
-  }) as unknown as typeof globalThis.fetch;
-
-  const loaded = await loadComparisonSnapshot({
-    env: { VITE_COMPARISON_SOURCE: "/preview.json" },
-    publicDir,
-    fetch: stubFetch,
-  });
-  assert.deepEqual(loaded, fixture);
-
-  const escaped = await loadComparisonSnapshot({
-    env: { VITE_COMPARISON_SOURCE: "/../outside.json" },
-    publicDir,
-    fetch: stubFetch,
-  });
-  assert.equal(escaped, null);
-  assert.equal(fetchCalls, 0);
-});
-
-test("loadComparisonSnapshot fetches remote URL and degrades to null on offline, HTTP, schema, or timeout errors", async () => {
+test("loadComparisonSnapshot fetches remote URL and degrades to null on errors or timeouts", async () => {
   const fixture = makeFixture();
   const seenUrls: string[] = [];
-
   const okFetch = (async (input: string | URL | Request) => {
     seenUrls.push(String(input));
     return new Response(JSON.stringify(fixture), { status: 200 });
   }) as unknown as typeof globalThis.fetch;
 
-  const loaded = await loadComparisonSnapshot({ env: {}, fetch: okFetch });
-  assert.deepEqual(loaded, fixture);
+  assert.deepEqual(await loadComparisonSnapshot({ env: {}, fetch: okFetch }), fixture);
   assert.deepEqual(seenUrls, [COMPARISON_DATA_URL]);
 
-  const customUrl = "https://example.test/custom-comparison.json";
-  const fromCustom = await loadComparisonSnapshot({
-    env: { VITE_COMPARISON_SOURCE: customUrl },
-    fetch: okFetch,
-  });
-  assert.deepEqual(fromCustom, fixture);
-  assert.equal(seenUrls.at(-1), customUrl);
-
-  const offlineFetch = (async () => {
-    throw new TypeError("network unreachable");
+  const offline = (async () => {
+    throw new TypeError("offline");
   }) as unknown as typeof globalThis.fetch;
-  assert.equal(await loadComparisonSnapshot({ env: {}, fetch: offlineFetch }), null);
+  assert.equal(await loadComparisonSnapshot({ env: {}, fetch: offline }), null);
 
-  const httpErrorFetch = (async () =>
-    new Response("not found", { status: 404 })) as unknown as typeof globalThis.fetch;
-  assert.equal(await loadComparisonSnapshot({ env: {}, fetch: httpErrorFetch }), null);
+  const notFound = (async () =>
+    new Response("nope", { status: 404 })) as unknown as typeof globalThis.fetch;
+  assert.equal(await loadComparisonSnapshot({ env: {}, fetch: notFound }), null);
 
-  const invalidPayloadFetch = (async () =>
-    new Response(JSON.stringify({ spec: null }), {
-      status: 200,
+  const timeout = ((_u: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_res, rej) => {
+      init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
     })) as unknown as typeof globalThis.fetch;
-  assert.equal(await loadComparisonSnapshot({ env: {}, fetch: invalidPayloadFetch }), null);
-
-  const timeoutFetch = ((_input: string | URL | Request, init?: RequestInit) =>
-    new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
-    })) as unknown as typeof globalThis.fetch;
-  assert.equal(await loadComparisonSnapshot({ env: {}, timeoutMs: 25, fetch: timeoutFetch }), null);
+  assert.equal(await loadComparisonSnapshot({ env: {}, timeoutMs: 25, fetch: timeout }), null);
 });

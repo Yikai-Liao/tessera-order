@@ -107,17 +107,10 @@ export default defineConfig({
     logo: "/logo.svg",
     nav: [
       { text: "Guide", link: "/guide/getting-started", activeMatch: "^/(guide|conformance)/" },
+      { text: "Benchmarks", link: "/benchmarks/implementations", activeMatch: "^/benchmarks/" },
       { text: "How it works", link: "/explain/", activeMatch: "^/explain/" },
       {
-        text: "Performance",
-        activeMatch: "^/benchmarks/",
-        items: [
-          { text: "Overview and history", link: "/benchmarks/" },
-          { text: "Implementation comparison", link: "/benchmarks/implementations" },
-        ],
-      },
-      {
-        text: "Development",
+        text: "Internals",
         link: "/design/engine",
         activeMatch: "^/(design|development)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
@@ -142,10 +135,10 @@ export default defineConfig({
       ],
       "/benchmarks/": [
         {
-          text: "Performance",
+          text: "Benchmarks",
           items: [
-            { text: "Overview and history", link: "/benchmarks/" },
-            { text: "Implementation comparison", link: "/benchmarks/implementations" },
+            { text: "vs Other Sorts", link: "/benchmarks/implementations" },
+            { text: "Main History", link: "/benchmarks/" },
           ],
         },
       ],
@@ -180,19 +173,15 @@ function guideSidebar() {
 function developmentSidebar() {
   return [
     {
-      text: "Design",
+      text: "Engine & Architecture",
       items: [
         { text: "Engine reference", link: "/design/engine" },
-        { text: "Operation extensions proposal", link: "/design/operation-extensions-proposal" },
-        { text: "Python binding design", link: "/design/python-binding" },
         { text: "Engine evidence", link: "/design/evidence" },
-        { text: "CI scaling proposal", link: "/design/ci-scaling-proposal" },
-        { text: "Comparison model proposal", link: "/design/comparison-model-proposal" },
         { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
       ],
     },
     {
-      text: "Development",
+      text: "Contributor Guides",
       items: [
         { text: "Contributing", link: "/CONTRIBUTING" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
@@ -204,8 +193,14 @@ function developmentSidebar() {
       ],
     },
     {
-      text: "Planning",
-      items: [{ text: "Roadmap", link: "/ROADMAP" }],
+      text: "Proposals & Roadmap",
+      items: [
+        { text: "Roadmap", link: "/ROADMAP" },
+        { text: "Operation extensions proposal", link: "/design/operation-extensions-proposal" },
+        { text: "Python binding design", link: "/design/python-binding" },
+        { text: "CI scaling proposal", link: "/design/ci-scaling-proposal" },
+        { text: "Comparison model proposal", link: "/design/comparison-model-proposal" },
+      ],
     },
   ];
 }

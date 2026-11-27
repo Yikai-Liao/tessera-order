@@ -5,82 +5,31 @@
  * source URL, build-time loading and validation, headline/provenance/section
  * derivation, Markdown table parsing, and standalone Markdown rendering.
  *
- * Browser-safe by construction: this module has no static `node:*` runtime imports,
- * so VitePress components can import its pure helpers directly while Node/Bun build
- * steps (`comparisonSnapshot.data.ts` and `llms.ts`) call `loadComparisonSnapshot()`.
- *
- * Failure semantics:
- * - `parseComparisonData()` throws a Zod error on malformed input.
- * - `loadComparisonSnapshot()` returns `null` when offline, timed out, unreachable,
- *   or invalid so documentation builds and tests never fail on network state.
+ * Browser-safe: no static `node:*` runtime imports, so Vue components import pure
+ * helpers directly while build steps call `loadComparisonSnapshot()`.
  */
 
 import type * as fsPromises from "node:fs/promises";
 import type * as nodePath from "node:path";
 import type * as nodeUrl from "node:url";
 import { formatBytes, ordinal, times } from "../../bench/report/format.ts";
-import {
-  type ComparisonData,
-  type ComparisonHeadline,
-  comparisonSchema,
-} from "../../bench/tracking/result.ts";
+import { type ComparisonData, comparisonSchema } from "../../bench/tracking/result.ts";
 
-/** Published cross-implementation benchmark snapshot on the `benchmark-data` branch. */
 export const COMPARISON_DATA_URL =
   "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json";
 
-const COMMIT_URL_PREFIX = "https://github.com/Yikai-Liao/tessera-order/commit/";
+const COMMIT_PREFIX = "https://github.com/Yikai-Liao/tessera-order/commit/";
 const DEFAULT_TIMEOUT_MS = 5000;
 
-export type ComparisonView = "overview" | "all";
+export type ComparisonView = "headlines" | "overview" | "all";
 export type ComparisonFigure = ComparisonData["operations"][number]["figures"][number];
 export type ComparisonRun = ComparisonData["operations"][number]["runs"][number];
 
-export interface ComparisonHeadlineCard {
-  id: string;
-  headline: ComparisonHeadline;
-  claim: string;
-  speedText: string;
-  memoryText: string | null;
-  referenceMemoryText: string | null;
-}
-
-export interface ComparisonProvenance {
-  text: string;
-  tessera: { short: string; link: string } | null;
-  unmeasured: string[];
-}
-
-export interface ComparisonSection {
-  id: string;
-  label: string;
-  provenance: ComparisonProvenance | null;
-  figures: ComparisonFigure[];
-}
-
-export interface MarkdownTable {
-  head: string[];
-  body: string[][];
-}
-
-export interface LoadComparisonOptions {
-  /** Override environment variables (defaults to `process.env`). */
-  env?: Record<string, string | undefined>;
-  /** Override the `docs/public` directory for relative `VITE_COMPARISON_SOURCE` overrides. */
-  publicDir?: string;
-  /** Timeout in milliseconds for remote fetches (defaults to 5000). */
-  timeoutMs?: number;
-  /** Override `fetch` for tests. */
-  fetch?: typeof globalThis.fetch;
-}
-
-/** Validate raw JSON against `comparisonSchema`. */
 export function parseComparisonData(input: unknown): ComparisonData {
   return comparisonSchema.parse(input);
 }
 
-/** Derive formatted headline summary cards for every operation that has one. */
-export function comparisonHeadlines(data: ComparisonData): ComparisonHeadlineCard[] {
+export function comparisonHeadlines(data: ComparisonData) {
   return data.operations.flatMap(({ id, headline }) => {
     if (!headline) return [];
     const standing = headline.rank === 1 ? "Fastest" : `Ranked ${ordinal(headline.rank)}`;
@@ -100,8 +49,7 @@ export function comparisonHeadlines(data: ComparisonData): ComparisonHeadlineCar
   });
 }
 
-/** Derive date span, Tessera commit link, and unmeasured-memory labels from a section's runs. */
-export function comparisonProvenance(runs: readonly ComparisonRun[]): ComparisonProvenance | null {
+export function comparisonProvenance(runs: readonly ComparisonRun[]) {
   if (!runs.length) return null;
   const days = runs.map((run) => run.time.slice(0, 10)).toSorted();
   const span = days[0] === days.at(-1) ? days[0] : `${days[0]} to ${days.at(-1)}`;
@@ -109,22 +57,16 @@ export function comparisonProvenance(runs: readonly ComparisonRun[]): Comparison
   return {
     text: `Latest run of each implementation on Bencher Intel v1 bare metal, ${span}${tessera ? "; Tessera at" : ""}`,
     tessera: tessera
-      ? {
-          short: tessera.hash.slice(0, 7),
-          link: `${COMMIT_URL_PREFIX}${tessera.hash}`,
-        }
+      ? { short: tessera.hash.slice(0, 7), link: `${COMMIT_PREFIX}${tessera.hash}` }
       : null,
     unmeasured: runs.filter((run) => !run.memory).map((run) => run.label),
   };
 }
 
-/** Select the sections and figures shown for `overview` (sort ranking) or `all` (every operation). */
-export function comparisonSections(
-  data: ComparisonData,
-  view: ComparisonView,
-): ComparisonSection[] {
+export function comparisonSections(data: ComparisonData, view: ComparisonView) {
+  if (view === "headlines") return [];
   if (view === "overview") {
-    const sort = data.operations.find((operation) => operation.id === "sort");
+    const sort = data.operations.find((op) => op.id === "sort");
     return data.overview && sort
       ? [
           {
@@ -136,18 +78,17 @@ export function comparisonSections(
         ]
       : [];
   }
-  return data.operations.map((operation) => ({
-    id: operation.id,
-    label: operation.label,
-    provenance: comparisonProvenance(operation.runs),
-    figures: operation.figures,
+  return data.operations.map((op) => ({
+    id: op.id,
+    label: op.label,
+    provenance: comparisonProvenance(op.runs),
+    figures: op.figures,
   }));
 }
 
-/** Parse a GFM Markdown table into plain-text header and body cells. */
-export function parseMarkdownTable(markdown: string): MarkdownTable {
+export function parseMarkdownTable(markdown: string) {
   const trimmed = markdown.trim();
-  if (!trimmed) return { head: [], body: [] };
+  if (!trimmed) return { head: [] as string[], body: [] as string[][] };
   const rows = trimmed
     .split("\n")
     .map((line) => line.trim())
@@ -162,118 +103,83 @@ export function parseMarkdownTable(markdown: string): MarkdownTable {
   return { head: rows[0] ?? [], body: rows.slice(1) };
 }
 
-function escapeTableCell(text: string): string {
-  return text.replace(/\s+/g, " ").trim().replaceAll("|", "\\|");
+const escCell = (s: string) => s.replace(/\s+/g, " ").trim().replaceAll("|", "\\|");
+
+function renderHeadlinesTable(cards: ReturnType<typeof comparisonHeadlines>): string {
+  const rows = cards.map((c) => {
+    const mem =
+      c.memoryText === null
+        ? "—"
+        : c.referenceMemoryText === null
+          ? c.memoryText
+          : `${c.memoryText} (vs ${c.referenceMemoryText})`;
+    return `| ${escCell(c.headline.operation)} | ${escCell(c.claim)} | ${escCell(c.speedText)} | ${escCell(mem)} |`;
+  });
+  return [
+    "| Operation | Standing | Speed vs std | Extra memory |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
 }
 
-function formatProvenanceMarkdown(provenance: ComparisonProvenance): string {
-  const commit = provenance.tessera
-    ? ` [${provenance.tessera.short}](${provenance.tessera.link})`
+function formatProvenance(p: NonNullable<ReturnType<typeof comparisonProvenance>>): string {
+  const commit = p.tessera ? ` [${p.tessera.short}](${p.tessera.link})` : "";
+  const extra = p.unmeasured.length
+    ? ` Memory not yet recorded for ${p.unmeasured.join(", ")}.`
     : "";
-  const unmeasured = provenance.unmeasured.length
-    ? ` Memory not yet recorded for ${provenance.unmeasured.join(", ")}.`
-    : "";
-  return `${provenance.text}${commit}.${unmeasured}`;
+  return `${p.text}${commit}.${extra}`;
 }
 
-function formatFigureLead(figure: ComparisonFigure, includeTitle: boolean): string {
+function formatLead(figure: ComparisonFigure, includeTitle: boolean): string {
   const title = includeTitle ? figure.title.trim() : "";
   const summary = figure.summary?.trim() ?? "";
-  if (title && summary) {
-    const punctuated = /[.!?]$/.test(title) ? title : `${title}.`;
-    return `**${punctuated}** ${summary}`;
-  }
-  if (title) return `**${title}**`;
-  return summary;
+  if (title && summary) return `**${/[.!?]$/.test(title) ? title : `${title}.`}** ${summary}`;
+  return title ? `**${title}**` : summary;
 }
 
-/** Render a validated comparison snapshot into standalone Markdown for `overview` or `all`. */
 export function renderComparisonMarkdown(data: ComparisonData, view: ComparisonView): string {
+  const cards = comparisonHeadlines(data);
+  if (view === "headlines") return cards.length ? renderHeadlinesTable(cards) : "";
+
   const sections = comparisonSections(data, view);
   if (!sections.length) return "No cross-implementation figure is published yet.";
 
   const blocks: string[] = [];
-
   if (view === "overview") {
     const [section] = sections;
     const [figure] = section.figures;
-    const lead = formatFigureLead(figure, true);
+    const lead = formatLead(figure, true);
     if (lead) blocks.push(lead);
-    const table = figure.table.trim();
-    if (table) blocks.push(table);
-    if (section.provenance) blocks.push(formatProvenanceMarkdown(section.provenance));
+    if (figure.table.trim()) blocks.push(figure.table.trim());
+    if (section.provenance) blocks.push(formatProvenance(section.provenance));
     return blocks.join("\n\n");
   }
 
-  const cards = comparisonHeadlines(data);
-  if (cards.length) {
-    const rows = cards.map((card) => {
-      const memory =
-        card.memoryText === null
-          ? "—"
-          : card.referenceMemoryText === null
-            ? card.memoryText
-            : `${card.memoryText} (vs ${card.referenceMemoryText})`;
-      return `| ${escapeTableCell(card.headline.operation)} | ${escapeTableCell(card.claim)} | ${escapeTableCell(card.speedText)} | ${escapeTableCell(memory)} |`;
-    });
-    blocks.push(
-      "## At a glance",
-      [
-        "| Operation | Standing | Speed vs std | Extra memory |",
-        "| --- | --- | --- | --- |",
-        ...rows,
-      ].join("\n"),
-    );
-  }
-
+  if (cards.length) blocks.push("## At a glance", renderHeadlinesTable(cards));
   for (const section of sections) {
     blocks.push(`## ${section.label}`);
-    if (section.provenance) blocks.push(formatProvenanceMarkdown(section.provenance));
+    if (section.provenance) blocks.push(formatProvenance(section.provenance));
     for (const figure of section.figures) {
-      const heading = figure.subject ?? figure.title;
-      blocks.push(`### ${heading}`);
-      const includeTitle = Boolean(figure.subject && figure.subject !== figure.title);
-      const lead = formatFigureLead(figure, includeTitle);
+      blocks.push(`### ${figure.subject ?? figure.title}`);
+      const lead = formatLead(figure, Boolean(figure.subject && figure.subject !== figure.title));
       if (lead) blocks.push(lead);
-      const table = figure.table.trim();
-      if (table) blocks.push(table);
+      if (figure.table.trim()) blocks.push(figure.table.trim());
     }
   }
-
   return blocks.join("\n\n");
 }
 
-interface NodeBuiltins {
-  fs: typeof fsPromises;
-  path: typeof nodePath;
-  url: typeof nodeUrl;
+function nodeBuiltins() {
+  const get = (globalThis.process as { getBuiltinModule?: (id: string) => unknown } | undefined)
+    ?.getBuiltinModule;
+  if (typeof get !== "function") return null;
+  const fs = get("node:fs/promises") as typeof fsPromises | undefined;
+  const path = get("node:path") as typeof nodePath | undefined;
+  const url = get("node:url") as typeof nodeUrl | undefined;
+  return fs && path && url ? { fs, path, url } : null;
 }
 
-function getNodeBuiltins(): NodeBuiltins | null {
-  const getBuiltin = (
-    globalThis.process as { getBuiltinModule?: (id: string) => unknown } | undefined
-  )?.getBuiltinModule;
-  if (typeof getBuiltin !== "function") return null;
-  const fs = getBuiltin("node:fs/promises") as typeof fsPromises | undefined;
-  const path = getBuiltin("node:path") as typeof nodePath | undefined;
-  const url = getBuiltin("node:url") as typeof nodeUrl | undefined;
-  if (!fs || !path || !url) return null;
-  return { fs, path, url };
-}
-
-async function readComparisonFile(
-  builtins: NodeBuiltins,
-  filePath: string,
-): Promise<ComparisonData | null> {
-  try {
-    const raw = await builtins.fs.readFile(filePath, "utf8");
-    return parseComparisonData(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-async function fetchComparisonUrl(
+async function fetchJson(
   url: string,
   timeoutMs: number,
   fetchImpl: typeof globalThis.fetch,
@@ -281,9 +187,8 @@ async function fetchComparisonUrl(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, { signal: controller.signal });
-    if (!response.ok) return null;
-    return parseComparisonData(await response.json());
+    const res = await fetchImpl(url, { signal: controller.signal });
+    return res.ok ? parseComparisonData(await res.json()) : null;
   } catch {
     return null;
   } finally {
@@ -293,57 +198,52 @@ async function fetchComparisonUrl(
 
 let cachedDefaultRemote: Promise<ComparisonData | null> | null = null;
 
-/**
- * Load and validate the build-time `comparison.json` snapshot.
- *
- * Resolution order:
- * 1. `DOCS_COMPARISON_FILE` — local filesystem path (never falls back to network on error).
- * 2. `VITE_COMPARISON_SOURCE` — `http(s)://` URL or path relative to `docs/public/`
- *    (never falls back to the default remote URL on error).
- * 3. `COMPARISON_DATA_URL` — remote fetch with timeout (memoized per process for default
- *    no-argument calls so SSR pre-hydration and `buildEnd` share one snapshot).
- *
- * Returns `null` when offline, timed out, unreachable, or invalid.
- */
-export async function loadComparisonSnapshot(
-  options?: LoadComparisonOptions,
-): Promise<ComparisonData | null> {
+/** Load `comparison.json` from `DOCS_COMPARISON_FILE`, `VITE_COMPARISON_SOURCE`, or `COMPARISON_DATA_URL`. */
+export async function loadComparisonSnapshot(options?: {
+  env?: Record<string, string | undefined>;
+  publicDir?: string;
+  timeoutMs?: number;
+  fetch?: typeof globalThis.fetch;
+}): Promise<ComparisonData | null> {
   const env = options?.env ?? globalThis.process?.env ?? {};
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = options?.fetch ?? globalThis.fetch;
 
+  const readLocal = async (filePath: string) => {
+    const node = nodeBuiltins();
+    if (!node) return null;
+    try {
+      return parseComparisonData(JSON.parse(await node.fs.readFile(filePath, "utf8")));
+    } catch {
+      return null;
+    }
+  };
+
   const fileOverride = env.DOCS_COMPARISON_FILE?.trim();
   if (fileOverride) {
-    const builtins = getNodeBuiltins();
-    if (!builtins) return null;
-    return readComparisonFile(builtins, builtins.path.resolve(fileOverride));
+    const node = nodeBuiltins();
+    return node ? readLocal(node.path.resolve(fileOverride)) : null;
   }
 
   const sourceOverride = env.VITE_COMPARISON_SOURCE?.trim();
   if (sourceOverride) {
-    if (/^https?:\/\//i.test(sourceOverride)) {
-      return fetchComparisonUrl(sourceOverride, timeoutMs, fetchImpl);
-    }
-    const builtins = getNodeBuiltins();
-    if (!builtins) return null;
-    const publicDir = builtins.path.resolve(
+    if (/^https?:\/\//i.test(sourceOverride))
+      return fetchJson(sourceOverride, timeoutMs, fetchImpl);
+    const node = nodeBuiltins();
+    if (!node) return null;
+    const publicDir = node.path.resolve(
       options?.publicDir ??
-        builtins.path.resolve(
-          builtins.path.dirname(builtins.url.fileURLToPath(import.meta.url)),
-          "../public",
-        ),
+        node.path.resolve(node.path.dirname(node.url.fileURLToPath(import.meta.url)), "../public"),
     );
-    const relativeSource = sourceOverride.replace(/^\/+/, "");
-    const resolved = builtins.path.resolve(publicDir, relativeSource);
-    const rel = builtins.path.relative(publicDir, resolved);
-    if (!rel || rel.startsWith("..") || builtins.path.isAbsolute(rel)) return null;
-    return readComparisonFile(builtins, resolved);
+    const resolved = node.path.resolve(publicDir, sourceOverride.replace(/^\/+/, ""));
+    const rel = node.path.relative(publicDir, resolved);
+    if (!rel || rel.startsWith("..") || node.path.isAbsolute(rel)) return null;
+    return readLocal(resolved);
   }
 
   if (!options) {
-    cachedDefaultRemote ??= fetchComparisonUrl(COMPARISON_DATA_URL, timeoutMs, fetchImpl);
+    cachedDefaultRemote ??= fetchJson(COMPARISON_DATA_URL, timeoutMs, fetchImpl);
     return cachedDefaultRemote;
   }
-
-  return fetchComparisonUrl(COMPARISON_DATA_URL, timeoutMs, fetchImpl);
+  return fetchJson(COMPARISON_DATA_URL, timeoutMs, fetchImpl);
 }

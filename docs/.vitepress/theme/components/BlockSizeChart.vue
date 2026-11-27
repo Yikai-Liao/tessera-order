@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import {
+  balancedBlockSize,
+  formatBytesBinary as bytes,
+  chosenBlockSize,
+  DESCRIPTOR_BYTES,
+} from "../sim/blockSize.ts";
 
-// `default_block_size` in block.rs: scratch 2·R·b·s bytes plus d·n/b bytes
-// of ledger metadata, balanced at b* = ceil(sqrt(dn / (2Rs))), scaled by 2, then
-// floored at max(1024 / s, 32) records. d is `finish::serial_descriptor_bytes`
-// on a 64-bit target: a chain link, a block address, an owner cell, a source
-// and a free-cache slot.
-const DESCRIPTOR_BYTES = 52;
 const LOG_N = { min: 4, max: 9 };
 const RECORD_BYTES = [4, 8, 16, 32, 64];
 const RADIX_BITS = [4, 6, 8, 10, 12];
@@ -20,12 +20,8 @@ const R = computed(() => 2 ** radix.value);
 const scratch = (b: number) => 2 * R.value * b * recordBytes.value;
 const tables = (b: number) => (DESCRIPTOR_BYTES * n.value) / b;
 const total = (b: number) => scratch(b) + tables(b);
-const balancedSize = (records: number, buckets: number, bytes: number) =>
-  Math.ceil(Math.sqrt((DESCRIPTOR_BYTES * records) / (2 * buckets * bytes)));
-const chosenSize = (records: number, buckets: number, bytes: number) =>
-  Math.max(1, 2 * balancedSize(records, buckets, bytes), Math.floor(1024 / bytes), 32);
-const balanced = computed(() => balancedSize(n.value, R.value, recordBytes.value));
-const chosen = computed(() => chosenSize(n.value, R.value, recordBytes.value));
+const balanced = computed(() => balancedBlockSize(n.value, R.value, recordBytes.value));
+const chosen = computed(() => chosenBlockSize(n.value, R.value, recordBytes.value));
 const lsdBuffer = computed(() => n.value * recordBytes.value);
 
 // Log-log axes: both cost terms are straight lines and the total is a V.
@@ -38,7 +34,9 @@ const bMin = 1;
 const bMax =
   4 **
   Math.ceil(
-    Math.log2(chosenSize(10 ** LOG_N.max, 2 ** Math.min(...RADIX_BITS), Math.min(...RECORD_BYTES))) / 2,
+    Math.log2(
+      chosenBlockSize(10 ** LOG_N.max, 2 ** Math.min(...RADIX_BITS), Math.min(...RECORD_BYTES)),
+    ) / 2,
   );
 const yMin = computed(() => Math.min(total(balanced.value), scratch(bMin), tables(bMax)) / 4);
 const yMax = computed(() => Math.max(scratch(bMax), tables(bMin)) * 2);
@@ -69,16 +67,6 @@ const series = computed(() => [
   { name: `ledger ${DESCRIPTOR_BYTES}n/b`, color: "#eb6834", d: path(tables), dash: "" },
   { name: "total", color: "#1baf7a", d: path(total), dash: "" },
 ]);
-
-function bytes(v: number): string {
-  const units = ["B", "KiB", "MiB", "GiB"];
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v < 10 && !Number.isInteger(v) ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
-}
 
 const xTicks = Array.from({ length: Math.log2(bMax) / 2 + 1 }, (_, i) => 4 ** i);
 // Ticks at powers of two, so that every label is a round KiB/MiB value.

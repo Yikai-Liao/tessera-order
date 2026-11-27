@@ -4,9 +4,11 @@
 
 | Changed boundary | Additional automatic checks |
 |---|---|
-| Library source or library manifest | Rust validation, PR revision measurement and Docs (the figures replay the engine) |
+| Library source or library manifest | Rust validation, Python validation, PR revision measurement and Docs (the figures replay the engine) |
 | Library tests or Rust validation workflow | Rust validation |
-| Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, implementation comparison checks and PR revision measurement |
+| Python binding, Python benchmark script or Python CI workflow | Python validation |
+| Root `Cargo.lock` | Rust validation, implementation comparison checks and PR revision measurement |
+| Root `Cargo.toml`, `rust-toolchain` / `rust-toolchain.toml` or `.cargo/` | Rust validation, Python validation, implementation comparison checks and PR revision measurement |
 | Native adapters or implementation-session tooling | Implementation comparison checks |
 | Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Implementation comparison checks and PR revision measurement |
 | Revision execution or shard validation | PR revision measurement |
@@ -37,6 +39,7 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 | `cargo package` | in `rust / lint` | the same |
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Implementation harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
+| Python binding lint, Rust tests, stub check (`mypy --strict`) and wheel tests | Linux 3.13 `abi3` (with and without NumPy), Linux 3.10, macOS 3.13 `abi3`, Windows 3.13 `abi3` | adds Linux ARM64 3.13 `abi3`, Linux 3.9, Linux 3.11 `abi3` |
 
 Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. PR benchmark preparation shares the [aligned-build dependency cache](continuous-benchmarks.md#capacity-and-recovery) with main static Rust tracking, saving from PRs only while automatic main tracking is disabled.
 

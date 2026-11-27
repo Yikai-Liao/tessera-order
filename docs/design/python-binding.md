@@ -1,75 +1,86 @@
 # Python binding design
 
-Status: accepted, not started. This page records the decisions to implement; when the binding exists, its code and tests replace the sections they make true.
+Status: implemented. The code and tests in `python/` are authoritative for runtime behavior; this page keeps the design rationale and contracts.
 
-The binding wraps the Rust crate and does not wait for the C++ implementation. It has its own package version and `python/vX.Y.Z` tags.
+The binding wraps the Rust crate and does not wait for the C++ implementation. Its package version synchronizes `X.Y.Z` with the embedded `tessera-order` Rust crate (`python/v0.2.0` embeds Rust `0.2.0`), using PEP 440 post-releases (`python/v0.2.0.post1`) for Python-only adapter or packaging fixes ([releases](../../RELEASING.md)). The module exposes both `__version__` (Python package version) and `__core_version__` (embedded Rust crate version).
 
-## First release
+## Public API
 
-Support `list`, standard-library `array.array`, and one-dimensional numeric `numpy.ndarray`. The API follows NumPy's function names and keywords, so a NumPy caller switches by changing the module; NumPy's `sort` and `argsort` keywords also match the [Python array API standard](https://data-apis.org/array-api/latest/). The first release provides two functions:
+Support `list`, standard-library `array.array`, and `numpy.ndarray` of any dimension. Every operation uses Tessera's stable radix engine, so no-op or unsupported compatibility flags (`kind`, `stable`, `order`, `out`) are omitted. Copy-returning `sort` and `argsort` follow NumPy's names and `axis`/`descending` semantics; in-place sorting is the dedicated `sort_inplace` function returning `None`.
 
-| Function | NumPy counterpart | Result |
+| Function | Counterpart | Result |
 |---|---|---|
-| `sort(a, axis=-1, kind=None, order=None, *, stable=None, descending=False, key=None, out=None)` | `numpy.sort` | A sorted copy; with `out=a`, `a` sorted in place |
-| `argsort(a, axis=-1, kind=None, order=None, *, stable=None, descending=False, key=None)` | `numpy.argsort` | An index sequence |
+| `sort(a, axis=-1, *, descending=None, key=None, threads=1)` | `numpy.sort` / `sorted` | A sorted copy of `a` |
+| `sort_inplace(a, axis=-1, *, descending=None, key=None, threads=1)` | `ndarray.sort` / `list.sort` | Mutates `a` in place and returns `None` |
+| `argsort(a, axis=-1, *, descending=None, key=None, threads=1)` | `numpy.argsort` | Sorted indices |
+| `partition(a, kth, axis=-1, *, descending=None, key=None, threads=1)` | `numpy.partition` | A partitioned copy with `kth` rank(s) in final sorted position |
+| `partition_inplace(a, kth, axis=-1, *, descending=None, key=None, threads=1)` | `ndarray.partition` | Mutates `a` in place around `kth` and returns `None` |
+| `argpartition(a, kth, axis=-1, *, descending=None, key=None, threads=1)` | `numpy.argpartition` | Indices partitioning `a` around `kth` |
 
-Keywords keep their NumPy meaning, and every NumPy-accepted value is honored because a stable result is a legal result for each of them:
+Parameter contracts (shared by one argument parser across all six functions):
 
-- `stable=True` guarantees that equal keys keep their input order; `None` and `False` leave it unspecified, as in NumPy 2.0. Every call runs the stable Rust kernel, and `stable=False` claims no speed advantage. The keyword replaces separate stable and unstable functions.
-- `descending=True` sorts in descending order with NaN last, as in NumPy 2.5. It changes the key encoding and never reverses an ascending result.
-- `kind` accepts NumPy's values and selects no other kernel; `"stable"` and `"mergesort"` imply `stable=True`.
-- `order` must be `None`, because structured dtypes are deferred. `axis` accepts only values that address the single dimension.
-- `key` is Tessera's extension for lists, following Python's `sorted`; NumPy has no counterpart.
-- `out` follows NumPy's general output-array convention, because NumPy sorts in place only through the `ndarray.sort` method, which a binding cannot add. `out=a` sorts the input in place with the core's memory bound; another writable container of the same type, length and element type receives the result.
+- `kth` (for `partition`, `partition_inplace`, `argpartition`): an integer or a sequence of integers (negative ranks index from the end of the lane; `bool` raises `TypeError`; any out-of-bounds rank, including any rank on an empty lane, raises `ValueError`). Duplicate ranks are deduplicated; an empty sequence is a valid no-op. Single `kth` calls `tessera_order::select_nth` / `select_nth_by_key` directly (`argpartition` runs `select_nth_by_key` on `0..len` indices without a full sort). Sequence `kth` sorts and deduplicates normalized ranks and recursively partitions around the median rank on disjoint sub-slices, relying on `select_nth`'s equal-key stability across the whole slice to preserve stable rank semantics without falling back to a full sort.
+- `axis`: default `-1`.
+  - On `list` and `array.array` (1D): accepts `-1`, `0`, or `None` (for `sort`, `argsort`, `partition`, `argpartition`; `sort_inplace` and `partition_inplace` reject `axis=None` with `TypeError`, matching `ndarray.sort` / `ndarray.partition`). Out-of-bounds axes raise `ValueError`; `bool` raises `TypeError`.
+  - On `numpy.ndarray` (any `ndim >= 0`):
+    - Integer `axis` in `[-ndim, ndim)` operates on each 1D lane along that axis independently (0D arrays have no valid integer axis and raise `ValueError`, matching NumPy).
+    - `axis=None` flattens the array in C-order and returns a 1D result for `sort`, `argsort`, `partition`, and `argpartition` (including 0D arrays and broadcast views). For `sort_inplace` and `partition_inplace`, `axis=None` raises `TypeError` because in-place operations cannot change array shape.
+- `descending`: `None` (default) or `False` sorts ascending; `True` sorts descending with NaN still last (matching NumPy 2.5). Non-bool values raise `TypeError`. Descending changes key encoding and never reverses an ascending result. In `partition*`/`argpartition`, `descending=True` selects ranks in that descending order (so `kth=0` selects the maximum, and NaNs remain at the highest ranks).
+- `key`: optional callable (`None` by default). When `None`, numeric buffers run the zero-callback Rust path and numeric lists extract numbers directly. When provided, `key` runs a unified cached-key path across `list`, `array.array`, and **any `numpy.ndarray` dtype** (including structured, custom, string, and `object` dtypes): each element's key is evaluated once, ordered or partitioned in Rust, and the resulting permutation reorders the elements. Because `key` invokes Python per element, it trades speed for expressiveness rather than matching zero-callback numeric buffer throughput.
+- `threads`: `int | None = 1`.
+  - `1` (default): serial Rust engine with zero thread-pool involvement, matching single-threaded `np.sort` and avoiding oversubscription inside worker processes.
+  - `None`: Rayon global thread pool (respects `RAYON_NUM_THREADS`, defaults to available hardware parallelism).
+  - Integer `>= 2`: runs in a single-slot cached Rayon pool of that exact width (`Mutex<Option<(usize, Arc<ThreadPool>)>>`), so repeated calls with the same thread count pay no pool-creation cost and changing the count drops the old pool without accumulating idle threads.
+  - `bool` raises `TypeError`; integers `< 1` raise `ValueError`.
 
-Defer `partition(a, kth, ...)` and `argpartition(a, kth, ...)` until there is a design for NumPy's signatures, including an integer or a sequence of integers for `kth`. Rust exposes only single-rank selection. Stable sort or argsort is a correctness reference for several ranks but does not save refinement work. Equal keys would resolve as in a stable argsort, which is observable only in `argpartition` indices.
+| Input | `sort` / `partition` output | `sort_inplace` / `partition_inplace` | `argsort` / `argpartition` output |
+|---|---|---|---|
+| `list` | `list`, retaining original objects | Mutates `list` in place, returns `None` | `list[int]` |
+| `array.array` | `array.array` with the same typecode | Mutates buffer in place, returns `None` | `list[int]` |
+| `numpy.ndarray` | `ndarray` with the same dtype (1D when `axis=None`, else same shape) | Mutates `ndarray` in place, returns `None` | `ndarray` with dtype `np.intp` (1D when `axis=None`, else same shape) |
 
-These return and mutation rules are identical for all supported container families.
-
-| Input | `sort` output | `argsort` output |
-|---|---|---|
-| `list` | `list`, retaining original objects | `list[int]` |
-| `array.array` | `array.array` with the same typecode | `list[int]` |
-| `numpy.ndarray` | `ndarray` with the same dtype | `ndarray` with dtype `np.intp` |
-
-NumPy is optional. Importing the package and using lists or `array.array` must work without NumPy installed. No comparator fallback is provided. Unsupported keys, dtypes and layouts raise explicit exceptions.
-
-Document and benchmark the actual kernel. The `stable` keyword adds no unstable interface to the Rust crate.
+NumPy is optional. Importing the package and using lists or `array.array` must work without NumPy installed. No comparator fallback is provided. Unsupported containers, dtypes, keys, and layouts raise explicit exceptions.
 
 ## Container adapters
 
 ### Lists
 
-Numeric lists and arbitrary object lists with a numeric `key=` are supported. Save strong references to the original objects, extract each numeric key once, sort keys and original indices with Tessera, then apply the permutation to the original references. Preserve object identity, numeric subclasses, duplicate references and the order of equal keys under the stable contract. Never replace original Python numbers with newly constructed numbers just to apply a sort.
+Numeric lists (`key=None`) and arbitrary object lists (`key=callable`) are supported. Snapshot strong references to the original objects, extract each numeric key once, sort keys and original indices with Tessera, then apply the permutation to the original references. Preserve object identity, numeric subclasses (including `bool`, a Python `int` subclass), duplicate references, and equal-key order. Never replace original Python numbers with newly constructed numbers.
 
-On a successful call, each element's key is evaluated exactly once. No radix pass calls back into Python. Key extraction and validation finish before the binding writes to the list. A failing key or range check leaves the binding's writeback unstarted; callback side effects are not rolled back. Reentrant mutation of the source by a callback must be detected and given an explicit failure contract before implementation; do not overwrite a callback's edits using stale list positions.
+On a successful call, each element's key is evaluated exactly once. No radix pass calls back into Python. Key extraction and validation finish before any writeback begins; a failing key or range check leaves writeback unstarted (callback side effects are not rolled back).
 
-`key=` primarily serves lists in the first release. Array callers should compute numeric key arrays with array operations and use `argsort` to reorder associated columns or objects. Do not add `keys=`, `order=` or field-list APIs in the first release.
+Reentrant mutation contract: before calling `key`, snapshot the input list's strong references and raw element pointers. Check the list length immediately before and after each `key` callback. After extraction and again before in-place writeback, verify the length and every element pointer against the snapshot. These full checks take O(n) total work, rather than scanning the list for each callback. A detected mutation raises `ValueError("list modified during sort")` without writing back stale positions. The `array.array` and `ndarray` `key=` paths also detect in-place mutations before writeback.
 
 ### `array.array`
 
-Use the buffer protocol to access integer, `f` and `d` storage directly. Check buffer format, actual `itemsize`, dimensionality, contiguity, alignment, writability and byte order before dispatching once to a Rust numeric entry. Do not create an intermediate Python list or per-element Python numbers. Platform-dependent typecodes such as `l` and `L` must use their actual width. The exact supported typecode/width table is tested per platform; incompatible formats are rejected rather than reinterpreted.
+For `key=None`, use the PEP 3118 buffer protocol to access signed/unsigned integer, `f`, and `d` storage directly. Check buffer format, actual `itemsize`, dimensionality, contiguity, alignment, writability, and byte order before dispatching once to a Rust numeric entry. Platform-dependent typecodes such as `l` and `L` use their actual width; unsupported formats (such as Unicode `'u'`/`'w'`) raise `TypeError` when `key=None`. With `key=callable`, extract numeric keys once per element, sort indices in Rust, and permute the array's raw `itemsize` elements (or write into a new `array.array` of the same typecode).
 
 ### NumPy
 
-Start with one-dimensional `int8/16/32/64`, `uint8/16/32/64`, and `float32/64`.
+Detect `numpy.ndarray` only when `"numpy"` is already present in `sys.modules`, so calling the binding without NumPy installed never triggers an import.
 
-| Layout | In-place sort | Sorted copy and argsort |
+With `key=None`, direct numeric dtypes are `int8/16/32/64`, `uint8/16/32/64`, and `float32/64`:
+
+| Layout | `sort_inplace` | `sort` (copy) and `argsort` |
 |---|---|---|
-| Writable, contiguous, aligned, native-endian numeric buffer | Direct buffer | Supported |
-| Noncontiguous one-dimensional view, including negative stride | Reject | Read in logical view order |
-| Read-only numeric array | Reject | Supported |
-| Unaligned or non-native-endian numeric array | Reject | Convert into owned aligned/native working storage; preserve output dtype |
-| Multidimensional array | Deferred pending an `axis` contract; `axis=-1` on C-contiguous rows can loop over slices and sort each row independently | Deferred |
-| Object, string, complex or structured dtype | No direct sort | Extract a supported numeric key array, then argsort it |
+| Writable, aligned, native-endian lane (`strides[ax] == itemsize`, no self-overlap) | Direct in-place sort per lane (zero gather/scatter) | Supported (contiguous copy + in-place sort on C-contiguous `axis=-1`) |
+| Writable strided, negative-stride, unaligned, or non-native-endian lane (no self-overlap) | Gather each lane to 1D native aligned scratch, sort, scatter back (preserving dtype/byte order) | Read each lane in logical view order, sort/argsort, write output preserving dtype |
+| Read-only numeric array | Reject (`ValueError`) | Supported |
+| Broadcast or self-overlapping writable view (e.g. `stride == 0` with `shape > 1` or overlapping coordinates) | Reject (`ValueError`) | Supported (read-only traversal) |
+| Unsupported dtype (`bool`, `complex`, string, structured, `object`) with `key=None` | Reject (`TypeError`) | Reject (`TypeError`) |
 
-Indices for a view are relative to that view, not its backing array. Sorted copies preserve dtype, including byte order; any working-storage conversion and its cost are included in the interface's space and timing measurements. No noncontiguous input is silently treated as a contiguous slice.
+With `key=callable`, **any `numpy.ndarray` dtype** (including structured, custom, string, `bool`, `complex`, and `object`) is supported along any valid `axis` (and `axis=None` for `sort`/`argsort`):
+
+- For non-object dtypes (`!dtype.hasobject`), elements are plain `itemsize`-byte values: extract keys once per lane element, sort indices in Rust, and permute the raw element bytes into the output (or back into `a` for `sort_inplace`, rejecting read-only / self-overlapping views).
+- For object-containing dtypes (`dtype.hasobject`), never raw-`memcpy` `PyObject*` bytes; perform refcount-safe permutation through Python/NumPy element operations after sorting indices in Rust.
+
+Indices for a view or axis lane are relative to that lane (or flattened C-order for `axis=None`), not the backing array. Sorted copies preserve dtype including byte order by allocating output with `numpy.empty(shape, dtype=a.dtype)`.
 
 ## Numeric semantics
 
-Python integers are arbitrary precision. Inspect the whole key range and use one lossless common representation from `i64`, `u64`, `i128` or `u128`. Raise `OverflowError` if none covers the full range, including a mixture of negative keys and unsigned values above `i128::MAX`. Never truncate or silently convert large integers to floating point.
+Python integers are arbitrary precision. Inspect the whole key range in one pass and widen losslessly across `i64`, `u64`, `i128`, or `u128`. Raise `OverflowError` if none covers the full range, including a mixture of negative keys and unsigned values above `i128::MAX`. Never truncate or silently convert large integers to floating point.
 
-The first release rejects mixed integer/float key sets unless the caller explicitly normalizes them, for example with `key=float`. Strings, `Decimal`, `Fraction` and arbitrary comparison objects are not direct numeric keys.
+Mixed integer/float key sets raise `TypeError` unless the caller explicitly normalizes them (for example with `key=float`). Strings, `Decimal`, `Fraction`, and arbitrary comparison objects are not direct numeric keys (`TypeError`).
 
 Python floating-point ordering is an adapter contract, distinct from the Rust API's bitwise `total_cmp` order:
 
@@ -78,31 +89,39 @@ Python floating-point ordering is an adapter contract, distinct from the Rust AP
 | Ordinary numeric values | Numeric ascending or descending order |
 | NaN | Last in both directions |
 | `-0.0` and `+0.0` | Equal sorting keys |
-| NaNs, zeros and other equal keys in stable operations | Preserve input order |
+| NaNs, zeros, and other equal keys | Preserve input order |
 | Original values | Preserve bits, including NaN payloads |
 
-Normalize only sorting keys; move the original values or object references. A float buffer can use the Rust by-key API with a library-owned unsigned key encoder, so no Python callback enters the radix loop and no full key copy is required just to normalize float order. `descending=True` changes key encoding; it must not reverse the sorted result. The NaN sentinel remains last in both directions. These rules match `numpy.sort` with `stable=True`, including `descending` as defined in NumPy 2.5.
+Normalize only sorting keys; move original values or object references. Exact unsigned encoding for `f64` (and identically for `f32`):
 
-## Binding and buffer safety
+- Canonicalize `-0.0` (`0x8000_0000_0000_0000`) to `+0.0` (`0x0000_0000_0000_0000`).
+- If `x.is_nan()`, map to `u64::MAX` (`0xFFFF_FFFF_FFFF_FFFF`) in **both** ascending and descending order.
+- Otherwise, ascending encoding flips all bits when negative and flips only the sign bit when non-negative, mapping `[-inf, +inf]` into `[0x000F_FFFF_FFFF_FFFF, 0xFFF0_0000_0000_0000]`; descending encoding bitwise-inverts that ascending key, keeping `[-inf, +inf]` strictly below `u64::MAX`.
 
-Use PyO3, rust-numpy and maturin. Keep three adapters: list extraction/reference writeback, standard buffer validation/access, and NumPy dtype/layout/borrow and output handling. They all call the same Rust Tessera crate. Container/type checks happen at entry, outside the sort loops.
+Because `u64::MAX` never collides with any finite or infinite value in either direction, float buffers with NaNs or mixed `±0.0` call Rust's `sort_by_key` / `argsort_by_key` / `select_nth_by_key` / `par_*_by_key` directly with a pure-Rust key encoder: no Python callback enters the radix loop and no extra key copy is allocated. When a float slice has no NaNs and does not mix `-0.0` and `+0.0`, `total_cmp` (ascending) and `Reverse<f32>` / `Reverse<f64>` (descending) match NumPy order bit for bit, so the binding automatically takes the direct-key SIMD fast path; descending integer slices likewise use transparent `Reverse<T>` views to retain direct SIMD.
 
-Buffer access needs a separate safety design. A Python buffer export does not by itself grant an exclusive Rust mutable reference. Audit the actual pinned PyO3/rust-numpy versions and their current APIs before implementing access; do not copy legacy `PyBuffer::as_slice`/`as_mut_slice` examples with known aliasing problems. Concentrate unsafe pointer-to-slice conversion in one small adapter with explicit layout, lifetime and aliasing invariants.
+## Binding, buffer safety, and Rayon
 
-- Keep interpreter access while extracting Python keys and manipulating object references.
-- Rust-owned key/index buffers or copies may sort while detached from Python.
-- Direct external-buffer sorting initially keeps the GIL and requires no concurrent access through any alias for the call's duration.
-- The GIL cannot stop NumPy or C threads that already released it, and rust-numpy's borrow tracking cannot exclude every foreign alias. Validate what the binding can enforce and document the remaining caller obligation.
-- The first release requires a GIL-enabled access model. Use the selected PyO3 version's explicit GIL requirement (currently spelled `gil_used = true`) and verify behavior on free-threaded interpreters; do not advertise a free-threaded wheel until that access design has been validated separately.
+Use **PyO3 0.30** and **maturin** directly, without `rust-numpy`. One unified PEP 3118 buffer layer (`buffer.rs`) serves both `array.array` and `numpy.ndarray`, avoiding duplicate buffer/endianness logic, avoiding `ndarray`/`rust-numpy` dependency weight, and supporting NumPy 1.x and 2.x through the stable buffer protocol.
+
+All unsafe raw-pointer-to-slice and strided-element access is isolated inside `buffer.rs` with explicit layout, lifetime, alignment, writability, and non-overlap invariants (using raw `Py_buffer`, never PyO3's deprecated `as_slice`/`as_mut_slice`):
+
+- Keep interpreter access while extracting Python keys, checking container metadata, and reading/writing Python object references.
+- Rust-owned scratch and key/index buffers (list ordering, `key=` ordering, gathered strided/non-native lanes) sort or partition while detached from the GIL (`py.detach(...)`), both serially and with Rayon.
+- Direct external-buffer operations keep the GIL held on the calling thread for the call's duration. These include contiguous native `sort` / `partition` copies that write directly into pinned output buffers, `sort_inplace` / `partition_inplace`, and zero-copy `argsort` / `argpartition`. When `threads != 1`, Rayon worker threads execute only pure-Rust numeric kernels and encoders and never acquire the GIL, so holding the GIL on the caller thread prevents concurrent Python bytecode mutation of the buffer without deadlock risk.
+- For multi-lane N-D arrays when `threads != 1`: single-lane inputs call `par_sort` / `par_argsort`; multi-lane inputs parallelize across independent disjoint lanes inside the selected Rayon pool (and large lanes can nest `par_sort`/`par_argsort` cleanly through Rayon work-stealing).
+- The GIL cannot stop foreign C or NumPy threads that already released it; document that concurrent C-level mutation of the same buffer during a call is undefined by the caller.
+- Require a GIL-enabled interpreter with `#[pymodule(gil_used = true)]` (PyO3 0.28+ defaults to `gil_used = false`), and do not advertise free-threaded wheels until a separate no-GIL buffer access design is validated.
 
 ## Space and benchmarks
 
-Do not advertise O(√n) auxiliary memory for the whole package: contiguous numeric in-place sorting uses the core's O(√n) plus bounded adapter storage, a sorted copy adds O(n) output plus sorting scratch, argsort adds O(n) index output (record any key storage), and list sorting adds O(n) key/index/reference storage.
+Do not advertise O(√n) auxiliary memory for the whole package: contiguous native `sort_inplace` uses the core's O(√n) (or O(P√n) when `threads != 1`) plus bounded adapter storage; strided/non-native `sort_inplace` / `partition_inplace` adds O(lane_len) gather/scatter scratch when serial and O(min(P, num_lanes) * lane_len) when `threads != 1`, gathering at most one lane per worker (P is the selected pool's worker count); `sort` (copy) adds O(n) output plus sorting scratch; `argsort` adds O(n) index output; and list or `key=` sorting adds O(n) key/index/reference storage.
 
-Measure the entire public call (extraction, allocation, conversion, sort, writeback) against `list.sort()` for numeric lists, `list.sort(key=...)` for keyed lists, and `ndarray.sort(kind="stable")`, `np.sort(..., kind="stable")` and `np.argsort(..., kind="stable")` for arrays, with A/A controls, validated equivalent semantics, reported unsupported cases and conversion costs visible. No speed claim follows from using Rust or radix sort; prioritize contiguous numeric buffers, then measure the net benefit for lists.
+Measure the entire public call (extraction, allocation, conversion, sort, writeback) against `list.sort()`, `list.sort(key=...)`, `ndarray.sort(kind="stable")`, `np.sort(..., kind="stable")`, and `np.argsort(..., kind="stable")`, with A/A controls, validated equivalent semantics, reported unsupported cases, and conversion costs visible.
 
 ## Repository and release
 
-The binding lives in `python/` (maturin project, unpublished PyO3 crate, `tessera_order` package with stubs and `py.typed`, tests) with benchmarks in `bench/python/`. The CI router treats Python independently of Rust and C++ and enables its checks only once the project manifests exist; Rust core changes then select Python validation without releasing it, and Python tags build only Python with the embedded core. Use a maturin wheel matrix for mainstream Linux, macOS and Windows, with NumPy present and absent. Wheel records name the package version, actual core version, source commit, ABI, Python version, toolchain and flags, and release verifies which core dependency source the wheels used (published versions for releases, the local core in development). Design the trusted publisher and install tests with the implementation.
+The binding lives in `python/` (excluded from the root Cargo workspace, with its own `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `tessera_order` Python package with `.pyi` stubs and `py.typed`, and `tests/`) with benchmarks in `bench/python/`.
 
-Order of work: specify and test numeric encodings, return types and exceptions while auditing buffer exclusivity; implement `array.array` and NumPy numeric paths with argsort; implement list key extraction, identity-preserving writeback, `out=` handling and both functions; validate identity and repeated references, key-call counts, extraction failure and callback mutation, integer bounds, mixed-key rejection, float bits, stable descending order, NumPy keyword compatibility, read-only and noncontiguous views, dtype errors and NumPy-free imports; then measure, build wheels and publish independently. Multidimensional `axis` and structured-dtype or multicolumn sorting stay deferred until real use cases appear, and internal tile, digit and insertion parameters are not Python API.
+- **Python support & wheels**: `requires-python = ">=3.9"`. Build per-version wheels for `cp39` and `cp310`, and a single `cp311-abi3` wheel covering Python 3.11+ (`Py_buffer` entered the Limited API in 3.11; the Rust source is identical across both builds).
+- **CI & release**: The CI router treats Python independently of Rust and C++; Rust core and shared Cargo configuration changes select Python validation without releasing it. Python tags (`python/vX.Y.Z` or `python/vX.Y.Z.postN`) verify version alignment with `rust/tessera-order`, test each release wheel with NumPy and each `cp311-abi3` wheel without NumPy, and test installation from the sdist outside the checkout before publication ([release workflows](../../RELEASING.md#workflows)).

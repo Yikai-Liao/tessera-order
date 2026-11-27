@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['rust/v*', 'cpp/v*']
+    tags: ['rust/v*', 'cpp/v*', 'python/v*']
 
 permissions:
   contents: read
@@ -26,3 +26,38 @@ jobs:
     uses: ./.github/workflows/cpp-release.yml
     permissions:
       contents: write
+
+  python:
+    if: startsWith(github.ref_name, 'python/v')
+    uses: ./.github/workflows/python-release.yml
+
+  python-publish:
+    needs: python
+    if: startsWith(github.ref_name, 'python/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: python-wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-sdist
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-release-notes
+          path: ${{ runner.temp }}/release-notes
+      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create Python release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --latest=false --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes/release-notes.md"

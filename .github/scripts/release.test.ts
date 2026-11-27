@@ -2,14 +2,85 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readTagNotes, tagNotes } from "./release.ts";
+import {
+  readTagNotes,
+  tagNotes,
+  verifyPythonRelease,
+  verifyRelease,
+  verifyRustRelease,
+} from "./release.ts";
 
 const header = "object 0123\ntype commit\ntag rust/v0.2.0\ntagger A <a@b> 0 +0000\n\n";
 const notes = "## Additions\n\n- `argsort` ([#225](https://example.test/225))\n";
+
+test("Rust releases require a matching tag and a publishable crate", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tessera-rust-release-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "rust/tessera-order"), { recursive: true });
+  const manifest = join(root, "rust/tessera-order/Cargo.toml");
+  writeFileSync(manifest, '[package]\nversion = "0.2.0"\n');
+  const expected = { tag: "rust/v0.2.0", state: "verified" };
+  assert.deepEqual(await verifyRustRelease(expected.tag, root), expected);
+  assert.deepEqual(await verifyRelease(expected.tag, root), expected);
+  for (const tag of ["rust/v0.3.0", "python/v0.2.0", "v0.2.0"])
+    await assert.rejects(verifyRustRelease(tag, root), /Rust tag\/package version mismatch/);
+  writeFileSync(manifest, '[package]\nversion = "0.2.0"\npublish = false\n');
+  await assert.rejects(verifyRustRelease(expected.tag, root), /unpublished/);
+  for (const tag of ["cpp/v0.2.0", "v0.2.0", "python/0.2.0", ""])
+    await assert.rejects(verifyRelease(tag, root), /Unsupported release tag.*rust\/v.*python\/v/);
+});
+
+test("Python releases align package and adapter versions with the Rust core", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tessera-python-release-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "rust/tessera-order"), { recursive: true });
+  mkdirSync(join(root, "python"));
+  writeFileSync(join(root, "rust/tessera-order/Cargo.toml"), '[package]\nversion = "0.2.0"\n');
+  const pyproject = join(root, "python/pyproject.toml");
+  const adapter = join(root, "python/Cargo.toml");
+  writeFileSync(adapter, '[package]\nversion = "0.2.0"\npublish = false\n');
+  for (const version of ["0.2.0", "0.2.0.post1", "0.2.0.post12"]) {
+    writeFileSync(pyproject, `[project]\nversion = "${version}"\n`);
+    const tag = `python/v${version}`;
+    assert.deepEqual(await verifyPythonRelease(tag, root), { tag, state: "verified" });
+    assert.deepEqual(await verifyRelease(tag, root), { tag, state: "verified" });
+  }
+  for (const version of [
+    "0.3.0",
+    "0.3.0.post1",
+    "0.2.01",
+    "0.2.0.post0",
+    "0.2.0.post01",
+    "0.2.0.post-1",
+    "0.2.0.post1.dev1",
+    "0.2.0.post1+local",
+  ]) {
+    writeFileSync(pyproject, `[project]\nversion = "${version}"\n`);
+    await assert.rejects(
+      verifyPythonRelease(`python/v${version}`, root),
+      /Python project version must be/,
+    );
+  }
+  writeFileSync(pyproject, '[project]\nversion = "0.2.0"\n');
+  for (const tag of ["python/v0.3.0", "python/v0.2.0.post1", "rust/v0.2.0", "v0.2.0"])
+    await assert.rejects(verifyPythonRelease(tag, root), /Python tag\/project version mismatch/);
+  for (const metadata of [
+    'version = "0.3.0"\npublish = false',
+    'version = "0.2.0.post1"\npublish = false',
+    'version = "0.2.0"\npublish = true',
+    'version = "0.2.0"',
+  ]) {
+    writeFileSync(adapter, `[package]\n${metadata}\n`);
+    await assert.rejects(
+      verifyPythonRelease("python/v0.2.0", root),
+      /Python Cargo package.version/,
+    );
+  }
+});
 
 test("tag notes drop the header and every git signature format", () => {
   assert.equal(tagNotes(`${header}${notes}`), notes);

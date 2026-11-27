@@ -47,7 +47,12 @@ Do not reopen flat-state removal, fused order/variation, block-only tiles or rej
 
 ## Python binding
 
-An independent track binding the Rust crate; see the [design](docs/design/python-binding.md). It needs its own publication workflow, interpreter/ABI matrix and wheel install tests when it starts, not inactive CI.
+The PyO3 binding in `python/` implements `sort`, `sort_inplace`, `argsort`, `partition`, `partition_inplace` and `argpartition` over `list`, `array.array` and N-dimensional `numpy.ndarray` with optional Rayon `threads=` control, synchronized with the Rust crate version; see [design](docs/design/python-binding.md).
+
+Remaining post-0.2 items:
+
+- Validate a free-threaded (no-GIL) buffer access design before advertising free-threaded wheels (`#[pymodule(gil_used = true)]` currently enforces a GIL-enabled interpreter).
+- Evaluate zero-callback numeric-field sorting for structured NumPy dtypes if real workloads need faster than `key=` throughput.
 
 ## C++
 

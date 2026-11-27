@@ -76,4 +76,4 @@ With pool width `P`, parallel calls use O(P√n) auxiliary space for fixed recor
 
 ## Language adapters
 
-The planned C++ implementation follows the same ordering rules. The [planned Python binding](../docs/design/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.
+The planned C++ implementation follows the same ordering rules. The [Python binding](../docs/design/python-binding.md) has its own adapter contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and evaluates a `key=` function once per element across `list`, `array.array` and `numpy.ndarray`. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

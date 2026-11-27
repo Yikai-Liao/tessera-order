@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "tessera-order"
+version = "0.2.0"
+requires-python = ">=3.9"
+description = "Python bindings for tessera-order: stable radix sorting, argsort and selection"
+# Keep metadata files within this standalone Cargo workspace for maturin.
+readme = "README.md"
+license = "BSD-2-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Yikai Liao", email = "lyk-boya@outlook.com" }]
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: BSD License",
+]
+
+[project.urls]
+Homepage = "https://github.com/Yikai-Liao/tessera-order"
+Repository = "https://github.com/Yikai-Liao/tessera-order"
+Documentation = "https://yikai-liao.github.io/tessera-order/"
+
+[tool.maturin]
+python-source = "python"
+module-name = "tessera_order._core"
+features = ["extension-module"]

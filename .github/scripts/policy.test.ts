@@ -45,11 +45,18 @@ function replace(value: object, path: string[], replacement: unknown) {
 }
 
 test("routing keeps library, comparison and revision checks with their owners", () => {
-  const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+  const none = {
+    rust: false,
+    cpp: false,
+    python: false,
+    comparison: false,
+    benchmark: false,
+    docs: false,
+  };
   const owners: [string[], Partial<typeof none>][] = [
     [
       ["rust/tessera-order/src/lib.rs", "rust/tessera-order/Cargo.toml"],
-      { rust: true, benchmark: true, docs: true },
+      { rust: true, python: true, benchmark: true, docs: true },
     ],
     [["rust/tessera-trace/src/lib.rs", "rust/tessera-trace/Cargo.lock"], { docs: true }],
     [
@@ -60,11 +67,29 @@ test("routing keeps library, comparison and revision checks with their owners", 
       ],
       { rust: true },
     ],
+    [["Cargo.lock"], { rust: true, comparison: true, benchmark: true }],
     [
-      ["Cargo.lock", "Cargo.toml", ".cargo/config.toml", "rust-toolchain.toml"],
-      { rust: true, comparison: true, benchmark: true },
+      ["Cargo.toml", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml"],
+      { rust: true, python: true, comparison: true, benchmark: true },
     ],
     [["cpp/include/sort.hpp", ".github/workflows/cpp-ci.yml"], { cpp: true }],
+    [
+      [
+        "python/Cargo.toml",
+        "python/Cargo.lock",
+        "python/pyproject.toml",
+        "python/src/lib.rs",
+        "python/python/tessera_order/__init__.pyi",
+        "python/tests/test_list.py",
+        "python/README.md",
+        "bench/python/compare.py",
+        "bench/python/README.md",
+        "bench/python/policy.test.ts",
+        ".github/workflows/python-ci.yml",
+        ".github/actions/python-test/action.yml",
+      ],
+      { python: true },
+    ],
     [
       [
         "bench/rust/native/ips.cpp",
@@ -130,6 +155,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
         ".github/workflows/release.yml",
         ".github/workflows/rust-release.yml",
         ".github/workflows/cpp-release.yml",
+        ".github/workflows/python-release.yml",
         ".github/workflows/bench-diagnostics.yml",
         ".github/workflows/main-benchmarks.yml",
       ],
@@ -144,6 +170,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
   assert.deepEqual(select(["rust/tessera-order/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
     rust: true,
+    python: true,
     comparison: true,
     benchmark: true,
     docs: true,
@@ -203,6 +230,19 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
     }
     assert.equal(changesTrustedFiles(base, docs), false);
     assert.equal(changesTrustedFiles(base, workflow), true);
+    const lockfile = await commit("Cargo.lock", "a");
+    assert.equal(marker("python", at(workflow)), marker("python", at(lockfile)));
+    let previousRevision = lockfile;
+    for (const path of [
+      "Cargo.toml",
+      ".cargo/config.toml",
+      "rust-toolchain",
+      "rust-toolchain.toml",
+    ]) {
+      const current = await commit(path, "a");
+      assert.notEqual(marker("python", at(previousRevision)), marker("python", at(current)), path);
+      previousRevision = current;
+    }
   } finally {
     process.chdir(previous);
     await rm(root, { recursive: true, force: true });

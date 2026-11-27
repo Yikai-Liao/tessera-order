@@ -14,6 +14,38 @@ export async function verifyRustRelease(tag: string, root: string) {
   return { tag, state: "verified" };
 }
 
+/** Verify Python package and adapter versions against the embedded Rust core. */
+export async function verifyPythonRelease(tag: string, root: string) {
+  const core = parse(await readFile(join(root, "rust/tessera-order/Cargo.toml"), "utf8"));
+  const pyproject = parse(await readFile(join(root, "python/pyproject.toml"), "utf8"));
+  const adapter = parse(await readFile(join(root, "python/Cargo.toml"), "utf8"));
+  const coreVersion = (core.package as { version: string }).version;
+  const version = (pyproject.project as { version: string }).version;
+  if (!tag.startsWith("python/v") || tag !== `python/v${version}`)
+    throw new Error("Python tag/project version mismatch; expected python/v<project.version>");
+  const suffix = version.slice(coreVersion.length);
+  if (
+    version !== coreVersion &&
+    !(version.startsWith(coreVersion) && /^\.post[1-9][0-9]*$/.test(suffix))
+  )
+    throw new Error(
+      `Python project version must be ${coreVersion} or ${coreVersion}.postN (N >= 1, no leading zeros)`,
+    );
+  const pkg = adapter.package as { version: string; publish?: boolean };
+  if (pkg.version !== coreVersion || pkg.publish !== false)
+    throw new Error(
+      "Python Cargo package.version must match the Rust core and package.publish must be false",
+    );
+  return { tag, state: "verified" };
+}
+
+/** Dispatch release verification by the independently versioned package tag. */
+export async function verifyRelease(tag: string, root: string) {
+  if (tag.startsWith("rust/v")) return verifyRustRelease(tag, root);
+  if (tag.startsWith("python/v")) return verifyPythonRelease(tag, root);
+  throw new Error(`Unsupported release tag ${tag}; expected rust/v<version> or python/v<version>`);
+}
+
 /**
  * Release notes are the message of the annotated release tag, so publication
  * needs no manual step. Reject a lightweight tag, a tag that does not point at

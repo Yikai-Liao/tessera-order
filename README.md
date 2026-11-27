@@ -90,17 +90,15 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 ## Status by language
 
-Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
+Each independent implementation is versioned and released separately; bindings embedding the Rust core synchronize their `X.Y.Z` version with the embedded crate ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
 
-| Capability | Rust 0.2 | C++ |
-|---|---|---|
-| Stable sort | Implemented | Planned |
-| Unstable sort | Not in 0.2 | Planned |
-| Cached-key sort, argsort and selection | Implemented | Not planned |
-| 128-bit keys | Signed and unsigned | Planned |
-| Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
-
-A Python binding is planned as well; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).
+| Capability | Rust 0.2 | Python 0.2 (PyO3, unreleased) | C++ |
+|---|---|---|---|
+| Stable sort & argsort | Implemented | Implemented (`list`, `array.array`, N-D `ndarray`, optional Rayon) | Planned |
+| Selection / partition | Single-rank (`select_nth`) | Implemented (`partition`, `partition_inplace`, `argpartition`, single & sequence `kth`) | Not planned |
+| Cached-key / `key=` ordering | Implemented | Implemented across all containers & dtypes | Not planned |
+| 128-bit keys | Signed and unsigned | Lossless `int` widening up to 128 bits (`list` / `key=`) | Planned |
+| Records that own resources or hold `&mut` | Supported | Preserves Python object identity & refcounts | Trivially copyable records only (planned) |
 
 ## Learn more
 

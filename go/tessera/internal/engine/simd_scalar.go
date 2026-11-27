@@ -2,11 +2,11 @@
 
 package engine
 
-func scalarFirstInversion[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M]) int {
+func scalarFirstInversion[T any, V encoded](records []T, e *extractor[T, V]) int {
 	return firstInversion(records, e)
 }
 
-func scalarConfirmAscending[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M], previous V) bool {
+func scalarConfirmAscending[T any, V encoded](records []T, e *extractor[T, V], previous V) bool {
 	return confirmAscending(records, e, previous)
 }
 
@@ -21,10 +21,10 @@ func prefixSum(counts []uint16) uint16 {
 	return largest
 }
 
-func canFinishMSD[T, R, K any, V encoded, M sourceMode](_ *extractor[T, R, K, V, M]) bool {
+func canFinishMSD[T any, V encoded](_ *extractor[T, V]) bool {
 	return false
 }
 
-func finishMSD[T, R, K any, V encoded, M sourceMode](_ []T, _ int, _ *extractor[T, R, K, V, M]) bool {
+func finishMSD[T any, V encoded](_ []T, _ int, _ *extractor[T, V]) bool {
 	return false
 }

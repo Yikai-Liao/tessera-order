@@ -16,16 +16,10 @@ func reserve[T any](storage []T, length int) []T {
 
 // Histogram caches callback classifications. Scatter calls only sealed direct
 // encoders, whose classifications cannot change between passes.
-func countingPass[T, R, K any, V encoded, M sourceMode](source, destination []T, digit Digit, cursor, ids []uint16, e *extractor[T, R, K, V, M]) uint16 {
+func countingPass[T any, V encoded](source, destination []T, digit Digit, cursor, ids []uint16, e *extractor[T, V]) uint16 {
 	clear(cursor)
-	var mode M
 	for i := range source {
-		var bucket int
-		if len(mode) == len(directIdentityMode{}) {
-			bucket = wordBucket(any(source[i]).(V), digit)
-		} else {
-			bucket = keyDigit(e.get(&source[i]), digit)
-		}
+		bucket := keyDigit(e.get(&source[i]), digit)
 		if !e.direct() {
 			ids[i] = uint16(bucket)
 		}
@@ -34,9 +28,7 @@ func countingPass[T, R, K any, V encoded, M sourceMode](source, destination []T,
 	largest := prefixSum(cursor)
 	for i := range source {
 		var bucket int
-		if len(mode) == len(directIdentityMode{}) {
-			bucket = wordBucket(any(source[i]).(V), digit)
-		} else if e.direct() {
+		if e.direct() {
 			bucket = keyDigit(e.get(&source[i]), digit)
 		} else {
 			bucket = int(ids[i])
@@ -50,7 +42,7 @@ func countingPass[T, R, K any, V encoded, M sourceMode](source, destination []T,
 
 // Run one pass per digit, last digit first. An odd number of passes
 // leaves the result in scratch, so copy it back on normal completion.
-func countingPasses[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T], records []T, digits []Digit, counts *[maxDigitBuckets]uint16, e *extractor[T, R, K, V, M]) uint16 {
+func countingPasses[T any, V encoded](scratch *tileScratch[T], records []T, digits []Digit, counts *[maxDigitBuckets]uint16, e *extractor[T, V]) uint16 {
 	scratch.records = reserve(scratch.records, len(records))
 	if !e.direct() {
 		scratch.ids = reserve(scratch.ids, len(records))
@@ -68,7 +60,7 @@ func countingPasses[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T
 	return largest
 }
 
-func sortTile[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T], records []T, varying Uint128, e *extractor[T, R, K, V, M]) {
+func sortTile[T any, V encoded](scratch *tileScratch[T], records []T, varying Uint128, e *extractor[T, V]) {
 	if len(records) < 2 || varying == (Uint128{}) {
 		return
 	}
@@ -78,6 +70,11 @@ func sortTile[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T], rec
 	}
 	plan := planDigits(varying, tileDigitBits(len(records), recordBytes[T]()), len(records), canFinishMSD(e))
 	digit := plan.digits[0]
+	if observeRoutes {
+		for i, digit := range plan.digits[:plan.passes] {
+			emitRoute(routeEvent{stage: routeTileDigits, a: i, b: plan.passes, mask: varying, digit: digit})
+		}
+	}
 	if !plan.msd && plan.passes == 1 && tryCountWindow(records, digit, e) {
 		return
 	}
@@ -100,7 +97,7 @@ func sortTile[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T], rec
 	}
 }
 
-func finishTileChild[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[T], records []T, candidate Uint128, e *extractor[T, R, K, V, M]) {
+func finishTileChild[T any, V encoded](scratch *tileScratch[T], records []T, candidate Uint128, e *extractor[T, V]) {
 	if len(records) < 2 || candidate == (Uint128{}) {
 		return
 	}
@@ -113,7 +110,7 @@ func finishTileChild[T, R, K any, V encoded, M sourceMode](scratch *tileScratch[
 
 // A complete direct digit reconstructs interchangeable keys from the common
 // outside bits, including any constant half omitted at root dispatch.
-func tryCountWindow[T, R, K any, V encoded, M sourceMode](records []T, digit Digit, e *extractor[T, R, K, V, M]) bool {
+func tryCountWindow[T any, V encoded](records []T, digit Digit, e *extractor[T, V]) bool {
 	if !e.direct() || digit.Width < 1 || digit.Width > 8 {
 		return false
 	}
@@ -121,13 +118,16 @@ func tryCountWindow[T, R, K any, V encoded, M sourceMode](records []T, digit Dig
 	for i := range records {
 		counts[keyDigit(e.get(&records[i]), digit)]++
 	}
-	outside := e.fullBits(&records[0]).andNot(Digit{digit.Shift + e.offset, digit.Width}.Mask())
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeCountWindow, a: len(records), digit: digit})
+	}
+	outside := e.encode(&records[0]).andNot(Digit{digit.Shift + e.half, digit.Width}.Mask())
 	start := 0
 	for bucket, count := range counts[:1<<digit.Width] {
 		if count == 0 {
 			continue
 		}
-		bits := outside.or(Uint128{Lo: uint64(bucket)}.lsh(digit.Shift + e.offset))
+		bits := outside.or(Uint128{Lo: uint64(bucket)}.lsh(digit.Shift + e.half))
 		key := e.decode(bits)
 		for i := start; i < start+count; i++ {
 			records[i] = key

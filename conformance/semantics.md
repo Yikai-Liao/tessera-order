@@ -76,4 +76,10 @@ With pool width `P`, parallel calls use O(P√n) auxiliary space for fixed recor
 
 ## Language adapters
 
+### Go
+
+The Go module in `go/tessera/` follows the ordering, stability, key-encoding and cached-key rules above, with one difference for panics. If a key function panics, the panic propagates and the contents of the slice are unspecified: records may be duplicated or missing, as with the Go standard library's sorting functions. Go's garbage collector makes this memory-safe, so the implementation does not restore records. A normal return, including one under inconsistent keys, leaves every record in the slice exactly once, and a returned argsort is a permutation.
+
+### Other languages
+
 The planned C++ implementation follows the same ordering rules. The [planned Python binding](../docs/design/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

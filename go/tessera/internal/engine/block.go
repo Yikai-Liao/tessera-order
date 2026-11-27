@@ -139,34 +139,29 @@ func (c blockClassifier[V]) bucket(key V) int {
 // Keep setup and completion out of the scatter's optimization region.
 //
 //go:noinline
-func scatterBlocks[T, R, K any, V encoded, M sourceMode](p *partition[T], classifier blockClassifier[V], e *extractor[T, R, K, V, M]) {
+func scatterBlocks[T any, V encoded](p *partition[T], classifier blockClassifier[V], e *extractor[T, V]) {
 	// Four records per bucket-cursor reload, scaled down for wide records.
 	group := max(1, min(4, 4*(wordBits/8)/max(recordBytes[T](), 1)))
 	mask := len(p.buffers.writers) - 1
-	var mode M
 	for p.inputBlock*p.blockSize < len(p.input) {
 		start := p.inputBlock * p.blockSize
 		source := p.input[start:min(start+p.blockSize, len(p.input))]
 		complete := len(source) / group * group
 		for start := 0; start < complete; start += group {
 			for i := start; i < start+group; i++ {
-				var key V
-				if len(mode) == len(directIdentityMode{}) {
-					key = any(source[i]).(V)
-				} else {
-					key = e.get(&source[i])
+				bucket := classifier.bucket(e.get(&source[i])) & mask
+				if observeRoutes {
+					emitRoute(routeEvent{stage: routeScatter, a: bucket})
 				}
-				p.write(classifier.bucket(key)&mask, source[i])
+				p.write(bucket, source[i])
 			}
 		}
 		for i := complete; i < len(source); i++ {
-			var key V
-			if len(mode) == len(directIdentityMode{}) {
-				key = any(source[i]).(V)
-			} else {
-				key = e.get(&source[i])
+			bucket := classifier.bucket(e.get(&source[i])) & mask
+			if observeRoutes {
+				emitRoute(routeEvent{stage: routeScatter, a: bucket})
 			}
-			p.write(classifier.bucket(key)&mask, source[i])
+			p.write(bucket, source[i])
 		}
 		p.inputBlock++
 	}
@@ -174,7 +169,7 @@ func scatterBlocks[T, R, K any, V encoded, M sourceMode](p *partition[T], classi
 
 type visitBand[T any] func(bucket, start, end int, band []T)
 
-func partitionBlocks[T, R, K any, V encoded, M sourceMode](input []T, radix uint, size int, buffers *blockBuffers[T], classifier blockClassifier[V], e *extractor[T, R, K, V, M], visit visitBand[T]) []int {
+func partitionBlocks[T any, V encoded](input []T, radix uint, size int, buffers *blockBuffers[T], classifier blockClassifier[V], e *extractor[T, V], visit visitBand[T]) []int {
 	p := newPartition(input, 1<<radix, size, buffers)
 	scatterBlocks(&p, classifier, e)
 	return completeSerial(&p, visit)

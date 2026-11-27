@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func testDirect[V encoded]() extractor[V, V] {
+	codec := BindKey[V]()
+	return extractor[V, V]{encode: func(value *V) Uint128 { return codec.Encode(*value) }, decode: codec.Decode, mask: codec.VaryingMask}
+}
+
+func testKeyed[T any, V encoded](key func(*T) V) extractor[T, V] {
+	codec := BindKey[V]()
+	return extractor[T, V]{encode: func(value *T) Uint128 { return codec.Encode(key(value)) }, mask: codec.VaryingMask}
+}
+
 func caught(action func()) (value any) {
 	defer func() { value = recover() }()
 	action()
@@ -42,7 +52,7 @@ func checkOwners(t *testing.T, records, original []ownedRow) {
 
 func TestInsertionKeepsPermutationOnBudgetExit(t *testing.T) {
 	values := []uint64{1, 2, 3, 0}
-	e := extractor[uint64, uint64, uint64, uint64, directMode]{}
+	e := testDirect[uint64]()
 	if _, ok := insertionLoop(values, 1, &e); ok || !slices.Equal(values, []uint64{1, 0, 2, 3}) {
 		t.Fatalf("budget exit = %v", values)
 	}
@@ -52,10 +62,10 @@ func TestTileCachesChangingClassifications(t *testing.T) {
 	rows := rowsForRecovery(59)
 	original := slices.Clone(rows)
 	calls := 0
-	e := extractor[ownedRow, ownedRow, uint64, uint64, keyedMode]{key: func(r *ownedRow) uint64 {
+	e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 {
 		calls++
 		return uint64(calls * 7)
-	}}
+	})
 	var scratch tileScratch[ownedRow]
 	var counts [maxDigitBuckets]uint16
 	countingPasses(&scratch, rows, []Digit{{Width: 4}}, &counts, &e)
@@ -75,7 +85,7 @@ func TestBlockReturnsStableBandEnds(t *testing.T) {
 		rows := rowsForRecovery(length)
 		expected := slices.Clone(rows)
 		slices.SortStableFunc(expected, func(a, b ownedRow) int { return int(a.key&7) - int(b.key&7) })
-		e := extractor[ownedRow, ownedRow, uint64, uint64, keyedMode]{key: func(r *ownedRow) uint64 { return r.key }}
+		e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 { return r.key })
 		var buffers blockBuffers[ownedRow]
 		start := 0
 		ends := partitionBlocks(rows, 3, 7, &buffers, blockClassifier[uint64]{digit: Digit{Width: 3}}, &e,
@@ -92,7 +102,7 @@ func TestBlockReturnsStableBandEnds(t *testing.T) {
 }
 
 func TestNodeRoutes(t *testing.T) {
-	e := extractor[uint64, uint64, uint64, uint64, directMode]{}
+	e := testDirect[uint64]()
 	var rows [512]uint64
 	for i := range rows {
 		rows[i] = uint64(512 - i)
@@ -164,13 +174,13 @@ func TestIndexScatterRejectsChangingCounts(t *testing.T) {
 	keys := []uint64{0, 1, 1, 0}
 	indices := make([]int, len(keys))
 	calls := 0
-	e := extractor[uint64, uint64, uint64, uint64, keyedMode]{key: func(key *uint64) uint64 {
+	e := testKeyed[uint64, uint64](func(key *uint64) uint64 {
 		calls++
 		if calls > len(keys) {
 			return 1
 		}
 		return *key
-	}}
+	})
 	p := caught(func() { scatterIndices(keys, indices, &e, 0, 0, 0, false) })
 	if p != "tessera: inconsistent radix partition" {
 		t.Fatalf("panic = %v", p)

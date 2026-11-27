@@ -6,7 +6,7 @@ const indexBands = 1 << 8
 
 // Fill the output permutation, or describe source spans that the caller can
 // expand into that same buffer or apply to its records directly.
-func orderIndices[T, R, K any, V encoded, M, I sourceMode](values []T, recordLen int, e *extractor[T, R, K, V, M], indexed *extractor[int, R, K, V, I]) ([]int, sourceOrder) {
+func orderIndices[T any, V encoded](values []T, recordLen int, e *extractor[T, V], indexed *extractor[int, V]) ([]int, sourceOrder) {
 	length := len(values)
 	indices := make([]int, length)
 	for i := range indices {
@@ -19,14 +19,23 @@ func orderIndices[T, R, K any, V encoded, M, I sourceMode](values []T, recordLen
 	tileLen := tileCapacity[int](tileBytes)
 	varying := prepare(indices, e.mask, indexed, tileLen, true)
 	if varying == (Uint128{}) {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeIndices, a: 0})
+		}
 		return indices, nil
 	}
 	var scratch workspace[int]
 	if length <= tileLen {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeIndices, a: 1})
+		}
 		sortTile(&scratch.tile, indices, varying, indexed)
 		return indices, nil
 	}
 	if order := sourceOrderForNode(values, varying, allRanks, e, recordLen); order != nil {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeIndices, a: 2})
+		}
 		return indices, order
 	}
 	low := trailingBits(varying)
@@ -42,6 +51,9 @@ func orderIndices[T, R, K any, V encoded, M, I sourceMode](values []T, recordLen
 	}
 	prefixShift := uint(max(lower.bitLen()-int(prefixBits), int(low)))
 	prefixMask := lower.rsh(prefixShift)
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeIndices, a: 3, digit: Digit{digitShift, 8}, mask: prefixMask})
+	}
 	ends := scatterIndices(values, indices, e, digitShift, prefixShift, indexBits, prefixMask != (Uint128{}))
 	if lower == (Uint128{}) {
 		return indices, nil
@@ -49,7 +61,7 @@ func orderIndices[T, R, K any, V encoded, M, I sourceMode](values []T, recordLen
 	remaining := lower.and(lowMask(prefixShift))
 	// Index prefixes occupy a machine word. Casting the packed word to uint
 	// before shifting preserves its high bit when Go's int is signed.
-	prefix := extractor[int, int, uint, uint64, prefixIndexMode]{shift: indexBits}
+	prefix := extractor[int, uint64]{encode: func(index *int) Uint128 { return Uint128{Lo: uint64(uint(*index) >> indexBits)} }}
 	start := 0
 	for _, end := range ends {
 		if end == start {
@@ -88,7 +100,7 @@ func shiftedWord[V encoded](key V, shift uint) uint {
 
 // Changed extractor results may invalidate the first-pass counts. A
 // mismatched directory panics while the index output is still private.
-func scatterIndices[T, R, K any, V encoded, M sourceMode](records []T, words []int, e *extractor[T, R, K, V, M], shift, prefixShift, indexBits uint, pack bool) [indexBands]int {
+func scatterIndices[T any, V encoded](records []T, words []int, e *extractor[T, V], shift, prefixShift, indexBits uint, pack bool) [indexBands]int {
 	digit := Digit{shift, 8}
 	var counts, ends, next [indexBands]int
 	for i := range records {

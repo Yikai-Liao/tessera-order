@@ -38,7 +38,7 @@ func exceptionLimit[V encoded](length, recordLen int) int {
 	return tile * int(math.Sqrt(float64(tiles)))
 }
 
-func finishCut[T, R, K any, V encoded, M sourceMode](records []T, rank int, e *extractor[T, R, K, V, M]) bool {
+func finishCut[T any, V encoded](records []T, rank int, e *extractor[T, V]) bool {
 	pivot := e.get(&records[rank])
 	mask := fromBits[V](e.mask)
 	pivotVarying := and(pivot, mask)
@@ -122,7 +122,7 @@ func prefixHoles(start, end, step, needed, limit int, keep func(int) bool) ([]in
 
 // Prefer the first minimum and the last maximum. With a peer of the
 // displaced endpoint, rotation preserves its source order.
-func placeExtreme[T, R, K any, V encoded, M sourceMode](records []T, last bool, anchor V, e *extractor[T, R, K, V, M]) {
+func placeExtreme[T any, V encoded](records []T, last bool, anchor V, e *extractor[T, V]) {
 	start, end, endpoint := 1, len(records), 0
 	if last {
 		start, end, endpoint = 0, len(records)-1, len(records)-1
@@ -146,7 +146,7 @@ func placeExtreme[T, R, K any, V encoded, M sourceMode](records []T, last bool, 
 	}
 }
 
-func sourceOrderForNode[T, R, K any, V encoded, M sourceMode](records []T, varying Uint128, rank int, e *extractor[T, R, K, V, M], recordLen int) sourceOrder {
+func sourceOrderForNode[T any, V encoded](records []T, varying Uint128, rank int, e *extractor[T, V], recordLen int) sourceOrder {
 	length := len(records)
 	if length < keySampleLen {
 		return nil
@@ -234,7 +234,7 @@ func sourceOrderForNode[T, R, K any, V encoded, M sourceMode](records []T, varyi
 	})
 }
 
-func dominantOrder[T, R, K any, V encoded, M sourceMode](records []T, pivot V, rank, limit int, e *extractor[T, R, K, V, M]) sourceOrder {
+func dominantOrder[T any, V encoded](records []T, pivot V, rank, limit int, e *extractor[T, V]) sourceOrder {
 	var positions []int
 	var entries []sourceEntry[V]
 	lower := 0
@@ -279,7 +279,7 @@ func dominantOrder[T, R, K any, V encoded, M sourceMode](records []T, pivot V, r
 
 // Complement both fields so an upper end prefers later source positions
 // on ties. Reduce a full batch before accepting more candidates.
-func orderedEnd[T, R, K any, V encoded, M sourceMode](records []T, end sourceRun, e *extractor[T, R, K, V, M]) sourceOrder {
+func orderedEnd[T any, V encoded](records []T, end sourceRun, e *extractor[T, V]) sourceOrder {
 	count := end.end - end.start
 	upper := end.start != 0
 	invert := fromBits[V](lowMask(128))

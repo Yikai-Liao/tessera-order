@@ -12,6 +12,9 @@ import (
 const allRanks = -1
 
 func projectRank(rank, start, end int) (int, bool) {
+	if observeRoutes && rank != allRanks {
+		emitRoute(routeEvent{stage: routeRank, a: rank, b: start, c: end})
+	}
 	if rank == allRanks {
 		return allRanks, start < end
 	}
@@ -22,12 +25,15 @@ func topBit(varying Uint128) Uint128 {
 	return (Uint128{Lo: 1}).lsh(uint(varying.bitLen() - 1))
 }
 
-func refine[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M], rank, budgetBytes int) {
+func refine[T any, V encoded](records []T, e *extractor[T, V], rank, budgetBytes int) {
 	if len(records) < 2 || recordBytes[T]() == 0 {
 		return
 	}
 	tileLen := tileCapacity[T](budgetBytes)
 	if rank != allRanks && len(records) > tileLen && finishCut(records, rank, e) {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeCut, a: rank})
+		}
 		return
 	}
 	varying := prepare(records, e.mask, e, tileLen, true)
@@ -36,12 +42,15 @@ func refine[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R
 	}
 	var scratch workspace[T]
 	if isWide[V]() && (varying.Hi == 0 || varying.Lo == 0) {
-		half := extractor[T, R, K, uint64, M]{key: e.key, codec: e.codec, source: e.source}
+		half := extractor[T, uint64]{encode: e.encode, decode: e.decode}
 		if varying.Lo == 0 {
-			half.offset = 64
+			half.half = 64
 			varying = Uint128{Lo: varying.Hi}
 		}
-		half.mask = e.mask.rsh(half.offset).and(lowMask(64))
+		half.mask = e.mask.rsh(half.half).and(lowMask(64))
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeNarrow, a: int(half.half), mask: varying})
+		}
 		sortNode(records, varying, rank, tileLen, &scratch, &half)
 		return
 	}
@@ -58,8 +67,11 @@ const (
 	unordered
 )
 
-func prepare[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint128, e *extractor[T, R, K, V, M], tileLen int, probeInsertion bool) Uint128 {
+func prepare[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V], tileLen int, probeInsertion bool) Uint128 {
 	sampled := probeOrder(records, e)
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeProbe, a: int(sampled), b: len(records)})
+	}
 	if probeInsertion && sampled == unordered && insertionProbe(records, e, tileLen) {
 		return Uint128{}
 	}
@@ -73,6 +85,9 @@ func prepare[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint12
 	}
 	if sampled == flatSample {
 		confirmed := confirmOrder(records, e)
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeProbe, a: int(confirmed), b: len(records)})
+		}
 		if confirmed <= descendingTies {
 			finishOrdered(records, confirmed, e)
 			return Uint128{}
@@ -83,7 +98,7 @@ func prepare[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint12
 
 // A longer input estimates its insertion budget from one tile of encoded
 // keys. An ordered probe window says nothing about the rest of the input.
-func insertionProbe[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M], tileLen int) bool {
+func insertionProbe[T any, V encoded](records []T, e *extractor[T, V], tileLen int) bool {
 	if len(records) <= min(insertionLimit[T](), tileLen) {
 		insertionLoop(records, maxInt, e)
 		return true
@@ -98,7 +113,7 @@ func insertionProbe[T, R, K any, V encoded, M sourceMode](records []T, e *extrac
 	for i := range keys {
 		keys[i] = e.get(&records[i])
 	}
-	probe := extractor[V, V, V, V, directMode]{}
+	probe := extractor[V, V]{encode: func(key *V) Uint128 { return keyBits(*key) }}
 	swaps, ok := insertionLoop(keys, budget, &probe)
 	if swaps == 0 || !ok {
 		return false
@@ -117,7 +132,7 @@ const (
 
 // Short inputs confirm directly. Larger inputs sample adjacent pairs before
 // paying for the confirming scan.
-func probeOrder[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M]) order {
+func probeOrder[T any, V encoded](records []T, e *extractor[T, V]) order {
 	if len(records) < orderSampleMinLen {
 		return confirmOrder(records, e)
 	}
@@ -139,7 +154,7 @@ func probeOrder[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[
 
 // Three records are the shortest mixed-direction witness. If they tie,
 // the endpoints decide which directional scan to start.
-func confirmOrder[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M]) order {
+func confirmOrder[T any, V encoded](records []T, e *extractor[T, V]) order {
 	first := e.get(&records[0])
 	if len(records) == 1 {
 		return ascending
@@ -172,6 +187,9 @@ func confirmOrder[T, R, K any, V encoded, M sourceMode](records []T, e *extracto
 					return unordered
 				}
 			}
+			if observeRoutes {
+				emitRoute(routeEvent{stage: routeConstant, a: len(records)})
+			}
 			return ascending
 		}
 		up = less(current, last)
@@ -196,7 +214,7 @@ func confirmOrder[T, R, K any, V encoded, M sourceMode](records []T, e *extracto
 	return descendingTies
 }
 
-func finishOrdered[T, R, K any, V encoded, M sourceMode](records []T, order order, e *extractor[T, R, K, V, M]) {
+func finishOrdered[T any, V encoded](records []T, order order, e *extractor[T, V]) {
 	if order == ascending {
 		return
 	}
@@ -221,7 +239,7 @@ func rotateLeft[T any](records []T, at int) {
 	slices.Reverse(records)
 }
 
-func sortChild[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, R, K, V, M]) {
+func sortChild[T any, V encoded](records []T, candidate Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, V]) {
 	if len(records) < 2 || candidate == (Uint128{}) {
 		return
 	}
@@ -229,19 +247,39 @@ func sortChild[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint
 	sortNode(records, varying, rank, tileLen, scratch, e)
 }
 
-func sortNode[T, R, K any, V encoded, M sourceMode](records []T, varying Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, R, K, V, M]) {
+func sortNode[T any, V encoded](records []T, varying Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, V]) {
 	if len(records) < 2 || varying == (Uint128{}) {
 		return
 	}
 	if len(records) <= tileLen {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeTile, a: len(records)})
+		}
 		sortTile(&scratch.tile, records, varying, e)
 		return
 	}
 	if order := sourceOrderForNode(records, varying, rank, e, recordBytes[T]()); order != nil {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeSpans, a: len(records)})
+		}
 		applySpans(order, records)
 		return
 	}
 	plan := planNode(records, varying, tileLen, e)
+	executeNode(records, varying, rank, tileLen, scratch, e, plan)
+}
+
+func executeNode[T any, V encoded](records []T, varying Uint128, rank, tileLen int, scratch *workspace[T], e *extractor[T, V], plan nodePlan[V]) {
+	if observeRoutes {
+		kind := 0
+		if plan.mode {
+			kind = 1
+		}
+		if plan.boundary != 0 {
+			kind = 2
+		}
+		emitRoute(routeEvent{stage: routeNodeDigit, a: kind, b: plan.boundary, digit: plan.digit, mask: varying})
+	}
 	if plan.boundary != 0 {
 		boundary := plan.boundary
 		if plan.set {
@@ -281,6 +319,9 @@ func sortNode[T, R, K any, V encoded, M sourceMode](records []T, varying Uint128
 		}
 	}
 	size := blockSize(len(records), recordBytes[T](), 1<<radix, serialDescriptorBytes())
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeBlock, a: len(records), b: int(radix), c: size})
+	}
 	ends := partitionBlocks(records, radix, size, &scratch.block, cl, e, visit)
 	start := 0
 	for bucket, end := range ends {

@@ -27,6 +27,48 @@ func storageBits(width uint) uint {
 	return uint(8) << bits.Len((width-1)/8)
 }
 
+var (
+	uint8Codec = newCodec(8,
+		func(value uint8) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uint8 { return uint8(encoded.Lo) })
+	uint16Codec = newCodec(16,
+		func(value uint16) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uint16 { return uint16(encoded.Lo) })
+	uint32Codec = newCodec(32,
+		func(value uint32) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uint32 { return uint32(encoded.Lo) })
+	uint64Codec = newCodec(64,
+		func(value uint64) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uint64 { return uint64(encoded.Lo) })
+	uintCodec = newCodec(bits.UintSize,
+		func(value uint) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uint { return uint(encoded.Lo) })
+	uintptrCodec = newCodec(bits.UintSize,
+		func(value uintptr) Uint128 { return Uint128{Lo: uint64(value)} },
+		func(encoded Uint128) uintptr { return uintptr(encoded.Lo) })
+	int8Codec = newCodec(8,
+		func(value int8) Uint128 { return signedBits(uint64(value), 8) },
+		func(encoded Uint128) int8 { return int8(signedBits(encoded.Lo, 8).Lo) })
+	int16Codec = newCodec(16,
+		func(value int16) Uint128 { return signedBits(uint64(value), 16) },
+		func(encoded Uint128) int16 { return int16(signedBits(encoded.Lo, 16).Lo) })
+	int32Codec = newCodec(32,
+		func(value int32) Uint128 { return signedBits(uint64(value), 32) },
+		func(encoded Uint128) int32 { return int32(signedBits(encoded.Lo, 32).Lo) })
+	int64Codec = newCodec(64,
+		func(value int64) Uint128 { return signedBits(uint64(value), 64) },
+		func(encoded Uint128) int64 { return int64(signedBits(encoded.Lo, 64).Lo) })
+	intCodec = newCodec(bits.UintSize,
+		func(value int) Uint128 { return signedBits(uint64(value), bits.UintSize) },
+		func(encoded Uint128) int { return int(signedBits(encoded.Lo, bits.UintSize).Lo) })
+	float32Codec = newCodec(32,
+		func(value float32) Uint128 { return floatBits(math.Float32bits(value)) },
+		func(encoded Uint128) float32 { return math.Float32frombits(rawFloatBits(uint32(encoded.Lo))) })
+	float64Codec = newCodec(64,
+		func(value float64) Uint128 { return floatBits(math.Float64bits(value)) },
+		func(encoded Uint128) float64 { return math.Float64frombits(rawFloatBits(uint64(encoded.Lo))) })
+)
+
 type sealedKey[K any] interface {
 	radixCodec() Codec[K]
 }
@@ -39,31 +81,31 @@ func BindKey[K any]() Codec[K] {
 	case sealedKey[K]:
 		return key.radixCodec()
 	case uint8:
-		return codecAs[K](unsignedCodec[uint8](8))
+		return codecAs[K](uint8Codec)
 	case uint16:
-		return codecAs[K](unsignedCodec[uint16](16))
+		return codecAs[K](uint16Codec)
 	case uint32:
-		return codecAs[K](unsignedCodec[uint32](32))
+		return codecAs[K](uint32Codec)
 	case uint64:
-		return codecAs[K](unsignedCodec[uint64](64))
+		return codecAs[K](uint64Codec)
 	case uint:
-		return codecAs[K](unsignedCodec[uint](bits.UintSize))
+		return codecAs[K](uintCodec)
 	case uintptr:
-		return codecAs[K](unsignedCodec[uintptr](bits.UintSize))
+		return codecAs[K](uintptrCodec)
 	case int8:
-		return codecAs[K](signedCodec[int8](8))
+		return codecAs[K](int8Codec)
 	case int16:
-		return codecAs[K](signedCodec[int16](16))
+		return codecAs[K](int16Codec)
 	case int32:
-		return codecAs[K](signedCodec[int32](32))
+		return codecAs[K](int32Codec)
 	case int64:
-		return codecAs[K](signedCodec[int64](64))
+		return codecAs[K](int64Codec)
 	case int:
-		return codecAs[K](signedCodec[int](bits.UintSize))
+		return codecAs[K](intCodec)
 	case float32:
-		return codecAs[K](floatCodec(32, math.Float32bits, math.Float32frombits))
+		return codecAs[K](float32Codec)
 	case float64:
-		return codecAs[K](floatCodec(64, math.Float64bits, math.Float64frombits))
+		return codecAs[K](float64Codec)
 	case bool:
 		return codecAs[K](boolCodec())
 	case [1]byte:
@@ -108,22 +150,9 @@ func codecAs[K, T any](codec Codec[T]) Codec[K] {
 	return any(codec).(Codec[K])
 }
 
-func unsignedCodec[K uint8 | uint16 | uint32 | uint64 | uint | uintptr](width uint) Codec[K] {
-	return newCodec(width, func(value K) Uint128 {
-		return Uint128{Lo: uint64(value)}
-	}, func(encoded Uint128) K {
-		return K(encoded.Lo)
-	})
-}
-
-func signedCodec[K int8 | int16 | int32 | int64 | int](width uint) Codec[K] {
-	mask := lowMask(width).Lo
-	sign := uint64(1) << (width - 1)
-	return newCodec(width, func(value K) Uint128 {
-		return Uint128{Lo: (uint64(value) & mask) ^ sign}
-	}, func(encoded Uint128) K {
-		return K(encoded.Lo ^ sign)
-	})
+func signedBits(raw uint64, width uint) Uint128 {
+	flip := uint64(1) << (width - 1)
+	return Uint128{Lo: raw&(flip|(flip-1)) ^ flip}
 }
 
 func (Uint128) radixCodec() Codec[Uint128] {
@@ -141,23 +170,21 @@ func (Int128) radixCodec() Codec[Int128] {
 	})
 }
 
-func floatCodec[K float32 | float64, U uint32 | uint64](
-	width uint, toBits func(K) U, fromBits func(U) K,
-) Codec[K] {
-	sign := U(1) << (width - 1)
-	return newCodec(width, func(value K) Uint128 {
-		raw := toBits(value)
-		if raw&sign != 0 {
-			return Uint128{Lo: uint64(^raw)}
-		}
-		return Uint128{Lo: uint64(raw ^ sign)}
-	}, func(encoded Uint128) K {
-		raw := U(encoded.Lo)
-		if raw&sign != 0 {
-			return fromBits(raw ^ sign)
-		}
-		return fromBits(^raw)
-	})
+func floatBits[U uint32 | uint64](raw U) Uint128 {
+	sign := ^U(0) ^ (^U(0) >> 1)
+	floatMask := sign - 1
+	if raw&sign != 0 {
+		return Uint128{Lo: uint64(raw ^ (floatMask | sign))}
+	}
+	return Uint128{Lo: uint64(raw ^ sign)}
+}
+
+func rawFloatBits[U uint32 | uint64](encoded U) U {
+	sign := ^U(0) ^ (^U(0) >> 1)
+	if encoded&sign != 0 {
+		return encoded ^ sign
+	}
+	return ^encoded
 }
 
 func boolCodec() Codec[bool] {
@@ -210,11 +237,11 @@ type ReverseKey[K any] struct {
 
 func (ReverseKey[K]) radixCodec() Codec[ReverseKey[K]] {
 	inner := BindKey[K]()
-	mask := lowMask(inner.Width)
+	reverseMask := lowMask(inner.Width)
 	codec := newCodec(inner.Width, func(key ReverseKey[K]) Uint128 {
-		return inner.Encode(key.Value).xor(mask)
+		return inner.Encode(key.Value).xor(reverseMask)
 	}, func(encoded Uint128) ReverseKey[K] {
-		return ReverseKey[K]{Value: inner.Decode(encoded.xor(mask))}
+		return ReverseKey[K]{Value: inner.Decode(encoded.xor(reverseMask))}
 	})
 	codec.VaryingMask = inner.VaryingMask
 	return codec

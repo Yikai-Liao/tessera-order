@@ -30,7 +30,7 @@ func compareKey[V encoded](a, b V) int {
 	return 1
 }
 
-func sampleKeys[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M], keys *[keySampleLen]V) []V {
+func sampleKeys[T any, V encoded](records []T, e *extractor[T, V], keys *[keySampleLen]V) []V {
 	sample := keys[:min(len(records), keySampleLen)]
 	for i := range sample {
 		sample[i] = e.get(&records[sampleIndex(len(records), i)])
@@ -88,7 +88,7 @@ func chooseSplitDigit[V encoded](length, tileLen int, varying Uint128, sample []
 }
 
 // A top bit already in two runs needs at most one stable rotation.
-func twoRuns[T, R, K any, V encoded, M sourceMode](records []T, bit Uint128, e *extractor[T, R, K, V, M]) (int, bool) {
+func twoRuns[T any, V encoded](records []T, bit Uint128, e *extractor[T, V]) (int, bool) {
 	mask := fromBits[V](bit)
 	var zero V
 	first := and(e.get(&records[0]), mask) != zero
@@ -121,7 +121,7 @@ type nodePlan[V encoded] struct {
 	set      bool
 }
 
-func planNode[T, R, K any, V encoded, M sourceMode](records []T, varying Uint128, tileLen int, e *extractor[T, R, K, V, M]) nodePlan[V] {
+func planNode[T any, V encoded](records []T, varying Uint128, tileLen int, e *extractor[T, V]) nodePlan[V] {
 	if digit, ok := completeDigit(varying); ok {
 		return nodePlan[V]{digit: digit}
 	}

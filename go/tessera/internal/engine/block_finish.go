@@ -60,6 +60,9 @@ func buildCompletion[T any](p *partition[T]) completion[T] {
 			}
 			if prefix != 0 {
 				c.owners[physical] = len(c.sources)
+				if observeRoutes {
+					emitRoute(routeEvent{stage: routeSource, a: len(c.sources), b: prefix})
+				}
 				c.sources = append(c.sources, blockSource{physical, prefix})
 				length += prefix
 			}
@@ -108,6 +111,9 @@ func (c *completion[T]) protect(physical int) {
 // source overlaps the output, memmove transfers it before it becomes final.
 func (c *completion[T]) transfer(logical, start int) int {
 	source := c.sources[logical]
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeTransfer, a: logical})
+	}
 	p := c.partition
 	first := start / p.blockSize
 	last := min((start+source.length-1)/p.blockSize+1, len(p.input)/p.blockSize)
@@ -139,6 +145,9 @@ func (c *completion[T]) finish(bucket int, visit visitBand[T]) {
 	start := band.start
 	for logical := band.first; logical < band.end; logical++ {
 		start += c.transfer(logical, start)
+	}
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeBand, a: bucket, b: start - band.start})
 	}
 	if visit != nil {
 		input := c.partition.input

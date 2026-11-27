@@ -6,7 +6,7 @@ import "math/bits"
 
 // Cache one encoded key per record in source order. Key panics propagate
 // before any movement starts.
-func sortCached[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M]) {
+func sortCached[T any, V encoded](records []T, e *extractor[T, V]) {
 	if len(records) < 2 || recordBytes[T]() == 0 {
 		return
 	}
@@ -26,14 +26,23 @@ func sortCached[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[
 		previous = current
 	}
 	if ordered {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeCached, a: 0})
+		}
 		return
 	}
 	varying := keyBits(differences)
 	low := trailingBits(varying)
 	width := uint(varying.bitLen()) - low
 	if width <= uint(bits.Len(uint(maxPartitionBuckets))-1) {
+		if observeRoutes {
+			emitRoute(routeEvent{stage: routeCached, a: 1, digit: Digit{low, width}})
+		}
 		distribute(records, keys, Digit{low, width})
 		return
+	}
+	if observeRoutes {
+		emitRoute(routeEvent{stage: routeCached, a: 2, mask: varying})
 	}
 	indices, order := orderCached(keys, recordBytes[T](), e.mask)
 	keys = nil // The permutation no longer borrows the cached keys.
@@ -45,7 +54,7 @@ func sortCached[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[
 }
 
 func orderCached[V encoded](keys []V, recordLen int, mask Uint128) ([]int, sourceOrder) {
-	e := extractor[V, V, V, V, directMode]{mask: mask}
-	indexed := extractor[int, V, V, V, cachedIndexMode]{keys: keys, mask: mask}
+	e := extractor[V, V]{encode: func(key *V) Uint128 { return keyBits(*key) }, mask: mask}
+	indexed := extractor[int, V]{encode: func(index *int) Uint128 { return keyBits(keys[*index]) }, mask: mask}
 	return orderIndices(keys, recordLen, &e, &indexed)
 }

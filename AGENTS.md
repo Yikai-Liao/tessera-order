@@ -43,7 +43,8 @@ Use the `software-design-philosophy` skill for structural engine changes. Judge 
 
 ## Quality boundaries
 
-- Preserve ordering, stability, record ownership, panic recovery and the documented memory contract. Every unsafe operation explains its safety invariant. Keep the library's panic, inconsistent-key, owned-record and mutable-reference tests.
+- Each implementation follows its own language's philosophy. The engine stages, [semantics](conformance/semantics.md) and golden vectors are shared; idioms, ownership mechanisms and the performance target are not. Rust aims at the performance ceiling with zero-cost abstractions; language-specific rules live in that implementation's directory, such as [`go/AGENTS.md`](go/AGENTS.md). Do not carry one language's techniques into the other.
+- Preserve ordering, stability, record ownership and the documented memory contract. In Rust, preserve panic recovery, explain every unsafe operation's safety invariant, and keep the library's panic, inconsistent-key, owned-record and mutable-reference tests.
 - Preserve stable Rust and the MSRV in `Cargo.toml`; agree dependency, MSRV or platform-support changes with the operator. New source files carry BSD-2-Clause SPDX headers; retain Clausecker's notice in `block.rs`. Third-party algorithms remain dependencies or verified external sources.
 - Separate structural cleanup from changes to measured algorithms, inputs and sampling. Accept performance-sensitive engine changes and attribute their gains as [performance changes](CONTRIBUTING.md#performance-changes) describes.
 - Use domain names and units: records, keys, extractor, `_bytes`, `_bits` and `_len`. Public APIs explain their contract; internal comments explain non-obvious invariants and decisions.

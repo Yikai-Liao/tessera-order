@@ -4,7 +4,7 @@ package engine
 
 // firstInversion retains the previous key so a callback runs once per scanned
 // record. No records move during this scan.
-func firstInversion[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M]) int {
+func firstInversion[T any, V encoded](records []T, e *extractor[T, V]) int {
 	if len(records) == 0 {
 		return -1
 	}
@@ -21,7 +21,7 @@ func firstInversion[T, R, K any, V encoded, M sourceMode](records []T, e *extrac
 
 // Only candidate bits are returned, so changing keys cannot restore a parent
 // digit and prevent recursion from making progress.
-func scanVarying[T, R, K any, V encoded, M sourceMode](records []T, candidate Uint128, e *extractor[T, R, K, V, M]) Uint128 {
+func scanVarying[T any, V encoded](records []T, candidate Uint128, e *extractor[T, V]) Uint128 {
 	if candidate == (Uint128{}) {
 		return Uint128{}
 	}
@@ -46,7 +46,7 @@ func scanVarying[T, R, K any, V encoded, M sourceMode](records []T, candidate Ui
 
 // A budget exit leaves a stable permutation. The lifted record is inserted
 // in its current vacancy before returning normally.
-func insertionLoop[T, R, K any, V encoded, M sourceMode](records []T, budget int, e *extractor[T, R, K, V, M]) (int, bool) {
+func insertionLoop[T any, V encoded](records []T, budget int, e *extractor[T, V]) (int, bool) {
 	var value T
 	swaps := 0
 	for start := 0; start < len(records); {
@@ -79,7 +79,7 @@ func insertionLoop[T, R, K any, V encoded, M sourceMode](records []T, budget int
 
 // Combine each group's ordering results before rejecting. A callback may
 // read the rest of a group after the first inversion.
-func confirmAscending[T, R, K any, V encoded, M sourceMode](records []T, e *extractor[T, R, K, V, M], previous V) bool {
+func confirmAscending[T any, V encoded](records []T, e *extractor[T, V], previous V) bool {
 	i := 0
 	for ; i+4 <= len(records); i += 4 {
 		ordered := true

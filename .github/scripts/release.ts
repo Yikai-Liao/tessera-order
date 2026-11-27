@@ -34,21 +34,36 @@ export function readTagNotes(tag: string, cwd?: string, commit?: string): string
   return tagNotes(git("cat-file", "tag", ref));
 }
 
-// Git's signature markers (`gpg-interface.c`). Like git, cut at the last one,
-// so notes that quote a marker keep their text.
+// Git's signature markers (`gpg-interface.c`). A signature is the last such
+// block and runs to the end of the message; a quoted marker is note text.
 const signatureStart =
-  /^-----BEGIN (?:PGP SIGNATURE|PGP MESSAGE|SSH SIGNATURE|SIGNED MESSAGE)-----$/gm;
+  /^-----BEGIN (PGP SIGNATURE|PGP MESSAGE|SSH SIGNATURE|SIGNED MESSAGE)-----$/gm;
 
 /** Extract the message of a raw tag object (`git cat-file tag`), without its signature. */
 export function tagNotes(tagObject: string): string {
   const headerEnd = tagObject.indexOf("\n\n");
   const message = headerEnd < 0 ? "" : tagObject.slice(headerEnd + 2);
-  const signature = [...message.matchAll(signatureStart)].at(-1)?.index ?? message.length;
-  const notes = message.slice(0, signature).trim();
+  const last = [...message.matchAll(signatureStart)].at(-1);
+  const signed =
+    last !== undefined && message.slice(last.index).trimEnd().endsWith(`-----END ${last[1]}-----`);
+  // Keep leading indentation: an indented first line is a Markdown code block.
+  const notes = (signed ? message.slice(0, last.index) : message).replace(/^\n+/, "").trimEnd();
   if (notes === "") throw new Error("release tag message is empty; it holds the release notes");
-  // The checklist groups notes under headings; none means git's default
+  // The checklist groups notes under `#` headings; none means git's default
   // `--cleanup=strip` removed them as comments.
-  if (!/^#{1,6} /m.test(notes))
-    throw new Error("release notes have no Markdown heading; tag with --cleanup=whitespace");
+  if (!hasAtxHeading(notes))
+    throw new Error("release notes have no `#` heading; tag with --cleanup=whitespace");
   return `${notes}\n`;
+}
+
+/** Whether a line outside fenced code blocks is an ATX (`#`) heading. */
+function hasAtxHeading(markdown: string): boolean {
+  let fence: string | undefined;
+  for (const line of markdown.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker !== undefined && (fence === undefined || marker.startsWith(fence)))
+      fence = fence === undefined ? marker : undefined;
+    else if (fence === undefined && /^ {0,3}#{1,6}(?: |$)/.test(line)) return true;
+  }
+  return false;
 }

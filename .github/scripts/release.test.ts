@@ -21,16 +21,24 @@ test("tag notes drop the header and every git signature format", () => {
     );
 });
 
-test("tag notes cut only at the last signature marker", () => {
-  const quoted = `${notes}\n\`\`\`\n-----BEGIN PGP SIGNATURE-----\n\`\`\`\n`;
+test("tag notes keep quoted markers and leading indentation", () => {
+  const quoted = `${notes}\n\`\`\`\n-----BEGIN SSH SIGNATURE-----\n\`\`\`\n\n## Fixes\n\n- two\n`;
   const signature = "-----BEGIN SSH SIGNATURE-----\nabc\n-----END SSH SIGNATURE-----\n";
+  assert.equal(tagNotes(`${header}${quoted}`), quoted);
   assert.equal(tagNotes(`${header}${quoted}${signature}`), quoted);
+  const indented = "    cargo add tessera-order\n\n## Additions\n";
+  assert.equal(tagNotes(`${header}${indented}`), indented);
 });
 
-test("tag notes reject empty and headingless messages", () => {
+test("tag notes reject empty messages and messages without a heading outside code", () => {
   assert.throws(() => tagNotes(`${header}\n  \n`), /empty/);
   assert.throws(() => tagNotes("object 0123\ntype commit\n"), /empty/);
-  assert.throws(() => tagNotes(`${header}- one\n`), /no Markdown heading/);
+  assert.throws(() => tagNotes(`${header}- one\n`), /no `#` heading/);
+  assert.throws(() => tagNotes(`${header}\`\`\`sh\n# example\n\`\`\`\n`), /no `#` heading/);
+  assert.equal(
+    tagNotes(`${header}\`\`\`sh\n# example\n\`\`\`\n\n# Fixes\n`),
+    "```sh\n# example\n```\n\n# Fixes\n",
+  );
 });
 
 test("release notes come only from an annotated tag at the published commit", () => {
@@ -64,7 +72,7 @@ test("release notes come only from an annotated tag at the published commit", ()
     assert.throws(() => readTagNotes("rust/v9.0.0", root, "HEAD"), /does not point at/);
     assert.throws(() => readTagNotes("rust/v9.0.1", root), /not an annotated tag/);
     // Git's default cleanup strips headings as comments.
-    assert.throws(() => readTagNotes("rust/v9.0.2", root), /no Markdown heading/);
+    assert.throws(() => readTagNotes("rust/v9.0.2", root), /no `#` heading/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

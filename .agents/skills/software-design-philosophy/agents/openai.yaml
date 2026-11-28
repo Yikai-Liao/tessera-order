@@ -1,0 +1,4 @@
+interface:
+  display_name: "Software Design Philosophy"
+  short_description: "Design modules, state, and interfaces from real use cases; cut whole-system mechanism burden while coding and refactoring"
+  default_prompt: "Use $software-design-philosophy for the current design, audit, or simplification task."

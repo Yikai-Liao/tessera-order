@@ -17,8 +17,12 @@ type Lane = (typeof LANES)[number];
  * an unclassified file is not known to be harmless.
  */
 const ROUTES: [RegExp, Lane[]][] = [
-  // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
-  [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
+  // Repository metadata and agent skills that no automatic lane reads. `fuzz/` is outside the Cargo
+  // workspace.
+  [
+    /^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/|\.agents\/|skills-lock\.json$)/,
+    [],
+  ],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.

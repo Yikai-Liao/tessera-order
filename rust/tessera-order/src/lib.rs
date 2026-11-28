@@ -92,7 +92,7 @@ pub use algorithms::parallel::{
 pub use algorithms::{argsort, argsort_by_key, select_nth, select_nth_by_key, sort, sort_by_key};
 #[allow(deprecated)]
 pub use algorithms::{stable_sort, stable_sort_by_key};
-pub use engine::RadixKey;
+pub use engine::{MapStats, RadixKey, TesseraMap, TesseraSet};
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
 ///

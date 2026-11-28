@@ -9,6 +9,7 @@
 mod block;
 mod distribution;
 mod key;
+mod map;
 mod order;
 mod portable_simd;
 mod refine;
@@ -22,6 +23,7 @@ mod unwind;
 pub mod thresholds;
 
 pub use key::RadixKey;
+pub use map::{MapStats, TesseraMap, TesseraSet};
 #[cfg(feature = "trace")]
 pub use trace::{Event, partition as trace_partition};
 

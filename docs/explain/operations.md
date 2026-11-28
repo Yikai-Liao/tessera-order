@@ -1,45 +1,45 @@
 # 7. Beyond sorting
 
-Argsort, selection and cached-key sorting each ask for less than a sorted slice. They run on the same engine and skip exactly the work their answer does not need.
+**The core idea:** `argsort`, `select_nth`, and `sort_by_cached_key` each ask for less than a full sorted slice. Instead of maintaining separate algorithms, they all run on the same ordering engine and skip the work their answer does not need.
 
 ## Argsort
 
-**Problem.** Argsort sorts indices, not records. Every key read becomes an indirect lookup into the source, a likely cache miss on a large input.
+Sorting indices instead of moving wide records avoids copying payloads, but creates a new bottleneck: every key read becomes an indirect random lookup into the source slice — a cache miss on large inputs.
 
-**Idea: pack key bits into the index.** An index into a million records needs 20 bits; a 64-bit word has 44 more. Tessera fills them with key bits, so most of the sorting reads only the words themselves.
+**The trick: pack key bits into the spare bits of each 64-bit index.** An index into 1 million records uses only 20 bits, leaving **44 unused bits** in a `u64`. Tessera fills those upper bits with the key's highest varying bits so sorting the packed words reads only the words themselves:
 
-1. The input is first routed like a sort: ordered inputs, constant keys, inputs that fit a tile and [sparse source order](routing.md#sparse-source-order) finish there.
-2. One counting pass on the top 8 varying key bits writes each source index into one of 256 bands, in input order.
-3. Within each dense band, every word holds the next key bits above the index. Sorting the words as plain integers orders them by those key bits and then by source position, which keeps the order stable.
-4. Only words whose packed bits tie, with key bits still unresolved, look up their source keys again.
+1. **Reuse root shortcuts:** already ordered, constant, single-tile, and [sparse source order](routing.md#sparse-source-order) inputs finish immediately.
+2. **Coarse split:** one 8-bit counting pass distributes indices into 256 bands in input order.
+3. **Pack & sort integers:** in dense bands (> 256 average entries), pack the next key bits above the index and sort the words as plain integers (the low index bits break ties in ascending source order, keeping stability automatically!).
+4. **Resolve remaining ties only:** touch the source slice again only for words whose packed key prefix tied while lower key bits remain unresolved.
 
-For a million random `u32` keys, the band and the packed prefix resolve the top 28 of 32 bits; the source is read again only to separate words that agree on all 28. When bands average at most 256 entries, packing does not pay for itself, and each band is sorted directly by source keys.
+On 1 million random `u32` keys, the 8-bit band plus packed prefix resolves the top 28 of 32 bits — the source slice is touched again only when two keys share all 28 top bits. Sparse bands (averaging ≤ 256 entries) skip packing and sort directly by source keys.
 
-With the `rayon` feature, `par_argsort` and `par_argsort_by_key` fall back to serial argsort in a one-thread pool, when the input has fewer than four index tiles, or when `len * max(size_of::<T>(), size_of::<usize>())` is below 1 MiB (the byte gate uses the wider of records and output indices, so 131,072 `u32` keys clear 1 MiB via their 64-bit indices while a wide-record slice with fewer than four index tiles stays serial). Eligible inputs pack the top varying key prefix directly into the spare bits of each index word in parallel, sort those words through the shared parallel root, and unmask the indices. When all varying bits fit in the prefix, no tie reads the source again; otherwise, prefix-aligned slices refine small ties in parallel and ties wider than a worker share unmask and scan their remaining varying bits in one parallel pass before refining any still-varying bits through the parallel root. That fused pass probes the first 64 slots serially (matching the serial scan's first batch) and then scans in parallel waves of `P * 8,192` slots; once cumulative variation saturates the remaining candidate bits, the tail is only unmasked in parallel, bounding extra key reads past the serial early exit to at most `P * 8,192 - 1` regardless of chunk layout or scheduling.
+### Parallel `par_argsort` rules
+
+| Rule | Value / behavior |
+|---|---|
+| Serial fallback gate | Falls back to serial `argsort` in a 1-thread pool, below 4 index tiles, or when `len * max(size_of::<T>(), size_of::<usize>()) < 1 MiB` (sizing by the wider of records and output indices lets 131,072 `u32` keys clear 1 MiB via their 64-bit indices while keeping short wide-record slices serial). |
+| Parallel packing & refinement | Packs top varying key bits directly into each index word in parallel, sorts through the shared parallel root, and unmasks indices. If all varying bits fit in the prefix, no tie ever reads the source again. |
+| Bounded tie-scan waves | Wide ties unmask and scan remaining varying bits in one fused parallel pass: probes the first 64 slots serially (matching serial early exit), then scans in waves of `P * 8,192` slots; once all candidate bits vary, remaining tails only unmask. This bounds extra key reads past the serial early exit to at most `P * 8,192 - 1` regardless of scheduling. |
 
 ## Select one rank
 
-**Problem.** `select_nth` needs one record in its place and the right records on each side, not the whole order.
+`select_nth` needs the exact record at one zero-based rank (matching a full stable sort, even across equal-key ties) and the right elements on each side, without ordering either side internally.
 
-**Idea: refine only the band that holds the rank.** Selection runs the same node and tile decisions as a sort. After each partition, every band completes its stable movement, so both sides hold the right records in a stable order, but only the band containing the rank is analyzed further. A tile that contains the rank is still sorted completely.
+**The trick: refine only the one bucket containing the target rank.** After each partition, every bucket completes its stable movement so both sides preserve relative equal-key order, and then Tessera discards every bucket that does not contain the requested rank. How much work that skips depends on the selected band's size: on a balanced 256-way digit split it drops roughly 255/256 (~99.6%) of the slice after pass 1, whereas on a skewed input where the target rank lands inside a large outer band (for example after a 4-band equality split) that outer band is refined further on its remaining bits. A tile containing the rank finishes completely.
 
-Before partitioning an input larger than a tile, selection tries shortcuts that may avoid partitioning altogether. Let *p* be the key currently at the rank.
+Before partitioning a multi-tile slice, selection checks four cheap shortcuts around the key $p$ currently sitting at the target rank:
 
-- **Already a boundary.** If no record before the rank has a key above *p* and none after it has a key below *p*, the rank is already correct. When every varying bit of *p* (from its [key encoding](keys.md)) is `1` or `0`, no valid key can exceed or precede *p*, so that side is certified without scanning it — including padded tuples, byte arrays and reversed narrow keys whose unused bits are constant; any key below that varying maximum still scans the prefix.
-- **One side clean.** Suppose no key after the rank is below *p*. Then the prefix through the rank must consist of the smallest records, all at most *p*. Starting at the first record before the rank whose key exceeds *p*, take records with keys at most *p* in input order until the prefix is full; the skipped records follow. Any record taken from beyond the rank has key exactly *p*, so taking them in input order keeps the stable choice. The mirrored rule handles a clean prefix.
-- **First or last rank.** Find the first minimum (or last maximum). If the displaced record has no equal key elsewhere, swap the two; otherwise rotate the winner into place so the records in between keep their order.
-- **A short end.** If the rank lies close to one end, collect that end's candidates in a batch. Whenever the batch fills, keep its better half. For wide records, the engine moves only the winners and displaced end slots when it proves no outside key ties the original end; it checks only varying bits, so an end whose keys share no varying bit (ignoring constant padding) falls back directly to the stable run-and-exception placement instead of running tie lookups. The batch stays within the [sparse-order budget](routing.md#sparse-source-order), and the end is placed with the same run-and-exception movement.
-
-With one dominant key, a rank inside the dominant key's band needs only that position reserved; a rank outside it sorts only the bounded exceptions.
+- **Already a boundary:** if no key before the rank exceeds $p$ and none after is below $p$, done. When every varying bit of $p$ is all `1`s or all `0`s (ignoring constant padding on tuples, byte arrays, and `Reverse`), that side is certified without scanning it; any key below that varying maximum still scans the prefix.
+- **One side clean:** if no key after the rank is below $p$ (or symmetrically none before exceeds $p$), scan forward from the first misplaced key before the rank, taking keys ≤ $p$ in input order until the prefix is full — any key pulled from beyond the rank equals $p$, preserving stability.
+- **First or last rank:** find the first minimum (or last maximum); swap directly if the displaced key has no tie elsewhere, otherwise rotate the winner into place to keep equal keys ordered.
+- **Short end & dominant key:** ranks close to either end collect candidates in a batch within the [sparse-order budget](routing.md#sparse-source-order), keeping the better half each time it fills (moving only winners and displaced end slots on wide records when varying bits prove no outside tie, otherwise falling back to stable run-and-exception placement). With one dominant key, a rank inside the dominant band only reserves that slot, and a rank outside sorts only the bounded exceptions.
 
 ## Sort by a cached key
 
-**Problem.** A costly key function, or one that must not run twice, cannot be called during every pass.
+When a key closure is expensive or must run at most once per record, `sort_by_cached_key` calls it once per record in input order, stores the encoded keys ($O(n)$ cache, matching `slice::sort_by_cached_key`), and learns in that same pass whether keys are already ascending and which bits vary:
 
-**Idea: cache once, then decide from the cached keys.** `sort_by_cached_key` calls the key function once per record, in input order, and stores the encoded keys. The same pass learns whether the keys ascend and which bits vary.
-
-- **Already ascending:** done, with no further work.
-- **Keys vary within 12 bits**, as with a small category ID: one stable distribution moves each record once into its final bucket. It never calls the key function: it replays the cached keys in input order. A tile uses a single counting pass; a larger input uses one [block partition](block-partition.md) without recursive finishing.
-- **Otherwise:** argsort the cached keys, with the packing above, and release them. Then move the records along the permutation: run by run if the order was sparse, otherwise by following its cycles, in linear time.
-
-The cache costs one key per record, the same O(n) as the standard library's cached-key sort.
+- **Already ascending:** return immediately.
+- **Narrow varying span (≤ 12-bit span from lowest to highest varying bit, e.g., categories):** run one stable distribution pass replaying cached keys in input order without calling the closure again (one counting pass for a tile, or one [block partition](block-partition.md) with no recursion for larger inputs). Keys whose varying bits are widely spaced (such as bits 0 and 20, spanning 21 positions) exceed this 12-bit window and take the wider-key path below.
+- **Wider keys:** `argsort` the cached keys with prefix packing, free the key cache, and permute the records in linear time (run by run if sparse, otherwise by cycles).

@@ -68,7 +68,6 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); next retire the remaining engine model:
 
-- Move `CountingPassDemo` from the frame slider in `StepControls` to structural navigation, then retire `StepControls`.
 - Replace `sim/digits.ts` (`KeySample::collect`, `plan_digits`, `top_window`) with engine events, and extend the trace to tile finishing where a figure needs it.
 
 ## Integrations

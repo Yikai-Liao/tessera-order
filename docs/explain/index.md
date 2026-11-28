@@ -1,44 +1,38 @@
 # How Tessera works
 
-Tessera is a radix sort that stays stable without a second, input-sized buffer and skips work the data does not need. Both demos below run the engine itself, compiled to WebAssembly.
+Tessera is a stable radix ordering engine that runs in O(√n) extra memory instead of an O(n) output buffer, and skips passes whenever the input is already ordered, constant, narrow, or dominated by a repeated key.
 
-## The textbook: LSD needs an input-sized buffer
+## Engine route & scale explorer
 
-<CountingPassDemo />
-
-A textbook LSD radix sort repeats this counting pass once per digit: count each digit value, turn the counts into start positions, then copy every record into its bucket in a second array as large as the input. For 10 million 8-byte records that buffer is 76 MiB. [Radix sort in one pass](radix-sort.md) builds LSD, MSD and Tessera from this pass.
-
-## Tessera: a stable split without a second buffer
-
-<BlockPartitionDemo />
-
-Tessera splits in place. Here the input splits on the tens digit into four buckets. Each bucket fills a chain of fixed-size blocks, and once an input block has been read it becomes free for any bucket's output. A short ledger then copies each chain into its final range. Equal keys keep their input order (the small number under each key), and the only extra memory is a few spare blocks: about 6 MiB instead of 76 MiB for those 10 million records. [The block partition](block-partition.md#step-by-step) explains every row and control.
-
-## The whole engine
+Select a 10-million-record workload below to see which stages run, which are skipped, and how much extra memory Tessera uses compared with a textbook LSD radix buffer. Click any box in the pipeline to open its chapter.
 
 <PipelineMap />
 
-1. **Skip what the data does not need.** An order probe returns ascending inputs at once and reverses descending ones stably. Unsorted inputs get an insertion pass with a swap budget, which finishes nearly sorted ones. One scan finds the key bits that vary; if none do, the input is done.
-2. **Split large inputs (nodes).** A node takes the first partition that applies: one window covering every varying bit when they span at most 8 bits (counted directly when the records are their own keys), an equality partition when one key is frequent, a split at its top varying bit when it is already grouped by that bit, or otherwise a block partition on its top digit. Each split removes at least one key bit, so recursion never goes deeper than the key is wide.
-3. **Route the children again.** A child larger than a tile repeats the order check and the varying-bit scan before it is split, so an ordered or constant region exposed anywhere costs one scan.
-4. **Finish cache-sized pieces (tiles) in a scratch buffer**, where a second buffer is cheap: insertion sort, a tile-local MSD split, or LSD counting passes.
+### How the four stages work
 
-Argsort, selection and cached-key sorting reuse the same steps and skip the ones their answer does not need.
+1. **Skip what the data does not need.** An [order probe](routing.md#order-probe) returns ascending inputs at once and reverses descending ones stably without allocating. Unsorted inputs try [budgeted insertion](routing.md#budgeted-insertion), which finishes nearly sorted slices in linear time. One scan then finds the [varying key bits](keys.md#varying-bits); if none vary, the slice is done.
+2. **Split large inputs (nodes) in $O(\sqrt{n})$ scratch.** A node takes the first partition that applies: a [counted window](routing.md#counted-window) for a narrow direct-key range, an [equality partition](routing.md#repeated-key) when sampling finds a dominant key, a zero-copy split when the slice is already grouped by its top varying bit, or a stable [block partition](block-partition.md) on its top digit. Each split removes at least one key bit, bounding recursion depth by the key width.
+3. **Route large children again.** Every child larger than a tile repeats the order check and varying-bit scan over the remaining bits, so ordered or constant regions exposed inside a bucket finish in one scan.
+4. **Finish cache-sized tiles.** Once a subproblem fits in a [tile](tiles.md), a scratch buffer sits in L2 cache and ordinary counting passes are cheap: insertion sort for short tiles, one- or two-pass flat LSD when remaining bits fit, or tile-local MSD otherwise.
+
+Argsort, selection and cached-key sorting reuse the same pipeline and skip every stage their answer does not need; see [7. Beyond sorting](operations.md).
 
 ## Reading order
 
+Each chapter includes interactive models or WebAssembly replays of the engine itself:
+
 | Page | You will learn |
 |---|---|
-| [1. Radix sort in one pass](radix-sort.md) | Counting passes, LSD versus MSD, and how Tessera combines them |
+| [1. Radix sort in one pass](radix-sort.md) | Counting passes, LSD versus MSD, and how Tessera combines them (interactive counting-pass demo) |
 | [2. Keys as unsigned integers](keys.md) | How signed integers, floats and `Reverse` become radix keys, and why constant bits are free |
 | [3. Routing an input](routing.md) | How sorted, nearly sorted, repeated and partly ordered inputs avoid radix passes |
-| [4. The block partition](block-partition.md) | The O(√n) stable split, step by step, its parallel form and the block size |
+| [4. The block partition](block-partition.md) | The $O(\sqrt{n})$ stable split, WebAssembly step-by-step replay, parallel form, and block-size derivation |
 | [5. Finishing tiles](tiles.md) | Choosing digits and the leaf that finishes each cache-sized piece |
 | [6. Ownership and panics](safety.md) | Why any record type is safe, and what happens when a key function panics |
 | [7. Beyond sorting](operations.md) | How argsort, selection and cached-key sorting skip work a full sort does |
 
 ## Memory
 
-Extra memory is O(√n) block scratch plus a fixed-size tile buffer and small tables. [Ordering semantics](../../conformance/semantics.md#space) states the contract; [block scratch](block-partition.md#choosing-the-block-size) and [tile scratch](tiles.md) explain the parts.
+Extra memory is $O(\sqrt{n})$ block scratch plus a bounded tile buffer and small tables. [Ordering semantics](../../conformance/semantics.md#space) states the formal contract; [choosing the block size](block-partition.md#choosing-the-block-size) and [finishing tiles](tiles.md) explain each component.
 
 These pages own the routing rules, thresholds and their reasons; the [engine reference](../design/engine.md) maps them to code.

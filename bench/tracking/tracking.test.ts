@@ -34,6 +34,7 @@ import { explainFailure } from "./failure.ts";
 import { growthPeaks, growthPlans, growthSchema } from "./growth.ts";
 import {
   comparableRuns,
+  currentCases,
   formatTimestamp,
   historyTimestamp,
   latestValues,
@@ -536,6 +537,48 @@ test("history connects reports across other executions and preserves same-execut
   assert.deepEqual(
     latestValues(runs, [serialCase, parallelCase]).map((row) => row.current),
     [true, true],
+  );
+  assert.deepEqual(
+    currentCases(runs, [serialCase, parallelCase]).map((entry) => entry.id),
+    [serialCase.id, parallelCase.id],
+  );
+  assert.deepEqual(
+    currentCases(runs.slice(0, 6), [serialCase, parallelCase]).map((entry) => entry.id),
+    [parallelCase.id],
+  );
+  // Publishing serial at a new commit keeps t4 from the previous commit visible (marked non-current).
+  assert.deepEqual(
+    currentCases(runs.slice(0, 9), [serialCase, parallelCase]).map((entry) => entry.id),
+    [serialCase.id, parallelCase.id],
+  );
+  assert.deepEqual(
+    latestValues(runs.slice(0, 9), [serialCase, parallelCase]).map((row) => row.current),
+    [true, false],
+  );
+  // A retired execution from an earlier commit (neither latest nor previous) is hidden,
+  // and a new t4 report that omits a parallel case hides that case.
+  const retired = "rust/sort/u64/random/65536/s1/t1";
+  const otherParallel = "rust/sort/u64/sorted/65536/s1/t4";
+  const [retiredCase, otherParallelCase] = trackingCases([retired, otherParallel]);
+  const withRetired = [runSchema.parse({ ...at(0, { [retired]: 300 }), execution: "t1" }), ...runs];
+  assert.deepEqual(
+    currentCases(withRetired, [serialCase, parallelCase, retiredCase]).map((entry) => entry.id),
+    [serialCase.id, parallelCase.id],
+  );
+  const parallelOmitted = [
+    ...runs.slice(0, 9),
+    runSchema.parse({
+      ...at(9, { [otherParallel]: 240 }),
+      execution: "t4",
+      hash: latestSerial.hash,
+      commit_time: latestSerial.commit_time,
+    }),
+  ];
+  assert.deepEqual(
+    currentCases(parallelOmitted, [serialCase, parallelCase, otherParallelCase]).map(
+      (entry) => entry.id,
+    ),
+    [serialCase.id, otherParallelCase.id],
   );
   assert.equal(latestValues(runs.slice(0, 6), [serialCase])[0].current, false);
   assert.equal(latestValues(runs.slice(0, 8), [serialCase])[0].current, false);

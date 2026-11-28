@@ -121,73 +121,54 @@
   transition: transform 0.35s ease;
 }
 
-/* Step controls */
-.tsr-controls {
-  display: flex;
+/* Segmented stage/preset tabs shared across interactive figures. */
+.tsr-seg {
+  display: inline-flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  font-size: 13px;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 3px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 9px;
+  background: var(--vp-c-bg);
 }
 
-.tsr-controls:focus-visible {
-  outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: 4px;
+.tsr-seg button {
+  padding: 4px 11px;
+  border: 1px solid transparent;
   border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.tsr-controls button,
-.tsr-controls select,
+.tsr-seg button:hover {
+  color: var(--vp-c-text-1);
+}
+
+.tsr-seg button.active {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+}
+
 .tsr-input select,
 .tsr-input input[type="text"],
 .tsr-input input[type="number"],
 .tsr-input textarea {
-  padding: 3px 9px;
+  padding: 4px 10px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 6px;
   background: var(--vp-c-bg);
   color: var(--vp-c-text-1);
   font-size: 13px;
-}
-
-.tsr-controls button:hover {
-  border-color: var(--vp-c-brand-1);
-}
-
-.tsr-controls .tsr-play {
-  min-width: 84px;
-  font-weight: 600;
-}
-
-.tsr-scrub {
-  flex: 1 1 140px;
-  accent-color: var(--vp-c-brand-1);
-}
-
-.tsr-count {
-  min-width: 64px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--vp-c-text-2);
-}
-
-.tsr-marks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-}
-
-.tsr-controls .tsr-mark {
-  padding: 1px 10px;
-  border-radius: 999px;
-  color: var(--vp-c-text-2);
-}
-
-.tsr-controls .tsr-mark.active {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
 }
 
 /* Form rows of the interactive figures */
@@ -233,4 +214,210 @@
   .tsr-move {
     transition: none;
   }
+}
+
+/* Lightweight Markdown copy/view bar at the top of documentation pages. */
+.tsr-md-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tsr-md-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.tsr-md-action:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.tsr-md-action:focus-visible,
+.tsr-md-link:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+.tsr-md-action:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.tsr-md-action.is-copied {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.tsr-md-action.is-error {
+  border-color: var(--tsr-focus);
+  color: var(--tsr-focus);
+}
+
+.tsr-md-link {
+  padding: 3px 4px;
+  color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.tsr-md-link:hover {
+  color: var(--vp-c-brand-1);
+}
+
+/* Home page: crisp hero spacing and two-column code + fit layout. */
+.tsr-home-md-wrap {
+  max-width: 1152px;
+  margin: 12px auto -28px;
+  padding: 0 24px;
+}
+
+@media (min-width: 640px) {
+  .tsr-home-md-wrap {
+    padding: 0 48px;
+  }
+}
+
+@media (min-width: 960px) {
+  .tsr-home-md-wrap {
+    padding: 0 64px;
+  }
+}
+
+.VPHome .VPHero {
+  padding-bottom: 32px;
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) {
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) th,
+.VPHome .vp-doc table:not(.implementation-comparison table) td {
+  padding: 12px 16px;
+  border: none;
+  border-bottom: 1px solid var(--tsr-line);
+  background: transparent;
+  vertical-align: middle;
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) tr:last-child td {
+  border-bottom: none;
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) th {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-c-text-2);
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) th:first-child,
+.VPHome .vp-doc table:not(.implementation-comparison table) td:first-child {
+  white-space: nowrap;
+  color: var(--vp-c-text-2);
+}
+
+.VPHome .vp-doc table:not(.implementation-comparison table) th:nth-child(2),
+.VPHome .vp-doc table:not(.implementation-comparison table) td:nth-child(2) {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-1);
+}
+
+@media (max-width: 720px) {
+  .VPHome .vp-doc table:not(.implementation-comparison table) {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+.tsr-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  margin: 16px 0 32px;
+  align-items: stretch;
+}
+
+@media (max-width: 859px) {
+  .tsr-home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tsr-card {
+  padding: 20px 22px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+}
+
+.tsr-card > h3:first-child {
+  margin-top: 0;
+}
+
+.tsr-card div[class*="language-"] {
+  margin: 12px 0 8px;
+}
+
+.tsr-fit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tsr-fit-block {
+  padding-left: 14px;
+  border-left: 3px solid var(--vp-c-divider);
+}
+
+.tsr-fit-block.is-good {
+  border-left-color: #1baf7a;
+}
+
+.tsr-fit-block h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.tsr-card .tsr-fit-block p,
+.tsr-card .tsr-fit-block ul {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-card .tsr-fit-block ul {
+  padding-left: 18px;
+}
+
+.tsr-card .tsr-fit-block li + li {
+  margin-top: 4px;
 }

@@ -1,30 +1,16 @@
 ---
-# Give the interactive figures the full document width, without an outline column.
+# Give the interactive history dashboard the full document width, without an outline column.
 aside: false
 pageClass: performance-page
 ---
 
-# Performance
+# Main history
 
 <script setup lang="ts">
-import ImplementationComparison from "../.vitepress/theme/components/ImplementationComparison.vue";
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
-In the current measurements:
-
-- **Large random inputs:** Tessera is the fastest stable sort for most key and record types. On `u32` keys, unstable SIMD and radix sorts are faster.
-- **Sorted and nearly sorted inputs:** sorted inputs are faster than with `slice::sort`, and nearly sorted ones many times faster.
-- **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
-- **Memory:** a serial `sort` needs extra memory that grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input. Parallel sorting, argsort and cached-key sorting have [their own bounds](../../conformance/semantics.md#space).
-
-The [implementation comparison](implementations.md) shows every figure behind these statements.
-
-<ImplementationComparison view="overview" />
-
-## Main history
-
-How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners: whether main is getting faster, which cases moved at which commit, and how long each case takes now.
+How long Tessera takes to sort fixed inputs on `main`, measured on Bencher's Intel v1 Bare Metal runners: whether `main` is getting faster, which cases moved at which commit, and how long each case takes now. For standings and memory comparisons against other Rust and C++ sorting libraries, see [vs Other Sorts](implementations.md).
 
 <PerformanceHistory />
 
@@ -41,17 +27,6 @@ How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel
 
 Each case's baseline is its first report in the selected range, so changing the range can change it. Commit time is not a guaranteed merge order. Changes include compiler and dependency upgrades as well as library changes. Criterion intervals are within-run estimates, not cross-run regression tests, and do not remove code-layout effects or differences between machines of the same specification. Missing measurements are absent, not passes or zeroes.
 
-Every view uses only runs on the latest run's hardware specification within the range, so environments are never mixed; select an earlier range to inspect older environments. Group means chain each case's ratio to its own previous measurement, so a case that joins later does not shift the mean; with an unchanged case set this equals the geometric mean of the cases' changes.
+Every view uses only runs on the latest run's hardware specification within the range, so environments are never mixed; select an earlier range to inspect older environments. The filters, trend matrix and latest-values table show only active cases: each case must appear in its execution mode's latest report, and that mode must have reported on either the latest commit or the immediately preceding comparable commit. Because execution modes publish separately, an execution mode that has not yet reported for the latest commit stays visible for one subsequent commit (dated to its earlier report in the latest-values table) so delayed parallel jobs are not mistaken for removals; once a mode publishes a report that omits a case, or a further commit reports without that mode, those cases are omitted. Group means chain each case's ratio to its own previous measurement, so a case that joins later does not shift the mean; with an unchanged case set this equals the geometric mean of the cases' changes.
 
 The page reads monthly JSONL from the public data branch and never queries the live Bencher API. Coverage, publication and limits belong to the [main tracking contract](../development/continuous-benchmarks.md#main-long-term-tracking); PR checks use their own paired comparisons.
-
-## Embed the tracker
-
-In another Vue-enabled Markdown page:
-
-	<script setup>
-	import PerformanceHistory from "./path/to/PerformanceHistory.vue";
-	</script>
-	<PerformanceHistory />
-
-Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or the initially compared case; a URL hash takes precedence. Other webpages can use an iframe. GitHub Markdown uses the [README's fixed SVG preview](../../README.md) of the group means. Publishing measurements does not rebuild this website.

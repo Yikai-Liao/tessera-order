@@ -2,18 +2,26 @@
 
 import type { Theme } from "vitepress";
 import DefaultTheme from "vitepress/theme";
+import { h } from "vue";
 import "./style.css";
 import BlockPartitionDemo from "./components/BlockPartitionDemo.vue";
 import BlockSizeChart from "./components/BlockSizeChart.vue";
 import CountingPassDemo from "./components/CountingPassDemo.vue";
 import DigitPlanner from "./components/DigitPlanner.vue";
 import KeyEncoder from "./components/KeyEncoder.vue";
+import PageMarkdownBar from "./components/PageMarkdownBar.vue";
 import PipelineMap from "./components/PipelineMap.vue";
 import RadixComparison from "./components/RadixComparison.vue";
 import VaryingBits from "./components/VaryingBits.vue";
 
 export default {
   extends: DefaultTheme,
+  Layout() {
+    return h(DefaultTheme.Layout, null, {
+      "doc-before": () => h(PageMarkdownBar),
+      "home-hero-before": () => h("div", { class: "tsr-home-md-wrap" }, [h(PageMarkdownBar)]),
+    });
+  },
   enhanceApp({ app }) {
     app.component("BlockPartitionDemo", BlockPartitionDemo);
     app.component("BlockSizeChart", BlockSizeChart);

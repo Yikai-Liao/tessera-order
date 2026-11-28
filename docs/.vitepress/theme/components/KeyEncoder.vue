@@ -2,15 +2,15 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-// The encodings of `RadixKey::encode` in key.rs, on integers, f32 and a padded tuple.
+// Mirrors `RadixKey::encode` in rust/tessera-order/src/engine/key.rs.
 type Kind = "u8" | "i8" | "f32" | "(u16, u8)";
 const kind = ref<Kind>("i8");
 const reverse = ref(false);
 const presets: Record<Kind, string> = {
-  u8: "200, 3, 255, 0, 64",
-  i8: "-128, 5, -1, 0, 127, -3",
-  f32: "1.5, -0.0, 0.0, -2.25, NaN, -Infinity, 3e-39, 0.5",
-  "(u16, u8)": "(0, 0); (1, 0); (0, 255); (256, 5)",
+  i8: "-128, -3, -1, 0, 5, 127",
+  u8: "0, 3, 64, 200, 255",
+  f32: "-Infinity, -2.25, -0.0, 0.0, 3e-39, 1.5, NaN",
+  "(u16, u8)": "(0, 0); (0, 255); (1, 0); (256, 5)",
 };
 const text = ref(presets.i8);
 function setKind(next: Kind) {
@@ -57,19 +57,22 @@ function encode(raw: number): number {
   return reverse.value ? (~encoded & all) >>> 0 : encoded;
 }
 
-const binary = (value: number) => {
-  const s = value.toString(2).padStart(bits.value, "0");
-  if (kind.value === "f32") return `${s[0]} ${s.slice(1, 9)} ${s.slice(9)}`;
-  if (kind.value === "(u16, u8)") return `${s.slice(0, 8)} ${s.slice(8, 24)} ${s.slice(24)}`;
-  return s;
-};
-const inputBits = (value: number) => {
-  if (kind.value === "(u16, u8)") {
-    const s = value.toString(2).padStart(24, "0");
-    return `${s.slice(0, 16)} · ${s.slice(16)}`;
-  }
-  return binary(value);
-};
+function groupedChars(raw: number, encoded: number) {
+  const r = raw.toString(2).padStart(bits.value, "0");
+  const e = encoded.toString(2).padStart(bits.value, "0");
+  const breaks =
+    kind.value === "f32"
+      ? new Set([1, 9])
+      : kind.value === "(u16, u8)"
+        ? new Set([8, 24])
+        : new Set<number>();
+  return e.split("").map((ch, i) => ({
+    ch,
+    flipped: ch !== r[i],
+    pad: kind.value === "(u16, u8)" && i < 8,
+    gap: breaks.has(i),
+  }));
+}
 
 interface Row {
   input: string;
@@ -95,41 +98,95 @@ const sorted = computed(() => [...rows.value.rows].sort((a, b) => a.encoded - b.
 
 <template>
   <figure class="tsr-figure">
-    <div class="tsr-input">
-      <label v-for="k in ['u8', 'i8', 'f32', '(u16, u8)'] as Kind[]" :key="k">
-        <input type="radio" name="key-kind" :checked="kind === k" @change="setKind(k)" /> <code>{{ k }}</code>
+    <div class="ke-bar">
+      <div class="tsr-seg" role="tablist" aria-label="Key type">
+        <button
+          v-for="k in (['i8', 'u8', 'f32', '(u16, u8)'] as Kind[])"
+          :key="k"
+          type="button"
+          role="tab"
+          :aria-selected="kind === k"
+          :class="{ active: kind === k }"
+          @click="setKind(k)"
+        >
+          <code>{{ k }}</code>
+        </button>
+      </div>
+      <label class="ke-toggle">
+        <input v-model="reverse" type="checkbox" />
+        Wrap in <code>Reverse</code>
       </label>
-      <label><input v-model="reverse" type="checkbox" /> wrap in <code>Reverse</code></label>
+    </div>
+
+    <div class="tsr-input">
       <textarea
         v-model="text"
         rows="1"
         :aria-label="kind === '(u16, u8)' ? 'Tuples, separated by semicolons' : 'Keys, separated by commas'"
       ></textarea>
     </div>
-    <table class="tsr-table">
+
+    <table class="tsr-table ke-table">
       <thead>
         <tr>
           <th>Key</th>
-          <th>{{ kind === "(u16, u8)" ? "Field bits" : "Bits in memory" }}</th>
-          <th>Encoded bits</th>
-          <th>Encoded integer</th>
+          <th>Encoded bits <small>(highlighted = flipped from raw bits)</small></th>
+          <th>Unsigned value</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows.rows" :key="row.input">
-          <td>{{ row.input }}</td>
-          <td class="tsr-bits">{{ inputBits(row.raw) }}</td>
-          <td class="tsr-bits">{{ binary(row.encoded) }}</td>
-          <td>{{ row.encoded }}</td>
+        <tr v-for="row in sorted" :key="row.input">
+          <td><strong>{{ row.input }}</strong></td>
+          <td class="tsr-bits">
+            <span
+              v-for="(bit, i) in groupedChars(row.raw, row.encoded)"
+              :key="i"
+              :class="{ flipped: bit.flipped, pad: bit.pad, gap: bit.gap }"
+            >{{ bit.ch }}</span>
+          </td>
+          <td>{{ row.encoded.toLocaleString('en-US') }}</td>
         </tr>
       </tbody>
     </table>
+
     <p class="tsr-caption">
-      Sorted by encoded integer:
+      Rows are ordered by their encoded unsigned integer:
       <code>{{ sorted.map((r) => r.input).join('  <  ') }}</code>
     </p>
     <p v-if="rows.errors.length" class="tsr-note">Not a valid <code>{{ kind }}</code>: {{ rows.errors.join(', ') }}</p>
-    <p v-if="kind === 'f32'" class="tsr-note">f32 bits are shown as sign · exponent · mantissa.</p>
-    <p v-if="kind === '(u16, u8)'" class="tsr-note">Field bits show the two scalar values (16b · 8b), not Rust tuple layout. Encoded bits pack them into u32 as 8 zero padding bits · u16 · u8; Reverse inverts only the 24 effective bits (e.g. Reverse((0, 0)) encodes to 0x00ff_ffff = 16777215).</p>
   </figure>
 </template>
+
+<style scoped>
+.ke-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+.ke-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ke-table th small {
+  font-weight: 400;
+  color: var(--vp-c-text-3);
+}
+.flipped {
+  border-radius: 2px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-weight: 700;
+}
+.pad {
+  opacity: 0.35;
+}
+.gap {
+  margin-left: 6px;
+}
+</style>

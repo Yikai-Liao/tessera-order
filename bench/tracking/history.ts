@@ -8,6 +8,9 @@ import { renderTrends, type TrendCell, type TrendChart } from "../plot/trends.ts
 
 import { caseUsesExecution, type TrackingCase, type TrackingRun } from "./result.ts";
 
+export const HISTORY_DATA_SOURCE =
+  "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/tessera/";
+
 // Display choices, not statistical tests. Bare Metal estimates of one build
 // usually agree within about 1%, so no chart magnifies a span smaller than
 // 5% into its full height; a cumulative change of 20% is set in bold.
@@ -115,6 +118,34 @@ function chainedChanges(runs: TrackingRun[], ids: string[]) {
   });
 }
 
+function isLatestCase(
+  runs: TrackingRun[],
+  entry: TrackingCase,
+  latestHash: string | undefined,
+  last = runs.findLast((run) => run.values[entry.id]),
+): boolean {
+  if (!last || last.hash !== latestHash) return false;
+  return last === runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
+}
+
+/**
+ * Cases that remain active at the end of the range: each case must appear in its execution's
+ * latest report, and that execution must have reported on either the latest commit or the
+ * immediately preceding commit (preserving other executions while a new commit's reports arrive,
+ * while hiding omitted cases and retired/one-off executions).
+ */
+export function currentCases(input: TrackingRun[], cases: TrackingCase[]): TrackingCase[] {
+  const runs = comparableRuns(input);
+  const latestHash = runs.at(-1)?.hash;
+  if (!latestHash) return [];
+  const previousHash = runs.findLast((run) => run.hash !== latestHash)?.hash;
+  return cases.filter((entry) => {
+    const lastExec = runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
+    if (!lastExec || (lastExec.hash !== latestHash && lastExec.hash !== previousHash)) return false;
+    return Boolean(lastExec.values[entry.id]);
+  });
+}
+
 /** Each measured case's latest comparable estimate, interval and change from its first run. */
 export function latestValues(input: TrackingRun[], cases: TrackingCase[]) {
   const runs = comparableRuns(input);
@@ -124,8 +155,7 @@ export function latestValues(input: TrackingRun[], cases: TrackingCase[]) {
     if (!last) return [];
     const [value, lower, upper] = last.values[entry.id];
     const change = caseChanges(runs, entry.id).findLast((value) => typeof value === "number") ?? 0;
-    const latest = runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
-    const current = last.hash === latestHash && last === latest;
+    const current = isLatestCase(runs, entry, latestHash, last);
     return [{ entry, value, lower, upper, change, time: last.time, current }];
   });
 }

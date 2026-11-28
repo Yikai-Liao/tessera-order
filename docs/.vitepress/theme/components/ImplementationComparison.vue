@@ -5,80 +5,149 @@ import { contentUpdatedCallbacks } from "vitepress/dist/client/app/utils.js";
 import { computed, onMounted, onUnmounted, shallowRef, useId, watch } from "vue";
 import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
 import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
-import { formatBytes, ordinal, times } from "../../../../bench/report/format.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
+import {
+  COMPARISON_DATA_URL,
+  type ComparisonFigure,
+  type ComparisonView,
+  comparisonHeadlines,
+  comparisonSections,
+  comparisonTable,
+} from "../../comparisonMarkdown.ts";
+import { data as snapshot } from "./comparisonSnapshot.data.ts";
 import { useFigureSelection } from "./figureSelection.ts";
 import { data as implementationChoices } from "./implementationChoices.data.ts";
 
-// `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
-const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
+// `headlines` renders compact proof cards linking to `/benchmarks/implementations#<op>`;
+// `overview` shows the sort ranking figure; `all` shows every operation's figures.
+const props = withDefaults(defineProps<{ view?: ComparisonView; source?: string }>(), {
   view: "all",
   source:
-    (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) ||
-    "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json",
+    (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL,
 });
 
-const data = shallowRef<ComparisonData | null>(null);
+const defaultSource =
+  (import.meta.env.DEV && import.meta.env.VITE_COMPARISON_SOURCE) || COMPARISON_DATA_URL;
+// Initialize from the build-time snapshot when using the default source so SSR emits real
+// cards, SVGs, provenance, and tables; keep explicit local preview overrides authoritative.
+const usingSnapshot = props.source === defaultSource;
+const data = shallowRef<ComparisonData | null>(usingSnapshot ? snapshot.data : null);
 const error = shallowRef("");
-// The headings appear only after the fetch, so the page's outline and a link's fragment are
-// resolved again once they render. `contentUpdatedCallbacks` is a private VitePress 1.6 export
-// (declared in env.d.ts); after a VitePress upgrade, check that both outlines list these headings.
+const staleNotice = shallowRef("");
+const retrying = shallowRef(false);
+let scrolledToHash = false;
+function scrollToFragment() {
+  if (!location.hash || scrolledToHash) return;
+  let id: string;
+  try {
+    id = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return;
+  }
+  const target = document.getElementById(id);
+  if (!target) return;
+  scrolledToHash = true;
+  // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
+  window.scrollTo(
+    0,
+    scrollY +
+      target.getBoundingClientRect().top -
+      getScrollOffset() +
+      parseInt(getComputedStyle(target).paddingTop, 10),
+  );
+}
+// When data arrives or gains newly published sections after mount, refresh the outline and
+// resolve any URL fragment once its target heading renders.
 watch(
   data,
-  () => {
-    if (props.view !== "all") return;
+  (current) => {
+    if (props.view !== "all" || !current) return;
     for (const refresh of contentUpdatedCallbacks) refresh();
-    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
-    if (target)
-      window.scrollTo(
-        0,
-        scrollY +
-          target.getBoundingClientRect().top -
-          getScrollOffset() +
-          parseInt(getComputedStyle(target).paddingTop, 10),
-      );
+    scrollToFragment();
   },
   { flush: "post" },
 );
 
 // Each card names the operation, Tessera's standing and the two numbers behind it.
-const cards = computed(() =>
-  (data.value?.operations ?? []).flatMap(({ id, headline }) => {
-    if (!headline) return [];
-    const { rank, of, noun } = headline;
-    const standing = rank === 1 ? "Fastest" : `Ranked ${ordinal(rank)}`;
-    return [{ id, headline, claim: `${standing} of ${of} stable ${noun}` }];
-  }),
-);
+const cards = computed(() => (data.value ? comparisonHeadlines(data.value) : []));
+let refreshController: AbortController | null = null;
+
+async function refreshLive() {
+  refreshController?.abort();
+  const controller = new AbortController();
+  refreshController = controller;
+  retrying.value = true;
+  try {
+    let response: Response;
+    try {
+      response = await fetch(props.source, { cache: "no-cache", signal: controller.signal });
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      console.error("Implementation comparison:", cause);
+      if (data.value) {
+        staleNotice.value =
+          "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be published.";
+      } else {
+        error.value = "The comparison data could not be reached. Check the connection and reload.";
+      }
+      return;
+    }
+    if (!response.ok) {
+      if (data.value) {
+        staleNotice.value = `Live refresh failed (HTTP ${response.status}); showing the site's build-time snapshot.`;
+      } else {
+        error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
+      }
+      return;
+    }
+    try {
+      const next = comparisonSchema.parse(await response.json());
+      if (controller.signal.aborted) return;
+      if (data.value && JSON.stringify(next) === JSON.stringify(data.value)) {
+        error.value = "";
+        staleNotice.value = "";
+        return;
+      }
+      // Validate only the charts this view renders so unchanged or non-chart views do zero extra SVG work.
+      for (const fig of comparisonSections(next, props.view).flatMap((section) => section.figures)) {
+        if (fig.kind === "curves") renderCurves({ ...(fig.chart as CurveChart), id: "check" });
+        else renderRows({ ...(fig.chart as RowChart), id: "check" });
+      }
+      error.value = "";
+      staleNotice.value = "";
+      data.value = next;
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      console.error("Implementation comparison:", cause);
+      if (data.value) {
+        staleNotice.value =
+          "Live comparison data could not be read; showing the site's build-time snapshot.";
+      } else {
+        error.value = "The published comparison data has a format this page cannot read.";
+      }
+    }
+  } finally {
+    if (!controller.signal.aborted) retrying.value = false;
+  }
+}
 
 onMounted(async () => {
   window.addEventListener("keydown", clearOnEscape);
-  let response: Response;
-  try {
-    response = await fetch(props.source, { cache: "no-cache" });
-  } catch (cause) {
-    console.error("Implementation comparison:", cause);
-    error.value = "The comparison data could not be reached. Check the connection and reload.";
-    return;
+  if (props.view === "all" && data.value) {
+    for (const refresh of contentUpdatedCallbacks) refresh();
+    scrollToFragment();
   }
-  if (!response.ok) {
-    error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
-    return;
-  }
-  try {
-    data.value = comparisonSchema.parse(await response.json());
-  } catch (cause) {
-    console.error("Implementation comparison:", cause);
-    error.value = "The published comparison data has a format this page cannot read.";
-  }
+  if (usingSnapshot && snapshot.overridden && data.value) return;
+  await refreshLive();
 });
-onUnmounted(() => window.removeEventListener("keydown", clearOnEscape));
+onUnmounted(() => {
+  window.removeEventListener("keydown", clearOnEscape);
+  refreshController?.abort();
+});
 
 // Inline SVG follows the page's light or dark class; each chart needs its own element ids.
 const id = useId();
-type Figure = ComparisonData["operations"][number]["figures"][number];
-const rendered = (operation: string, figure: Figure) => {
+const rendered = (operation: string, figure: ComparisonFigure) => {
   const key = `${id}-${operation}-${figure.name}`;
   return {
     // Section anchors keep figure names unique across operations.
@@ -90,33 +159,18 @@ const rendered = (operation: string, figure: Figure) => {
         ? renderCurves({ ...(figure.chart as CurveChart), id: key })
         : renderRows({ ...(figure.chart as RowChart), id: key }),
     selection: figure.selection,
-    table: cells(figure.table),
+    table: comparisonTable(figure.table),
   };
 };
 // The overview is the sort ranking; the full page shows each operation's section in order.
-const sections = computed(() => {
-  const value = data.value;
-  if (!value) return [];
-  if (props.view === "overview") {
-    const sort = value.operations.find((operation) => operation.id === "sort");
-    return value.overview && sort
-      ? [
-          {
-            id: sort.id,
-            label: sort.label,
-            provenance: provenance(sort.runs),
-            figures: [rendered(sort.id, value.overview)],
-          },
-        ]
-      : [];
-  }
-  return value.operations.map((operation) => ({
-    id: operation.id,
-    label: operation.label,
-    provenance: provenance(operation.runs),
-    figures: operation.figures.map((figure) => rendered(operation.id, figure)),
-  }));
-});
+const sections = computed(() =>
+  data.value
+    ? comparisonSections(data.value, props.view).map((section) => ({
+        ...section,
+        figures: section.figures.map((figure) => rendered(section.id, figure)),
+      }))
+    : [],
+);
 const root = shallowRef<HTMLElement | null>(null);
 const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
   () => root.value,
@@ -126,70 +180,55 @@ const { pinned, bar, choices, preview, pin, clear } = useFigureSelection(
 function clearOnEscape(event: KeyboardEvent) {
   if (event.key === "Escape") clear();
 }
-
-// The figure's Markdown table as rows of plain-text cells, rendered by Vue as text.
-function cells(markdown: string) {
-  const rows = markdown
-    .trim()
-    .split("\n")
-    .filter((line) => !/^\|\s*-/.test(line))
-    .map((line) =>
-      line
-        .replace(/^\|/, "")
-        .replace(/\|$/, "")
-        .split("|")
-        .map((cell) => cell.trim()),
-    );
-  return { head: rows[0] ?? [], body: rows.slice(1) };
-}
-type Run = ComparisonData["operations"][number]["runs"][number];
-// Which runs a section's figures come from: the dates, Tessera's commit and sorts without memory.
-function provenance(runs: Run[]) {
-  const days = runs.map((run) => run.time.slice(0, 10)).toSorted();
-  const span = days[0] === days.at(-1) ? days[0] : `${days[0]} to ${days.at(-1)}`;
-  const tessera = runs.find((run) => run.implementation === "tessera");
-  return {
-    text: `Latest run of each implementation on Bencher Intel v1 bare metal, ${span}${tessera ? "; Tessera at" : ""}`,
-    tessera: tessera && {
-      short: tessera.hash.slice(0, 7),
-      link: `https://github.com/Yikai-Liao/tessera-order/commit/${tessera.hash}`,
-    },
-    unmeasured: runs.filter((run) => !run.memory).map((run) => run.label),
-  };
-}
 </script>
 
 <template>
-  <div ref="root" class="implementation-comparison">
-    <p v-if="error" class="notice" role="alert">{{ error }}</p>
+  <div ref="root" class="implementation-comparison" :class="{ 'is-strip': view === 'headlines' }">
+    <h2 v-if="view === 'all' && cards.length" id="at-a-glance" class="operation-title" tabindex="-1">At a glance</h2>
+    <div v-if="view !== 'overview' && cards.length" class="cards">
+      <a v-for="card in cards" :key="card.id" class="card"
+        :href="view === 'headlines' ? withBase(`/benchmarks/implementations#${card.id}`) : `#${card.id}`">
+        <span class="card-operation">{{ card.headline.operation }}</span>
+        <span class="card-claim">{{ card.claim }}</span>
+        <span class="card-stats">
+          <span class="card-stat">
+            <strong>{{ card.speedText }}</strong>
+            <span>{{ view === 'headlines' ? 'vs std' : 'speed vs the standard library' }}</span>
+          </span>
+          <span v-if="card.memoryText !== null" class="card-stat">
+            <strong>{{ card.memoryText }}</strong>
+            <span>{{ view === 'headlines' ? 'extra' : 'extra memory' }}<template v-if="card.referenceMemoryText !== null">
+              {{ view === 'headlines' ? ' (vs ' : ', vs ' }}<span class="nowrap">{{ card.referenceMemoryText }}</span>{{ view === 'headlines' ? ')' : '' }}
+            </template></span>
+          </span>
+        </span>
+      </a>
+    </div>
+    <p v-if="view !== 'headlines' && staleNotice && !error" class="notice stale-notice" role="status">
+      {{ staleNotice }}
+      <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
+        {{ retrying ? "Retrying…" : "Retry" }}
+      </button>
+      · <a :href="props.source" target="_blank" rel="noopener">Live comparison.json</a>
+    </p>
+    <p v-if="view === 'headlines'" class="proof-foot">
+      <span v-if="staleNotice" role="status">
+        {{ staleNotice }}
+        <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
+          {{ retrying ? "Retrying…" : "Retry" }}
+        </button>
+        · <a :href="props.source" target="_blank" rel="noopener">Live JSON</a>
+      </span>
+      <span v-else>{{ cards.length ? 'Measured on Bencher Intel v1 bare metal against Rust & C++ sorts.' : 'Live benchmark measurements are published on the comparison page.' }}</span>
+      <a :href="withBase('/benchmarks/implementations')">Full comparison →</a>
+    </p>
+    <p v-else-if="error" class="notice" role="alert">{{ error }}</p>
     <p v-else-if="!data" class="notice" role="status">Loading the latest measurements…</p>
     <p v-else-if="!sections.length" class="notice">
       No cross-implementation figure is published yet.
     </p>
     <template v-else>
       <template v-if="view === 'all'">
-        <h2 v-if="cards.length" id="at-a-glance" class="operation-title" tabindex="-1">At a glance</h2>
-        <div v-if="cards.length" class="headlines">
-          <a v-for="card in cards" :key="card.id" class="headline" :href="`#${card.id}`">
-            <span class="headline-operation">{{ card.headline.operation }}</span>
-            <span class="headline-claim">{{ card.claim }}</span>
-            <span class="headline-stats">
-              <span class="headline-stat">
-                <strong>{{ times(card.headline.speed) }}</strong>
-                <span>speed vs the standard library</span>
-              </span>
-              <span v-if="card.headline.memoryBytes !== null" class="headline-stat">
-                <strong>{{ formatBytes(card.headline.memoryBytes) }}</strong>
-                <span>extra memory<template v-if="card.headline.referenceMemoryBytes !== null"
-                    >, vs
-                    <span class="nowrap">{{
-                      formatBytes(card.headline.referenceMemoryBytes)
-                    }}</span></template
-                  ></span>
-              </span>
-            </span>
-          </a>
-        </div>
         <p class="lead">
           <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,
           and further right is faster. Speed is relative to the reference the figure names, so 2× takes
@@ -208,10 +247,10 @@ function provenance(runs: Run[]) {
       <section v-for="section in sections" :key="section.id" class="operation">
         <template v-if="view === 'all'">
           <h2 :id="section.id" class="operation-title" tabindex="-1">{{ section.label }}</h2>
-          <p class="provenance">
+          <p v-if="section.provenance" class="provenance">
             {{ section.provenance.text }}
-            <a v-if="section.provenance.tessera" :href="section.provenance.tessera!.link">{{
-              section.provenance.tessera!.short
+            <a v-if="section.provenance.tessera" :href="section.provenance.tessera.link">{{
+              section.provenance.tessera.short
             }}</a
             >.<template v-if="section.provenance.unmeasured.length">
               Memory not yet recorded for
@@ -251,10 +290,10 @@ function provenance(runs: Run[]) {
           </details>
         </section>
         <template v-if="view === 'overview'">
-          <p class="provenance">
+          <p v-if="section.provenance" class="provenance">
             {{ section.provenance.text }}
-            <a v-if="section.provenance.tessera" :href="section.provenance.tessera!.link">{{
-              section.provenance.tessera!.short
+            <a v-if="section.provenance.tessera" :href="section.provenance.tessera.link">{{
+              section.provenance.tessera.short
             }}</a
             >.<template v-if="section.provenance.unmeasured.length">
               Memory not yet recorded for
@@ -287,6 +326,22 @@ function provenance(runs: Run[]) {
   max-width: 960px;
   margin: 24px 0;
 }
+.implementation-comparison.is-strip {
+  max-width: 100%;
+  margin: 8px 0 32px;
+}
+.proof-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  margin: 10px 2px 0;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+}
+.proof-foot a {
+  font-weight: 500;
+}
 .figure {
   margin: 0 0 40px;
 }
@@ -296,18 +351,18 @@ function provenance(runs: Run[]) {
   line-height: 1.3;
   font-weight: 600;
 }
-.headlines {
+.cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin: 16px 0 24px;
 }
 @media (max-width: 639px) {
-  .headlines {
+  .cards {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.headline {
+.card {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -320,43 +375,43 @@ function provenance(runs: Run[]) {
   overflow-wrap: anywhere;
   transition: border-color 0.2s;
 }
-.headline:hover {
+.card:hover {
   border-color: var(--vp-c-brand-1);
 }
-.headline-operation {
+.card-operation {
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
 }
-.headline-claim {
+.card-claim {
   color: var(--vp-c-brand-1);
   font-size: 14px;
   font-weight: 600;
 }
-.headline-stats {
+.card-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin: 12px 0 0;
 }
-.headline-stat {
+.card-stat {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.headline-stat strong {
+.card-stat strong {
   color: var(--vp-c-brand-1);
   font-size: 30px;
   font-weight: 600;
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
-.headline-stat span {
+.card-stat span {
   color: var(--vp-c-text-2);
   font-size: 13px;
   line-height: 1.45;
 }
-.headline-stat .nowrap {
+.card-stat .nowrap {
   white-space: nowrap;
 }
 .subject {
@@ -545,4 +600,36 @@ function provenance(runs: Run[]) {
   color: var(--vp-c-text-2);
   font-size: 14px;
 }
+.stale-notice {
+  margin-bottom: 16px;
+}
+.stale-retry {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-size: 12px;
+  cursor: pointer;
+}
+.stale-retry:hover:not(:disabled) {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+.stale-retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.is-strip .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.is-strip .card { gap: 4px; padding: 16px 18px; transition: border-color 0.2s ease, transform 0.15s ease; }
+.is-strip .card:hover { transform: translateY(-1px); }
+.is-strip .card-operation { font-size: 14px; }
+.is-strip .card-claim { font-size: 12px; line-height: 1.35; }
+.is-strip .card-stats { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px; }
+.is-strip .card-stat { gap: 1px; }
+.is-strip .card-stat strong { color: var(--vp-c-text-1); font-size: 22px; font-weight: 700; }
+.is-strip .card-stat span { font-size: 12px; line-height: 1.35; }
+@media (max-width: 959px) { .is-strip .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 559px) { .is-strip .cards { grid-template-columns: minmax(0, 1fr); } }
 </style>

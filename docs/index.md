@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Tessera
-  text: Stable radix sorting in O(√n) extra memory
-  tagline: A Rust library that sorts records of any type by a fixed-width key, keeps equal keys in input order, and needs no input-sized buffer.
+  text: Linear-time stable radix sorting in O(√n) scratch memory
+  tagline: One engine for stable sort, argsort, and single-rank selection on any Rust record type without Clone, Default, or an input-sized sort buffer.
   image:
     src: /logo.svg
     alt: Tessera logo, a mosaic rosette
@@ -13,28 +13,14 @@ hero:
       text: Get started
       link: /guide/getting-started
     - theme: alt
-      text: How it works
-      link: /explain/
-    - theme: alt
       text: Benchmarks
       link: /benchmarks/implementations
     - theme: alt
+      text: How it works
+      link: /explain/
+    - theme: alt
       text: GitHub
       link: https://github.com/Yikai-Liao/tessera-order
-
-features:
-  - title: Small memory footprint
-    details: Scratch grows as √n, not with the input. A textbook radix sort needs a second buffer as large as the input.
-    link: /explain/block-partition
-  - title: Free when the data is easy
-    details: Sorted, reversed, nearly sorted and constant inputs skip the radix passes. A heavily repeated key takes one partition, and key bits that never change are never sorted.
-    link: /explain/routing
-  - title: Safe for any record
-    details: Records need no Copy, Clone, Default or Ord. Each is moved, never duplicated, even if the key function panics.
-    link: /explain/safety
-  - title: One engine, several answers
-    details: Sort in place, return sorted indices without moving records, or find one ranked record without sorting the rest.
-    link: /guide/getting-started#choose-an-operation
 ---
 
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
@@ -43,24 +29,73 @@ features:
 import ImplementationComparison from "./.vitepress/theme/components/ImplementationComparison.vue";
 </script>
 
-## In three lines
+<ImplementationComparison view="headlines" />
+
+## Compare at a glance
+
+All four libraries are stable and move arbitrary `T` without `Copy` or `Clone`; they differ in complexity, extra memory, key contract, and operations:
+
+| | **Tessera** | slice::sort (std) | radsort | glidesort |
+|---|---|---|---|---|
+| **Time** | **O(n)** | O(n log n) | O(n) | O(n log n) |
+| **Extra memory (sort)** | **O(√n)** scratch (O(P√n) parallel) | O(n) | O(n) | O(n) |
+| **Keys** | Fixed-width keys | Any Ord or comparator | Fixed-width keys | Any Ord or comparator |
+| **Parallel** | Built-in (Rayon) | Separate (rayon) | No | No |
+| **Operations** | Sort, cached key, argsort, select_nth | Sort, unstable select_nth | Sort | Sort |
+
+`argsort` returns an O(n) index `Vec<usize>` and `sort_by_cached_key` caches O(n) keys; see [ordering semantics](../conformance/semantics.md#space) for exact memory bounds.
+
+## One engine, zero record-trait bounds
+
+<div class="tsr-home-grid">
+<div class="tsr-card">
+
+### `tessera-order` 0.2
 
 ```rust
+use std::cmp::Reverse;
+
 let mut rows = vec![(30i64, "c"), (10, "a"), (30, "d")];
-tessera_order::sort_by_key(&mut rows, |row| row.0);
+tessera_order::sort_by_key(&mut rows, |r| r.0);
 assert_eq!(rows, [(10, "a"), (30, "c"), (30, "d")]);
+
+// Sorted indices descending by key without moving records:
+let order = tessera_order::argsort_by_key(&rows, |r| Reverse(r.0));
+assert_eq!(order, [1, 2, 0]);
+
+// Exact stable rank selection without sorting the rest:
+let (_, median, _) = tessera_order::select_nth_by_key(&mut rows, 1, |r| r.0);
+assert_eq!(*median, (30, "c"));
 ```
 
-The key can be any supported fixed-width key (see [key encoding](../conformance/semantics.md#key-encoding) for supported types and limits). Records with equal keys keep their input order. See [versions](guide/getting-started.md#versions) for what 0.1 names differently.
+Any supported fixed-width key works out of the box (see [key encoding](../conformance/semantics.md#key-encoding)). Equal keys always preserve input order, and every original record stays in the slice exactly once even if the key function panics.
 
-## Is it for you?
+</div>
+<div class="tsr-card tsr-fit-stack">
+<div class="tsr-fit-block is-good">
 
-**A good fit** when you sort large slices by a fixed-width key, need equal keys to stay in input order, or cannot afford a second buffer as large as the input.
+### Good fit
 
-**Use something else** when the order comes from a comparator, or keys are strings or other variable-length values: use `slice::sort_by`. Tessera also needs an allocator.
+- Large slices keyed by integers, floats, fixed-width byte arrays, or composite tuples.
+- Workloads that require stability without paying for an $O(n)$ auxiliary buffer.
+- Moving wide records is expensive (`argsort`) or only one ranked element is needed (`select_nth`).
+- Real-world inputs with sorted runs, reversed runs, narrow bit spans, or heavily repeated keys.
+
+</div>
+<div class="tsr-fit-block">
+
+### Use something else
+
+- **Comparators or variable-length keys** (strings, slices): use `slice::sort_by`.
+- **No allocator / `no_std`**: Tessera requires `std` and heap scratch.
+- **Unstable `u32` keys** where reordering equal keys is acceptable: unstable SIMD sorts can be faster.
+
+</div>
+</div>
+</div>
 
 ## Measured against other sorts
 
 <ImplementationComparison view="overview" />
 
-[Use the library](guide/getting-started.md), [learn the algorithm](explain/index.md), or [choose a development task](README.md).
+Next: [Getting started](guide/getting-started.md) · [vs Other Sorts](benchmarks/implementations.md) · [How it works](explain/index.md) · [Ordering semantics](../conformance/semantics.md) · [Repository task index](README.md)

@@ -1,42 +1,45 @@
 # 6. Ownership and panics
 
-Tessera sorts records of any type: `String`, `Box<T>`, `&mut T`, structs with destructors. It never requires `Copy`, `Clone` or `Default`. A sort that moves records with raw copies has to make sure that no record is dropped twice, leaked, or read while half-moved. That has to hold even when the user's key function returns inconsistent keys or panics. This page explains the rules that make this work.
+**The core idea:** Tessera moves arbitrary Rust types (`String`, `Box<T>`, `&mut T`, types with destructors) using raw bitwise copies — never requiring `Copy`, `Clone`, or `Default`. Memory safety rests on one strict invariant: **at every instant, every input record has exactly one live owner**, and every panic guard knows how to put all live owners back into the input slice without calling user code again.
 
 ## One live owner per record
 
-Records move by bitwise copies between the input slice and scratch memory of type `MaybeUninit<T>`. After a copy, the old bytes are a **stale copy**: they look like a record but are never dropped, borrowed or returned. In the [block partition figure](block-partition.md#step-by-step), stale copies are the grey cells.
+Records move by bitwise copy between the input slice and `MaybeUninit<T>` scratch. The moment a record is copied to a new slot, the old bytes become a **stale copy**: they may look like valid bytes, but Tessera never reads, borrows, drops, or returns them (the faded grey cells in [4. The block partition](block-partition.md#step-by-step)).
 
-At every point, each record has exactly one **live** copy, and the engine always knows which copy it is:
+Each stage tracks the exact set of live copies with a single source of truth:
 
-- in the block partition, the bucket chains and then the completion ledger name every live block prefix ([invariants](block-partition.md#invariants));
-- in a tile, the `RestoreTile` guard remembers whether the complete set is in the tile or in scratch;
-- during insertion, the `Hole` guard holds the lifted moving record and points to the single vacated slot while predecessors shift right ([engine reference](../design/engine.md#panic-safety)).
+- **Block partition:** the bucket chains (during scatter) and the completion ledger (during write-back) name every live block prefix ([invariants](block-partition.md#invariants)).
+- **Tile pass:** `RestoreTile` tracks whether the complete live set currently sits in the tile or in scratch.
+- **Insertion pass:** `Hole` holds the single lifted record and records the sole vacated slot while predecessors shift right ([engine reference](../design/engine.md#panic-safety)).
 
-The key function only ever borrows a live record.
+The user's key closure is only ever given a shared borrow to a live record.
 
 ## Inconsistent key functions
 
-A counting pass reads each key twice: once for the histogram and once for the scatter. If the key function returns a different digit the second time, the histogram's bucket sizes no longer match the records sent to each bucket. Two records could then be written to the same slot, and one slot would never be written.
+A textbook counting pass reads every key twice: once to build the histogram (deciding bucket sizes) and once to scatter records into those buckets. If a buggy or non-deterministic key closure returns a different digit on the second call, two records can collide on the same output slot while another slot stays uninitialized — instant undefined behavior for owned types.
 
-`sort_by_key` therefore **caches bucket IDs**: during the histogram it stores each record's bucket as a `u16`, and the scatter reads that value instead of calling the key function again. The bucket ranges are disjoint and their sizes match the stored IDs, so every output slot is written exactly once, whatever the key function does. The block partition calls the key function once per record and pass, so it has nothing to cache.
+Tessera closes that hole completely:
 
-`sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
+- **User key functions (`sort_by_key`):** during the histogram pass, Tessera caches each tile record's `u16` bucket ID in scratch and reads that cached ID during scatter instead of calling the key closure again. Bucket ranges are disjoint and match the cached counts identically, so every output slot is written **exactly once** no matter what the closure returns. (The block partition calls the key function only once per record per pass, so it needs no cache.)
+- **Direct keys (`sort`):** Tessera's own sealed encoders are deterministic and panic-free, so scatter recomputes digits directly with zero bucket-ID storage ([engine reference](../design/engine.md#record-handling)).
 
-An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record. The contract also lets the sort panic in that case, as Rust's standard sorts may; the records are then restored as after a [panicking key function](#panicking-key-functions).
+An inconsistent key closure may therefore produce an unsorted slice or panic, just like Rust's standard `slice::sort_by_key`, but can never leak, duplicate, or corrupt a record.
 
 ## Panicking key functions
 
-A key-function panic propagates only after every live record is back in the input slice:
+If a key closure unwinds, Tessera restores every original record into the input slice (in unspecified order) before the panic propagates:
 
-- **During a block scatter**, the partition guard retains the writers and input-block progress. On unwind its destructor works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass, and the [completion ledger](block-partition.md#completion) copies every record back into the input.
-- **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
-- **During an insertion pass**, `Hole` writes the lifted moving record back into the single vacated slot without calling the key function ([engine reference](../design/engine.md#panic-safety)).
-- **During a completion callback** (a band finished while cache-hot), ordinary unwinding reaches the completion guard after parallel jobs join. The guard completes unpublished bands without callbacks and never accesses a band already lent to a callback.
+| Stage where panic occurs | How ownership is restored (zero key calls during unwind) |
+|---|---|
+| **Block scatter** | The partition guard inspects bucket cursors and consumed input blocks, appends the unread suffix directly to bucket 0 without calling the classifier, and runs the [completion ledger](block-partition.md#completion) to move every record back into the input slice. |
+| **Tile counting pass** | `RestoreTile` copies the last complete record set back from scratch into the tile; the interrupted pass wrote only stale bytes into the opposite buffer. |
+| **Insertion pass** | `Hole`'s destructor writes the lifted moving record back into the sole vacated slot. |
+| **Parallel completion callback** | Rayon jobs join first; the parent completion guard finishes every unpublished band without running callbacks and never touches bands already lent to callbacks. |
 
-Afterwards the slice holds every record exactly once, in an unspecified order.
-
-Every build requires `std`, so this recovery always applies; there is no abort-only variant ([engine reference](../design/engine.md#panic-safety)).
+Recovery runs through `Drop` guards whenever a panic unwinds, preserving every record as promised by [ordering semantics](../../conformance/semantics.md#panics-and-unwinding). In applications compiled with `panic = "abort"`, the process terminates immediately without unwinding or running destructors.
 
 ## Where this is tested
 
-The tests in [`rust/tessera-order/tests`](../../rust/tessera-order/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.
+The test suite in [`rust/tessera-order/tests`](../../rust/tessera-order/tests) exercises drop-tracked owned records, `&mut` references, zero-sized and over-aligned types, non-deterministic key functions, and panics injected at every stage of serial and parallel sorts, verified continuously under Miri and AddressSanitizer in CI.
+
+Next: [7. Beyond sorting](operations.md) shows how `argsort`, `select_nth`, and `sort_by_cached_key` reuse this engine and skip work their answer does not need.

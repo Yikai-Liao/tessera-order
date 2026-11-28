@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { useData } from "vitepress";
+import { useData, withBase } from "vitepress";
 import {
   computed,
   nextTick,
@@ -18,8 +18,10 @@ import {
   type ComparedCase,
   type ComparisonAxis,
   comparableRuns,
+  currentCases,
   formatTime,
   formatTimestamp,
+  HISTORY_DATA_SOURCE,
   type HistoryAxis,
   latestValues,
   renderComparison,
@@ -33,7 +35,7 @@ import {
 } from "../../../../bench/tracking/result.ts";
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
-  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/tessera/",
+  source: HISTORY_DATA_SOURCE,
   caseId: "rust/sort/u64/random/65536/s1/serial",
 });
 type Color = ComparedCase["color"];
@@ -123,13 +125,20 @@ onMounted(() => {
   watch([selection, from, to, filters, axis, horizontal, firstRun, lastRun], writeHash, { deep: true });
   window.addEventListener("hashchange", onHashChange);
 });
-onUnmounted(() => window.removeEventListener("hashchange", onHashChange));
+onUnmounted(() => {
+  window.removeEventListener("hashchange", onHashChange);
+  liveController?.abort();
+});
 
 // The index first, then only the monthly journals the range needs, each once.
 const index = shallowRef<ReturnType<typeof indexSchema.parse> | null>(null);
 const journals = shallowRef(new Map<string, TrackingRun[]>());
 const error = ref("");
+const staleNotice = ref("");
+const retryingLive = ref(false);
 const loading = ref(true);
+let activeSeededMonth: string | null = null;
+let liveController: AbortController | null = null;
 
 /** A failure readers can act on; the underlying cause goes to the console only. */
 class DataError extends Error {}
@@ -164,28 +173,137 @@ function fail(cause: unknown) {
   error.value =
     cause instanceof DataError ? cause.message : "The performance data could not be displayed.";
 }
-const months = computed(() => {
+function monthsInRange(available: readonly string[]) {
   const start = from.value.slice(0, 7);
   const end = to.value.slice(0, 7);
-  return (index.value?.months ?? []).filter(
-    (month) => (!start || month >= start) && (!end || month <= end),
-  );
+  return available.filter((month) => (!start || month >= start) && (!end || month <= end));
+}
+const months = computed<string[]>((previous) => {
+  const next = monthsInRange(index.value?.months ?? []);
+  // Keep reference stability when live index confirms the same months so in-flight range loads
+  // started from the build snapshot are not aborted and fetched twice.
+  return previous && previous.length === next.length && previous.every((m, i) => m === next[i])
+    ? previous
+    : next;
 });
+async function refreshLive(source: string, signal: AbortSignal, retryMissing = false) {
+  const text = await download(source, "index.json", signal);
+  const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
+  if (signal.aborted) return;
+  const toFetch = monthsInRange(liveIndex.months).filter(
+    (month) => month === activeSeededMonth || (retryMissing && !journals.value.has(month)),
+  );
+  const batches: [string, TrackingRun[]][] = await Promise.all(
+    toFetch.map(async (month) => {
+      const raw = await download(source, `${month}.jsonl`, signal);
+      return [month, readable(() => parseRuns(raw))] as [string, TrackingRun[]];
+    }),
+  );
+  if (signal.aborted) return;
+  const fetched = new Set(batches.map(([month]) => month));
+  // If the reader switched back to the provisional month while other downloads were in flight,
+  // fetch its live journal before evicting the provisional copy so it is never stranded.
+  if (
+    activeSeededMonth &&
+    !fetched.has(activeSeededMonth) &&
+    monthsInRange(liveIndex.months).includes(activeSeededMonth)
+  ) {
+    const raw = await download(source, `${activeSeededMonth}.jsonl`, signal);
+    const liveSeeded = readable(() => parseRuns(raw));
+    if (signal.aborted) return;
+    batches.push([activeSeededMonth, liveSeeded]);
+  }
+  if (activeSeededMonth || batches.length) {
+    const next = new Map(journals.value);
+    if (activeSeededMonth) next.delete(activeSeededMonth);
+    for (const [month, runs] of batches) next.set(month, runs);
+    journals.value = next;
+    activeSeededMonth = null;
+  }
+  staleNotice.value = "";
+  const nowNeeded = monthsInRange(liveIndex.months);
+  const rangeComplete = nowNeeded.every((month) => journals.value.has(month));
+  if (rangeComplete) {
+    error.value = "";
+    loading.value = false;
+  }
+  index.value = liveIndex;
+}
+async function retryLiveRefresh() {
+  if (retryingLive.value) return;
+  liveController?.abort();
+  const controller = new AbortController();
+  liveController = controller;
+  retryingLive.value = true;
+  try {
+    await refreshLive(props.source, controller.signal, true);
+  } catch (cause) {
+    if (!controller.signal.aborted) {
+      console.error("Performance history:", cause);
+      if (activeSeededMonth) {
+        staleNotice.value =
+          "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+      } else if (!index.value || months.value.some((month) => !journals.value.has(month))) {
+        fail(cause);
+      }
+    }
+  } finally {
+    if (!controller.signal.aborted) retryingLive.value = false;
+  }
+}
 onMounted(() => {
   watch(
     () => props.source,
     async (source, _, cleanup) => {
+      liveController?.abort();
       const controller = new AbortController();
+      liveController = controller;
       cleanup(() => controller.abort());
       loading.value = true;
       error.value = "";
+      staleNotice.value = "";
+      retryingLive.value = false;
+      activeSeededMonth = null;
       index.value = null;
       journals.value = new Map();
+      // Seed from the same-origin build snapshot only when its latest month overlaps the active range.
+      if (source === HISTORY_DATA_SOURCE) {
+        try {
+          const snapshotBase = withBase("/benchmarks/data/tessera/");
+          const snapIndex = indexSchema.parse(
+            JSON.parse(await download(snapshotBase, "index.json", controller.signal)),
+          );
+          const latestMonth = snapIndex.months.at(-1);
+          const start = from.value.slice(0, 7);
+          const end = to.value.slice(0, 7);
+          const latestNeeded =
+            Boolean(latestMonth) &&
+            (!start || latestMonth! >= start) &&
+            (!end || latestMonth! <= end);
+          if (latestNeeded && latestMonth) {
+            const raw = await download(snapshotBase, `${latestMonth}.jsonl`, controller.signal);
+            const seededRuns = parseRuns(raw);
+            if (!controller.signal.aborted) {
+              journals.value = new Map([[latestMonth, seededRuns]]);
+              index.value = snapIndex;
+              loading.value = false;
+              activeSeededMonth = latestMonth;
+            }
+          }
+        } catch {
+          // Local snapshot is optional (absent in dev or offline builds).
+        }
+      }
       try {
-        const text = await download(source, "index.json", controller.signal);
-        index.value = readable(() => indexSchema.parse(JSON.parse(text)));
+        await refreshLive(source, controller.signal);
       } catch (cause) {
         if (controller.signal.aborted) return;
+        if (activeSeededMonth) {
+          console.error("Performance history:", cause);
+          staleNotice.value =
+            "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+          return;
+        }
         fail(cause);
         loading.value = false;
       }
@@ -232,7 +350,23 @@ const runs = computed(() => {
   return comparableRuns(measured, firstRun.value || lastRun.value
     ? { first: firstRun.value, last: lastRun.value } : undefined);
 });
-const cases = computed(() => index.value?.cases ?? []);
+const allCases = computed(() => index.value?.cases ?? []);
+// Hide cases removed before the latest commit in the selected range.
+const cases = computed(() =>
+  runs.value.length ? currentCases(runs.value, allCases.value) : allCases.value,
+);
+const availableFacets = computed(() => {
+  if (!index.value) return null;
+  const present = Object.fromEntries(
+    FILTERS.map(({ facet }) => [facet, new Set(cases.value.map((entry) => entry[facet]))]),
+  ) as Record<Facet, Set<string>>;
+  return Object.fromEntries(
+    FILTERS.map(({ facet }) => [
+      facet,
+      index.value!.facets[facet].filter((value) => present[facet].has(value)),
+    ]),
+  ) as Record<Facet, string[]>;
+});
 // An empty filter admits every value; filters intersect.
 const shown = computed(() =>
   cases.value.filter((entry) =>
@@ -251,7 +385,7 @@ function setFilter(facet: Facet, value: string | null) {
         : [...current, value];
   filters.value = { ...filters.value, [facet]: next };
 }
-const byId = computed(() => new Map(cases.value.map((entry) => [entry.id, entry])));
+const byId = computed(() => new Map(allCases.value.map((entry) => [entry.id, entry])));
 
 // A colour follows its case: a new case takes the first colour not in use.
 const limitNotice = ref(false);
@@ -488,7 +622,7 @@ const emptyMessage = computed(() => {
           All
         </button>
         <button
-          v-for="value in index.facets[facet]"
+          v-for="value in availableFacets?.[facet] ?? []"
           :key="value"
           type="button"
           :aria-pressed="filters[facet].includes(value)"
@@ -540,6 +674,17 @@ const emptyMessage = computed(() => {
         </fieldset>
         <span v-if="loading" role="status" class="status">Loading…</span>
       </div>
+      <p v-if="staleNotice" class="chart-note" role="status">
+        {{ staleNotice }}
+        <button
+          type="button"
+          class="reset-zoom"
+          :disabled="retryingLive"
+          @click="retryLiveRefresh"
+        >
+          {{ retryingLive ? "Retrying…" : "Retry live refresh" }}
+        </button>
+      </p>
       <p v-if="firstRun || lastRun" class="chart-note" role="status">
         Zoomed to a report range. <button type="button" class="reset-zoom" @click="clearZoom">Reset zoom</button>
       </p>
@@ -580,7 +725,17 @@ const emptyMessage = computed(() => {
           </template>
         </ul>
       </div>
-      <p v-if="error" class="notice" role="alert">{{ error }}</p>
+      <p v-if="error" class="notice" role="alert">
+        {{ error }}
+        <button
+          type="button"
+          class="reset-zoom"
+          :disabled="retryingLive"
+          @click="retryLiveRefresh"
+        >
+          {{ retryingLive ? "Retrying…" : "Retry" }}
+        </button>
+      </p>
       <div
         v-else-if="comparison"
         ref="chart"

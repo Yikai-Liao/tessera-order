@@ -58,7 +58,7 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 
 0.1 called the two sorts `stable_sort` and `stable_sort_by_key`; 0.2 keeps them as deprecated aliases. Every operation resolves equal keys as a full stable sort would.
 
-| API | Use |
+| Operation | Use |
 |---|---|
 | `sort(&mut [K])` | Sort keys themselves |
 | `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
@@ -66,17 +66,15 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 | `select_nth` / `_by_key` | Place one ranked record and partition around it |
 | `argsort` / `_by_key` | Return sorted indices without moving source records |
 
-See the [guide](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#select-one-rank) for examples, [multi-field sorting](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#sort-by-several-fields) for tuple keys, and [versions](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#versions) for what 0.1 names differently and how to migrate from earlier development snapshots.
+See the [getting-started guide](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md) for examples, [multi-field sorting](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#sort-by-several-fields) for tuple keys, and [versions](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#versions) for what 0.1 names differently. Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
-
-The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_stable_sort` and `par_stable_sort_by_key`), plus `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
+The optional `rayon` feature adds `par_sort`, `par_sort_by_key`, `par_argsort` and `par_argsort_by_key`. Large inputs partition in the caller's Rayon pool through the shared root engine, while small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points) for record and key-function bounds.
 
 ## Performance
 
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/development/benchmarking.md#command-capabilities) for paired implementation comparisons and source-change attribution.
 
-The [implementation comparison](https://yikai-liao.github.io/tessera-order/benchmarks/implementations.html) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
+The [implementation comparison](https://yikai-liao.github.io/tessera-order/benchmarks/implementations) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
 
 Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-order/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 
@@ -111,6 +109,7 @@ A Python binding is planned as well; see the [roadmap](https://github.com/Yikai-
 | How the engine works | [`docs/design/engine.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/design/engine.md) |
 | Why user key functions cache bucket IDs | [Record handling](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/design/engine.md#record-handling) |
 | All documentation | [Documentation site](https://yikai-liao.github.io/tessera-order/) · [Source index](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/README.md) |
+| Machine-readable documentation for AI agents | [`llms.txt`](https://yikai-liao.github.io/tessera-order/llms.txt) · [`llms-full.txt`](https://yikai-liao.github.io/tessera-order/llms-full.txt) |
 
 ## Contributing
 

@@ -1,18 +1,20 @@
 # Documentation site
 
-The documentation site is built with [VitePress](https://vitepress.dev) from the Markdown files in this repository, and published to GitHub Pages by [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml). The Markdown files are the source: they read correctly on GitHub and in an editor, and coding agents can read them directly.
+The documentation site is built with [VitePress](https://vitepress.dev) from the Markdown files in this repository, and published to GitHub Pages by [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml). The Markdown files are the single source: they read directly on GitHub and in an editor, render as static HTML for human readers, and export clean Markdown mirrors and `llms*.txt` indices at build time for external AI agents fetching site URLs.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `docs/**/*.md` | Pages. `docs/index.md` serves as `/`; `docs/explain/index.md` serves as `/explain/`. `docs/README.md` is the repository task index, not a site page. |
-| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
-| `docs/.vitepress/config.ts` | Site configuration, navigation and link handling |
-| `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
+| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`SHARED_PAGES` in `docs/.vitepress/llms.ts`) |
+| `docs/.vitepress/config.ts` | Site configuration, navigation, link handling, per-page metadata, sitemap and `buildEnd` export hook |
+| `docs/.vitepress/llms.ts` | Site page discovery through VitePress, shared navigation and bundle sections, repository link resolution, per-page metadata, and build-time `.md` mirrors and `llms*.txt` bundles, with `llms.test.ts` |
+| `docs/.vitepress/comparisonMarkdown.ts` | Shared comparison presentation and Markdown tables, using `bench/report/format.ts` and the published schema, with `comparisonMarkdown.test.ts` |
+| `docs/.vitepress/theme/components/` | Vue components for figures, benchmark views (`ImplementationComparison.vue`, `PerformanceHistory.vue`), build-time data loaders (`comparisonSnapshot.data.ts`, `implementationChoices.data.ts`) and `PageMarkdownBar.vue` |
 | `docs/.vitepress/theme/sim/` | The figures' models and engine replays, with their tests |
 | `rust/tessera-trace/` | The engine's figure entry points, built for WebAssembly into `theme/sim/tessera_trace.wasm` (not in Git) |
-| `docs/public/` | Static files, such as the logo (a copy of `assets/logo.svg`) |
+| `docs/public/` | Static files copied verbatim into the site root, including `logo.svg` (a copy of `assets/logo.svg`) |
 | `package.json`, `bun.lock` | The site's pinned toolchain, at the repository root |
 
 ## Commands
@@ -23,7 +25,7 @@ Run these from the repository root with the Bun version pinned in `package.json`
 bun install --frozen-lockfile  # install the pinned toolchain
 bun run docs:wasm              # build the figure engine; dev, test and build run it first
 bun run docs:dev               # local server with hot reload
-bun run docs:test              # check ownership models and type-checker diagnostics
+bun run docs:test              # check ownership models, export pipelines and type-checker diagnostics
 bun run docs:typecheck         # type-check the config, theme and components
 bun run docs:build             # build into docs/.vitepress/dist; fails on dead links
 ```
@@ -32,13 +34,38 @@ bun run docs:build             # build into docs/.vitepress/dist; fails on dead 
 
 The figure engine needs cargo and the WebAssembly target: `rustup target add wasm32-unknown-unknown`. `wasm32` is a documentation build target only, not a supported library platform; the library's platforms are those its [CI lanes](ci.md) test. On `wasm32`, `usize` has 32 bits, so a figure that showed a value the engine derives from `usize` widths, such as the default block size, would show the 32-bit result.
 
-The implementation comparison page reads the published `comparison.json` from the `benchmark-data` branch. To preview a change to that data before it is published, generate the file with `writeComparison` from [`comparison.ts`](../../bench/tracking/comparison.ts) over a copy of the branch's journals, place it under `docs/public/`, and start the server with `VITE_COMPARISON_SOURCE=/<file> bun run docs:dev`. The override applies only to the development server; delete the file afterwards.
+At build time, `comparisonSnapshot.data.ts` loads and validates the published `comparison.json` from the `benchmark-data` branch with the shared `bench/tracking/result.ts` schema (returning `null` gracefully when offline so offline builds and tests still succeed). `ImplementationComparison.vue` pre-hydrates from that build-time snapshot so static HTML immediately includes real comparison cards, SVGs, provenance and tables, then refreshes from `benchmark-data` on mount without erasing SSR data if the live fetch fails; the build-time Markdown mirrors and `llms-full.txt` reuse the same snapshot to inline Markdown tables and link directly to the live `comparison.json` dataset because publishing measurements does not trigger a site deploy. To preview unpublished data, generate the file with `writeComparison` from [`comparison.ts`](../../bench/tracking/comparison.ts) over a copy of the branch's journals and either point `DOCS_COMPARISON_FILE` at it or place it under `docs/public/` and pass `VITE_COMPARISON_SOURCE=/<file>`. Delete any temporary file under `docs/public/` afterwards.
 
 Pull requests that touch the site, its pages or the library source run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 
+Page discovery uses VitePress's `resolvePages`; `llms.ts` selects the served documents and derives sidebar entries and AI bundle sections from those pages. Titles and descriptions come from VitePress's Markdown renderer and its gray-matter frontmatter handling. The mirrors edit parser-reported link destinations in the original source rather than serialize parsed Markdown, preserving code and raw LaTeX. The comparison data loader owns filesystem and network access; `comparisonMarkdown.ts` stays browser-safe. Its small table reader accepts only the pipe tables generated by `bench/report/charts.ts`, which live browser refreshes also receive; a general Markdown parser is unnecessary in the client bundle.
+
+The workload examples in `theme/sim/pipeline.ts` feed both `PipelineMap` and its Markdown export, including the memory estimates from `theme/sim/blockSize.ts`; `BlockSizeChart` uses that same model for candidate block sizes. The explanation chapters own the actual routing rules, and the overview links to them instead of maintaining a second table of thresholds or computed memory values.
+
+## Static and AI-readable outputs
+
+The build emits machine-readable artifacts alongside the HTML site so external AI agents fetching published URLs receive complete, noise-free documentation without executing client-side JavaScript:
+
+- **Per-page `.md` mirrors:** emitted in `docs/.vitepress/dist/` next to every served page (`index.md`, `guide/getting-started.md`, `conformance/semantics.md`, `benchmarks/implementations.md`, etc.). Each mirror strips frontmatter (expanding the home page's `hero` into Markdown), removes `<script>` blocks, SPDX comments and layout wrapper `<div>` tags, replaces `<ImplementationComparison>` (`headlines`, `overview`, or `all`) with rendered Markdown tables from the build-time snapshot, links `<PerformanceHistory>` to `benchmark-data/tessera`, expands `<PipelineMap>` into the same workload table shown in HTML and strips other interactive figure tags whose content is already stated in prose, preserves raw LaTeX math, and rewrites relative links to canonical `.md` site URLs or GitHub `blob`/`tree` URLs.
+- **Audience-tiered indices:** `/llms.txt` derives every page's title and one-line summary directly from its own Markdown source and groups pages automatically from path rules (`Using Tessera`, `How Tessera Works` ordered by `docs/explain/index.md#reading-order`, and internal contributor docs and unimplemented proposals isolated under `## Optional`); `/llms-full.txt` bundles only the external-user core (`Using Tessera` plus the explanation overview), excluding `evidence.md` and unimplemented proposals; `/llms-explain.txt` bundles the explanation overview and chapters in reading order.
+- **Discovery metadata and UI:** `config.ts` generates `sitemap.xml` (GitHub Pages project sites under `/tessera-order/` do not own the origin-root `/robots.txt`) and injects per-page `<meta name="description">`, canonical URLs, Open Graph title/description, and `<link rel="alternate" type="text/markdown">` tags. `PageMarkdownBar.vue` adds compact Copy Markdown, View Markdown and `llms.txt` controls to both the home layout and standard documentation pages.
+
+## Embed the tracker
+
+To embed `PerformanceHistory` in another Vue-enabled Markdown page:
+
+```html
+<script setup>
+import PerformanceHistory from "./path/to/PerformanceHistory.vue";
+</script>
+<PerformanceHistory />
+```
+
+Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or the initially compared case; a URL hash takes precedence. Other webpages can use an iframe. GitHub Markdown uses the [README's fixed SVG preview](../../README.md) of the group means. Publishing measurements does not rebuild this website.
+
 ## Writing pages
 
-Site pages serve three readers: someone deciding whether to use Tessera (home and performance), someone using it (guide), and someone learning how it works (explanation). Contributors read the repository documents.
+Site pages serve human readers—someone deciding whether to use Tessera (home and performance), using it (guide), or learning how it works (explanation)—as well as external AI agents fetching published HTML, `.md` mirrors or `llms*.txt` bundles. Contributors read the repository documents.
 
 - One idea per paragraph, conclusion first. Explain a technique as the problem, the idea, why it is correct and what it saves, with a small example or number.
 - Reader pages name no functions or source files; the [engine reference](../design/engine.md) maps rules to code. Release status and migration stay at the end of the guide.

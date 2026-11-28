@@ -16,13 +16,12 @@ pub(super) fn execute(
     let ranks = validate_1d(request, a.len())?;
     let py = a.py();
     let items: Vec<Py<PyAny>> = a.iter().map(Bound::unbind).collect();
-    let ptrs: Vec<_> = if key.is_some() {
-        items.iter().map(Py::as_ptr).collect()
-    } else {
-        Vec::new()
-    };
     let unchanged = || {
-        if a.len() != ptrs.len() || a.iter().zip(&ptrs).any(|(item, &ptr)| item.as_ptr() != ptr) {
+        if a.len() != items.len()
+            || a.iter()
+                .zip(&items)
+                .any(|(item, saved)| item.as_ptr() != saved.as_ptr())
+        {
             Err(PyValueError::new_err("list modified during sort"))
         } else {
             Ok(())
@@ -56,9 +55,7 @@ pub(super) fn execute(
             .into_any()
             .unbind()),
         Output::Inplace => {
-            if key.is_some() {
-                unchanged()?;
-            }
+            unchanged()?;
             for (i, &source) in indices.iter().enumerate() {
                 a.set_item(i, &items[source])?;
             }

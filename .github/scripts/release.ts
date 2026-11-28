@@ -36,6 +36,38 @@ export async function verifyPythonRelease(tag: string, root: string) {
     throw new Error(
       "Python Cargo package.version must match the Rust core and package.publish must be false",
     );
+  const deps = adapter.dependencies as Record<string, { path?: string } | string> | undefined;
+  const coreDep = deps?.["tessera-order"];
+  if (typeof coreDep !== "object" || coreDep?.path !== "../rust/tessera-order")
+    throw new Error("Python Cargo dependency tessera-order must point to ../rust/tessera-order");
+  const coreTag = `rust/v${coreVersion}`;
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    git("rev-parse", "--verify", "--quiet", `refs/tags/${coreTag}^{commit}`);
+  } catch {
+    throw new Error(
+      `Published Rust release tag ${coreTag} not found; release Rust ${coreVersion} before Python ${version}`,
+    );
+  }
+  const diff = git(
+    "diff",
+    "--name-only",
+    `refs/tags/${coreTag}`,
+    "--",
+    "rust/tessera-order",
+  ).trim();
+  const untracked = git(
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+    "--",
+    "rust/tessera-order",
+  ).trim();
+  if (diff !== "" || untracked !== "")
+    throw new Error(
+      `Embedded rust/tessera-order source differs from published tag ${coreTag}; bump and release Rust before tagging Python`,
+    );
   return { tag, state: "verified" };
 }
 

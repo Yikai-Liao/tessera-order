@@ -8,6 +8,7 @@ inside each public call, including output allocation and conversion, is timed.
 """
 
 import argparse
+import hashlib
 import json
 import platform
 import sys
@@ -396,7 +397,17 @@ def main():
             2,
             f"Install tessera-order in this interpreter before benchmarking: {error}\n",
         )
+    build_info = ts._core._build_info()
+    artifact_path = Path(ts._core.__file__).resolve()
+    verified = build_info["commit"] != "unknown" and build_info["dirty"] == "false"
     metadata = {
+        **build_info,
+        "artifact_path": str(artifact_path),
+        "artifact_sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        "numpy_path": str(Path(np.__file__).resolve()),
+        "python_executable": sys.executable,
+        "comparison_scope": "installed-artifact-vs-installed-baselines",
+        "provenance_verified": verified,
         "python": sys.version,
         "platform": platform.platform(),
         "numpy": np.__version__,
@@ -408,6 +419,11 @@ def main():
         "rounds": args.rounds,
         "warmup_rounds": 1,
     }
+    if not verified:
+        metadata["provenance_note"] = (
+            f"Artifact source is unverified: commit={build_info['commit']}, "
+            f"dirty={build_info['dirty']}. The benchmark checkout does not identify the wheel source."
+        )
     print(
         f"Python {platform.python_version()}, NumPy {np.__version__}, Tessera {ts.__version__}; seed={SEED}."
     )

@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import math
+import multiprocessing
+import os
 import struct
+import sys
+import threading
 from decimal import Decimal
 from fractions import Fraction
 
@@ -16,6 +20,32 @@ NAMES = (
     "partition_inplace",
     "argpartition",
 )
+
+
+def assert_list_partition(result, expected, ranks, key=None, descending=False):
+    ranks = [ranks] if isinstance(ranks, int) else ranks
+    ranks = sorted({rank % len(expected) for rank in ranks})
+    assert len(result) == len(expected)
+    for rank in ranks:
+        assert result[rank] is expected[rank]
+    for lo, hi in zip([-1, *ranks], [*ranks, len(expected)]):
+        assert sorted(map(id, result[lo + 1 : hi])) == sorted(
+            map(id, expected[lo + 1 : hi])
+        )
+    reordered = sorted(result, key=key, reverse=descending)
+    assert all(x is y for x, y in zip(reordered, expected))
+
+
+def test_list_partition_assertion():
+    source = [3, -1, 3, 0, 2]
+    expected = sorted(source)
+    invalid = expected.copy()
+    invalid[1], invalid[3] = invalid[3], invalid[1]
+    with pytest.raises(AssertionError):
+        assert_list_partition(invalid, expected, [0, 2, 4])
+    valid = expected.copy()
+    valid[1], valid[2] = valid[2], valid[1]
+    assert_list_partition(valid, expected, [0, 3, 4])
 
 
 def check_operations(a, key=None, descending=False, threads=1):
@@ -46,21 +76,13 @@ def check_operations(a, key=None, descending=False, threads=1):
             assert all(x is y for x, y in zip(original, a))
         if name.startswith("arg"):
             assert sorted(result) == list(range(len(a)))
-            positions = [order.index(i) for i in result]
         else:
             assert sorted(map(id, result)) == sorted(map(id, a))
         if "partition" in name:
-            for rank in ranks:
-                if name.startswith("arg"):
-                    assert positions[rank] == rank
-                    assert all(x < rank for x in positions[:rank])
-                    assert all(x > rank for x in positions[rank + 1 :])
-                else:
-                    assert result[rank] is expected[rank]
-            # A stable sort of the partition must retain each equal-key group.
-            if not name.startswith("arg"):
-                reordered = sorted(result, key=key, reverse=descending)
-                assert all(x is y for x, y in zip(reordered, expected))
+            partitioned = (
+                [original[i] for i in result] if name.startswith("arg") else result
+            )
+            assert_list_partition(partitioned, expected, ranks, key, descending)
         elif name.startswith("arg"):
             assert result == order
         else:
@@ -123,10 +145,9 @@ def test_float_bits(descending, threads):
         part = ts.partition(a, kth, descending=descending, threads=threads)
         inplace = a.copy()
         ts.partition_inplace(inplace, kth, descending=descending, threads=threads)
-        for rank in kth if isinstance(kth, list) else [kth]:
-            assert a[indices[rank]] is expected[rank]
-            assert part[rank] is expected[rank]
-            assert inplace[rank] is expected[rank]
+        float_key = lambda x: (math.isnan(x), -x if descending else x)
+        for result in ([a[i] for i in indices], part, inplace):
+            assert_list_partition(result, expected, kth, float_key, False)
 
 
 @pytest.mark.parametrize(
@@ -238,10 +259,10 @@ def test_key_exception_and_partition_ranks(name):
                 assert result == (list(range(len(a))) if name.startswith("arg") else a)
                 continue
             order = sorted(range(len(a)), key=a.__getitem__)
-            for rank in kth if isinstance(kth, list) else [kth]:
-                assert result[rank] == (
-                    order[rank] if name.startswith("arg") else a[order[rank]]
-                )
+            if name.startswith("arg"):
+                assert sorted(result) == list(range(len(a)))
+                result = [a[i] for i in result]
+            assert_list_partition(result, [a[i] for i in order], kth)
 
 
 @pytest.mark.parametrize("threads", [1, None, 2, 4])
@@ -253,10 +274,121 @@ def test_large_lists(threads):
     objects = [(x, i) for i, x in enumerate(a)]
     result = ts.sort(objects, key=lambda x: x[0], descending=True, threads=threads)
     assert result == sorted(objects, key=lambda x: x[0], reverse=True)
-    for fn in (ts.partition, ts.argpartition):
-        result = fn(a, [0, 10000, -1], threads=threads)
-        if fn is ts.argpartition:
+    for fn in (ts.partition, ts.partition_inplace, ts.argpartition):
+        work = a.copy()
+        result = fn(work, [0, 10000, -1], threads=threads)
+        if fn is ts.partition_inplace:
+            assert result is None
+            result = work
+        elif fn is ts.argpartition:
+            assert sorted(result) == list(range(len(a)))
             result = [a[i] for i in result]
-        assert [result[i] for i in (0, 10000, -1)] == [
-            expected[i] for i in (0, 10000, -1)
-        ]
+        assert_list_partition(result, expected, [0, 10000, -1])
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+@pytest.mark.parametrize("threads", [1, 2])
+def test_no_key_concurrent_replacement(name, threads):
+    observed_rejection = False
+    for attempt in range(5):
+        size = 300_007 * (attempt + 1)
+        a = [(i * 1777) % size for i in range(size)]
+        replacement = 10**12 + 7 + attempt
+        ready = threading.Event()
+        start = threading.Lock()
+        start.acquire()
+
+        def replace():
+            ready.set()
+            with start:
+                a[0] = replacement
+
+        worker = threading.Thread(target=replace)
+        worker.start()
+        ready.wait(timeout=5)
+        interval = sys.getswitchinterval()
+        try:
+            # Hold the GIL until the Rust call detaches so the waiting thread
+            # replaces an element during the detached ordering window.
+            sys.setswitchinterval(60)
+            start.release()
+            try:
+                getattr(ts, name)(
+                    a, *([len(a) // 2] if "partition" in name else []), threads=threads
+                )
+            except ValueError as err:
+                assert "list modified during sort" in str(err)
+                observed_rejection = True
+        finally:
+            sys.setswitchinterval(interval)
+            worker.join(timeout=10)
+        assert not worker.is_alive()
+        if observed_rejection:
+            assert a[0] is replacement
+            break
+        # Even if the edit landed strictly before or after the call, it must never be lost.
+        assert any(item is replacement for item in a)
+    assert observed_rejection
+
+
+def _sort_after_fork(connection):
+    try:
+        for threads in (2, None, 1):
+            a = [(i * 1777) % 20_003 for i in range(20_003)]
+            assert ts.sort(a, threads=threads) == sorted(a)
+        connection.send(None)
+    except BaseException as error:
+        connection.send(repr(error))
+    finally:
+        connection.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX fork")
+def test_parallel_pools_after_fork(monkeypatch):
+    monkeypatch.setenv("RAYON_NUM_THREADS", "2")
+    a = list(range(20_003, -1, -1))
+    for threads in (2, None):
+        assert ts.sort(a, threads=threads) == sorted(a)
+    context = multiprocessing.get_context("fork")
+
+    def run_fork_check():
+        parent, child = context.Pipe(duplex=False)
+        worker = context.Process(target=_sort_after_fork, args=(child,))
+        worker.start()
+        child.close()
+        try:
+            assert parent.poll(20), "child sort hung after inheriting Rayon pools"
+            assert parent.recv() is None
+            worker.join(timeout=5)
+            assert worker.exitcode == 0
+        finally:
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=5)
+            parent.close()
+
+    run_fork_check()
+
+    # Also fork while another parent thread repeatedly replaces the cached pool,
+    # ensuring the child never locks an inherited parent mutex.
+    stop = threading.Event()
+    active = threading.Event()
+
+    def churn_pools():
+        small = [3, 1, 2, 0]
+        width = 2
+        while not stop.is_set():
+            ts.sort(small, threads=width)
+            active.set()
+            width = 3 if width == 2 else 2
+
+    churner = threading.Thread(target=churn_pools)
+    churner.start()
+    try:
+        assert active.wait(timeout=5)
+        for _ in range(3):
+            run_fork_check()
+    finally:
+        stop.set()
+        churner.join(timeout=10)
+    assert not churner.is_alive()

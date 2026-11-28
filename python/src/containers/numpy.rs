@@ -78,6 +78,107 @@ fn writable(a: &Bound<'_, PyAny>, layout: &Layout) -> PyResult<()> {
     layout.non_overlapping(a.getattr("itemsize")?.extract()?)
 }
 
+/// Allocates and validates NumPy-owned output before any element writeback.
+fn allocate_output<'py>(
+    a: &Bound<'py, PyAny>,
+    np: &Bound<'py, PyAny>,
+    source: &Layout,
+    request: Request<'_>,
+    dtype: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let shape = source.out_shape();
+    let dtype = if request.output == Output::Indices {
+        np.getattr("intp")?
+    } else {
+        dtype.clone()
+    };
+    let output = empty(np, &shape, &dtype)?;
+    if !output.is_instance(&np.getattr("ndarray")?)?
+        || output.getattr("shape")?.extract::<Vec<usize>>()? != shape
+        || !output.getattr("dtype")?.eq(&dtype)?
+    {
+        return Err(PyTypeError::new_err("output array does not match request"));
+    }
+    if output.is(a)
+        || np
+            .getattr("shares_memory")?
+            .call1((a, &output))?
+            .extract::<bool>()?
+    {
+        return Err(PyValueError::new_err("output buffer aliases the input"));
+    }
+    let axis = if request.axis == Axis::None {
+        Axis::Index(0)
+    } else {
+        request.axis
+    };
+    writable(&output, &layout(&output, axis)?)?;
+    Ok(output)
+}
+
+// The snapshot owns both mutation evidence and the storage used for writeback.
+enum Snapshot<'py> {
+    Raw(RawSnapshot),
+    RawBytes(RawSnapshot, Bound<'py, PyAny>),
+    Owned(Bound<'py, PyAny>),
+}
+
+impl<'py> Snapshot<'py> {
+    fn get(
+        a: &Bound<'py, PyAny>,
+        base: &Bound<'py, PyAny>,
+        ndarray: &Bound<'py, PyAny>,
+        axis: Axis,
+    ) -> PyResult<Self> {
+        Ok(match RawSnapshot::get(a, axis) {
+            Ok(raw) if raw.byte_comparable() => Self::Raw(raw),
+            // NumPy initializes Python bytes from padding; Rust keeps raw storage
+            // as MaybeUninit throughout capture and permutation.
+            Ok(raw) => Self::RawBytes(raw, base.call_method0("tobytes")?),
+            Err(_) => Self::Owned(ndarray.getattr("copy")?.call1((base,))?),
+        })
+    }
+
+    fn matches(&self, a: &Bound<'py, PyAny>, np: &Bound<'py, PyAny>, axis: Axis) -> PyResult<bool> {
+        match self {
+            Self::Raw(raw) => raw.matches(a, axis),
+            Self::RawBytes(_, saved) => {
+                let ndarray = np.getattr("ndarray")?;
+                let live = ndarray.getattr("view")?.call1((a, &ndarray))?;
+                live.call_method0("tobytes")?.eq(saved)
+            }
+            Self::Owned(saved) => {
+                let ndarray = np.getattr("ndarray")?;
+                let live = ndarray.getattr("view")?.call1((a, &ndarray))?;
+                same_elements(np, &live, saved)
+            }
+        }
+    }
+
+    fn write(
+        &self,
+        output: &Bound<'py, PyAny>,
+        axis: Axis,
+        source: &Layout,
+        target: &Layout,
+        indices: &[Vec<usize>],
+    ) -> PyResult<()> {
+        match self {
+            Self::Raw(raw) | Self::RawBytes(raw, _) => raw.write(output, axis, indices),
+            Self::Owned(copy) => {
+                for (lane, order) in indices.iter().enumerate() {
+                    for (i, &index) in order.iter().enumerate() {
+                        let from = PyTuple::new(output.py(), source.coordinates(lane, index))?;
+                        let to = PyTuple::new(output.py(), target.coordinates(lane, i))?;
+                        output.set_item(to, copy.get_item(from)?)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 fn execute_key(
     a: &Bound<'_, PyAny>,
     np: &Bound<'_, PyAny>,
@@ -97,6 +198,13 @@ fn execute_key(
         writable(a, &source)?;
     }
     let dtype = base.getattr("dtype")?;
+    if source.total_len == 0 || source.lane_len == 0 {
+        return if request.output == Output::Inplace {
+            Ok(py.None())
+        } else {
+            Ok(allocate_output(a, np, &source, request, &dtype)?.unbind())
+        };
+    }
     let reported_dtype = a.getattr("dtype")?;
     let strides: Vec<isize> = a.getattr("strides")?.extract()?;
     let unchanged = || {
@@ -110,20 +218,10 @@ fn execute_key(
     };
     // Only the exported PEP 3118 format authorizes raw copying. NumPy owns
     // references and custom dtype storage when that format is unavailable.
-    let raw = RawSnapshot::get(a, request.axis).ok();
-    let snapshot = if raw.as_ref().is_some_and(RawSnapshot::byte_comparable) {
-        None
-    } else {
-        Some(ndarray.getattr("copy")?.call1((&base,))?)
-    };
+    let snapshot = Snapshot::get(a, &base, &ndarray, request.axis)?;
     let content_unchanged = || {
         unchanged()?;
-        let matches = if let Some(snapshot) = &snapshot {
-            let live = ndarray.getattr("view")?.call1((a, &ndarray))?;
-            same_elements(np, &live, snapshot)?
-        } else {
-            raw.as_ref().unwrap().matches(a, request.axis)?
-        };
+        let matches = snapshot.matches(a, np, request.axis)?;
         if !matches {
             return Err(PyValueError::new_err("array modified during sort"));
         }
@@ -151,7 +249,6 @@ fn execute_key(
     }
     content_unchanged()?;
     let indices = keys::order_lanes(py, &lanes, ranks.as_deref(), request)?;
-    let out_shape = source.out_shape();
     let out_axis = if request.axis == Axis::None {
         Axis::Index(0)
     } else {
@@ -160,48 +257,16 @@ fn execute_key(
     let output = if request.output == Output::Inplace {
         a.clone()
     } else {
-        let out_dtype = if request.output == Output::Indices {
-            np.getattr("intp")?
-        } else {
-            dtype.clone()
-        };
-        let output = empty(np, &out_shape, &out_dtype)?;
-        if !output.is_instance(&np.getattr("ndarray")?)?
-            || output.getattr("shape")?.extract::<Vec<usize>>()? != out_shape
-            || !output.getattr("dtype")?.eq(out_dtype)?
-        {
-            return Err(PyTypeError::new_err("output array does not match request"));
-        }
-        if output.is(a)
-            || np
-                .getattr("shares_memory")?
-                .call1((a, &output))?
-                .extract::<bool>()?
-        {
-            return Err(PyValueError::new_err("output buffer aliases the input"));
-        }
-        output
+        allocate_output(a, np, &source, request, &dtype)?
     };
     content_unchanged()?;
     let target = layout(&output, out_axis)?;
     writable(&output, &target)?;
     match request.output {
         Output::Indices => buffer::write_indices(&output, out_axis, &indices)?,
-        _ => {
-            if let Some(raw) = raw {
-                raw.write(&output, out_axis, &indices)?;
-            } else {
-                let snapshot = snapshot.unwrap();
-                for (lane, order) in indices.iter().enumerate() {
-                    for (i, &index) in order.iter().enumerate() {
-                        let from = PyTuple::new(py, source.coordinates(lane, index))?;
-                        let to = PyTuple::new(py, target.coordinates(lane, i))?;
-                        output.set_item(to, snapshot.get_item(from)?)?;
-                    }
-                }
-            }
-        }
+        _ => snapshot.write(&output, out_axis, &source, &target, &indices)?,
     }
+
     Ok(if request.output == Output::Inplace {
         py.None()
     } else {

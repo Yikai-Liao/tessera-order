@@ -10,10 +10,11 @@ use crate::encoding::{
     NumericElem, argpartition_slice, argsort_slice, partition_slice, sort_slice,
 };
 use crate::pool::Threads;
-use pyo3::exceptions::{PyBufferError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyBufferError, PyMemoryError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use rayon::prelude::*;
+use std::collections::BTreeSet;
 use std::ffi::CStr;
 use std::mem::{MaybeUninit, align_of, size_of};
 use std::ptr;
@@ -147,7 +148,7 @@ pub(crate) struct Layout {
     pub(crate) shape: Vec<usize>,
     strides: Vec<isize>,
     axis: Option<usize>,
-    total_len: usize,
+    pub(crate) total_len: usize,
     pub(crate) lane_len: usize,
     pub(crate) num_lanes: usize,
 }
@@ -283,36 +284,105 @@ impl Layout {
         if active.iter().any(|&(stride, _)| stride == 0) {
             return Err(PyValueError::new_err("buffer has overlapping elements"));
         }
-        let mut span = itemsize;
-        let mut sufficient = true;
-        for (stride, len) in active {
-            if stride < span {
-                sufficient = false;
-                break;
-            }
-            span = (len - 1)
-                .checked_mul(stride)
-                .and_then(|n| n.checked_add(span))
-                .ok_or_else(|| PyValueError::new_err("buffer span is too large"))?;
-        }
-        if sufficient {
+        let overlap = || PyValueError::new_err("buffer has overlapping elements");
+        if active.is_empty() {
             return Ok(());
         }
-        // Interleaved dimensions can be disjoint despite failing the span test.
-        // Bound the exact fallback's allocation and O(n log n) work.
-        if self.total_len <= 65_536 {
-            let mut offsets: Vec<_> = (0..self.num_lanes)
-                .flat_map(|lane| (0..self.lane_len).map(move |i| self.offset(lane, i)))
-                .collect();
-            offsets.sort_unstable();
-            if offsets
-                .windows(2)
-                .all(|pair| pair[1] - pair[0] >= itemsize as isize)
-            {
-                return Ok(());
+        if active[0].0 < itemsize {
+            return Err(overlap());
+        }
+        // Independent outer axes cannot introduce collisions within the prefix.
+        let mut span = itemsize as u128
+            + active
+                .iter()
+                .map(|&(s, n)| (n - 1) as u128 * s as u128)
+                .sum::<u128>();
+        while active.len() > 1 {
+            let &(stride, len) = active.last().unwrap();
+            let prefix_span = span - (len - 1) as u128 * stride as u128;
+            if (stride as u128) < prefix_span {
+                break;
+            }
+            active.pop();
+            span = prefix_span;
+        }
+        if active.len() <= 1 {
+            return Ok(());
+        }
+        // Pigeonhole bound: disjoint elements need at least active_len * itemsize bytes.
+        let active_len = active
+            .iter()
+            .try_fold(1u128, |n, &(_, len)| n.checked_mul(len as u128));
+        if active_len.is_none_or(|n| {
+            n.checked_mul(itemsize as u128)
+                .is_none_or(|need| span < need)
+        }) {
+            return Err(overlap());
+        }
+        if let &[(s0, n0), (s1, n1)] = active.as_slice() {
+            let (mut a, mut b) = (s0, s1);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            if a >= itemsize {
+                return if s1 / a >= n0 || s0 / a >= n1 {
+                    Ok(())
+                } else {
+                    Err(overlap())
+                };
             }
         }
-        Err(PyValueError::new_err("buffer has overlapping elements"))
+        let pivot = active
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, (_, n))| n)
+            .unwrap()
+            .0;
+        let (stride, len) = active.remove(pivot);
+        let rest = active
+            .iter()
+            .try_fold(1usize, |n, &(_, len)| n.checked_mul(len))
+            .ok_or_else(overlap)?;
+        let capacity = rest
+            .checked_mul(2)
+            .ok_or_else(|| PyMemoryError::new_err("layout overlap check exceeds memory"))?;
+        let mut points: Vec<(usize, isize)> = Vec::new();
+        points
+            .try_reserve_exact(capacity)
+            .map_err(|_| PyMemoryError::new_err("layout overlap check exceeds memory"))?;
+        // from_shape bounds span <= isize::MAX, so offset, rem + stride, and q - 1 fit.
+        for mut index in 0..rest {
+            let mut offset = 0usize;
+            for &(s, n) in &active {
+                offset += (index % n) * s;
+                index /= n;
+            }
+            let (rem, q) = (offset % stride, (offset / stride) as isize);
+            points.push((rem, q));
+            points.push((rem + stride, q - 1));
+        }
+        points.sort_unstable();
+        // Each base offset spans len consecutive periods. Wrapped copies expose
+        // byte collisions across period boundaries without enumerating the pivot.
+        let mut window = BTreeSet::new();
+        let mut left = 0;
+        for (i, &(rem, q)) in points.iter().enumerate() {
+            while rem - points[left].0 >= itemsize {
+                window.remove(&(points[left].1, left));
+                left += 1;
+            }
+            let before = window.range(..=(q, usize::MAX)).next_back();
+            let after = window.range((q, 0)..).next();
+            if before
+                .into_iter()
+                .chain(after)
+                .any(|&(other, _)| q.abs_diff(other) < len)
+            {
+                return Err(overlap());
+            }
+            window.insert((q, i));
+        }
+        Ok(())
     }
 
     pub(crate) fn coordinates(&self, mut lane: usize, mut index: usize) -> Vec<usize> {
@@ -471,7 +541,7 @@ fn is_pod_format(format: &[u8]) -> bool {
                     }
                     *pos += 1;
                 }
-                Some(code) if b"bBhHiIlLqQnNefd?cxspw".contains(code) => {
+                Some(code) if b"bBhHiIlLqQnNefd?cxspuw".contains(code) => {
                     *pos += 1;
                 }
                 _ => return false,
@@ -1022,6 +1092,82 @@ mod tests {
     use super::*;
 
     #[test]
+    fn interleaved_layout_overlap() {
+        let cases = [
+            (vec![2, 65_536], vec![12, 8], true),
+            (vec![3, 65_536], vec![12, 8], false),
+            (vec![2, 65_536], vec![10, 8], false),
+            (vec![2, 2], vec![14, 8], true),
+            (vec![2, 3], vec![14, 8], false),
+            (vec![2, 65_536], vec![-12, 8], true),
+            (vec![3, 65_536], vec![12, -8], false),
+            (vec![2, 2], vec![-14, -8], true),
+            (vec![2, 3], vec![-14, 8], false),
+            (vec![3, 2, 65_536], vec![600_000, 12, 8], true),
+            (vec![3, 3, 65_536], vec![-600_000, 12, -8], false),
+            (vec![2, 2, 65_536], vec![12, 16, 32], true),
+            (vec![2, 2, 65_536], vec![14, 8, 32], true),
+            (vec![2, 2, 65_536], vec![14, 8, 24], false),
+            (vec![2, 2, 65_536], vec![12, 16, 24], true),
+            (vec![2, 2, 65_536], vec![-12, 16, -26], false),
+            (vec![2, 2, 65_536], vec![12, 16, 28], false),
+            (vec![0, 65_536], vec![0, 0], true),
+            (vec![1, 1], vec![0, 0], true),
+            (vec![2, 1], vec![0, 0], false),
+            (vec![2, 2], vec![2, 8], false),
+            (vec![256, 257, 258], vec![4, 6, 8], false),
+            (vec![257, 257, 257], vec![1028, 1032, 527_356], true),
+            (vec![257, 257, 257], vec![1028, 1032, 527_358], false),
+            (vec![257, 257, 257], vec![1028, 1032, 527_360], false),
+        ];
+        for (shape, strides, valid) in cases {
+            let layout = Layout::from_shape(shape, strides, 4, Axis::Index(-1)).unwrap();
+            assert_eq!(
+                layout.non_overlapping(4).is_ok(),
+                valid,
+                "{:?} {:?}",
+                layout.shape,
+                layout.strides
+            );
+        }
+    }
+
+    #[test]
+    fn modular_overlap_matches_element_ranges() {
+        // Small exhaustive layouts exercise partial-byte overlap and wraparound.
+        for n0 in 2..=4 {
+            for n1 in 2..=4 {
+                for n2 in 1..=3 {
+                    for s0 in 1..=16 {
+                        for s1 in 1..=16 {
+                            for s2 in [4, 9, 20] {
+                                let layout = Layout::from_shape(
+                                    vec![n0, n1, n2],
+                                    vec![s0, -s1, s2],
+                                    4,
+                                    Axis::None,
+                                )
+                                .unwrap();
+                                let mut offsets: Vec<_> =
+                                    (0..layout.total_len).map(|i| layout.offset(0, i)).collect();
+                                offsets.sort_unstable();
+                                let expected = offsets.windows(2).all(|p| p[1] - p[0] >= 4);
+                                assert_eq!(
+                                    layout.non_overlapping(4).is_ok(),
+                                    expected,
+                                    "{:?} {:?}",
+                                    layout.shape,
+                                    layout.strides
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn pod_formats_fail_closed() {
         for format in [
             "b",
@@ -1029,6 +1175,7 @@ mod tests {
             "@i",
             "T{i:score:4xT{d:value:}:nested:}",
             "2T{?b:tag:}",
+            "u",
             "w",
         ] {
             assert!(is_pod_format(format.as_bytes()), "{format}");

@@ -40,8 +40,11 @@ runs:
         if [ "$ABI3" = true ]; then
           features=(--features abi3-py311)
         fi
+        uv python install "$PYTHON_VERSION"
+        interpreter="$(uv python find "$PYTHON_VERSION")"
+        test -n "$interpreter"
         uvx maturin build --release --locked -m python/Cargo.toml \
-          --interpreter "$(uv python find "$PYTHON_VERSION")" \
+          --interpreter "$interpreter" \
           --out "$RUNNER_TEMP/python-wheels" "${features[@]}"
     - name: Test installed wheel
       shell: bash

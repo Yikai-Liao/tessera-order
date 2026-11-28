@@ -90,7 +90,7 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 ## Status by language
 
-Each independent implementation is versioned and released separately; bindings embedding the Rust core synchronize their `X.Y.Z` version with the embedded crate ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
+See [`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md) for per-language versioning and release policy.
 
 | Capability | Rust 0.2 | Python 0.2 (PyO3, unreleased) | C++ |
 |---|---|---|---|

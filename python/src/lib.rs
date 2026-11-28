@@ -11,6 +11,7 @@ use args::Axis;
 use containers::{Output, Request};
 use pool::Threads;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 // PyO3 extractors take one argument; the entry point supplies the None policy.
 fn axis_arg<const ALLOW_NONE: bool>(obj: &Bound<'_, PyAny>) -> PyResult<Axis> {
@@ -81,15 +82,53 @@ entry_point!(
     kth
 );
 
+fn ensure_gil_enabled(py: Python<'_>) -> PyResult<()> {
+    let sys = py.import("sys")?;
+    if sys.hasattr("_is_gil_enabled")?
+        && !sys.getattr("_is_gil_enabled")?.call0()?.extract::<bool>()?
+    {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "tessera_order requires a GIL-enabled Python interpreter",
+        ));
+    }
+    Ok(())
+}
+
+#[pyfunction]
+fn _build_info(py: Python<'_>) -> PyResult<Py<PyDict>> {
+    let info = PyDict::new(py);
+    for (name, value) in [
+        ("implementation", "tessera-order-py"),
+        ("package_version", env!("TESSERA_PY_VERSION")),
+        ("core_version", env!("CARGO_PKG_VERSION")),
+        ("kernel", "tessera-order"),
+        ("commit", env!("TESSERA_BUILD_COMMIT")),
+        ("dirty", env!("TESSERA_BUILD_DIRTY")),
+        ("source_sha256", env!("TESSERA_BUILD_SOURCE_SHA256")),
+        ("rustc", env!("TESSERA_BUILD_RUSTC")),
+        ("target", env!("TESSERA_BUILD_TARGET")),
+        ("profile", env!("TESSERA_BUILD_PROFILE")),
+        ("opt_level", env!("TESSERA_BUILD_OPT_LEVEL")),
+        ("rustflags", env!("TESSERA_BUILD_RUSTFLAGS")),
+        ("abi", env!("TESSERA_BUILD_ABI")),
+    ] {
+        info.set_item(name, value)?;
+    }
+    Ok(info.unbind())
+}
+
 #[pymodule(gil_used = true)]
 mod _core {
     use pyo3::prelude::*;
 
     #[pymodule_export]
-    use super::{argpartition, argsort, partition, partition_inplace, sort, sort_inplace};
+    use super::{
+        _build_info, argpartition, argsort, partition, partition_inplace, sort, sort_inplace,
+    };
 
     #[pymodule_init]
     fn init(module: &Bound<'_, PyModule>) -> PyResult<()> {
+        super::ensure_gil_enabled(module.py())?;
         module.add("__version__", env!("TESSERA_PY_VERSION"))?;
         module.add("__core_version__", env!("CARGO_PKG_VERSION"))
     }
@@ -101,6 +140,35 @@ mod tests {
     use pyo3::exceptions::{PyTypeError, PyValueError};
     use pyo3::types::PyDict;
     use std::ffi::CString;
+
+    #[test]
+    fn gil_enabled_interpreter_required() {
+        Python::initialize();
+        Python::attach(|py| {
+            let sys = py.import("sys").unwrap();
+            let original = sys.getattr("_is_gil_enabled").ok();
+            // Restore before asserting so a failing check cannot poison other tests.
+            let result = (|| -> PyResult<_> {
+                sys.setattr("_is_gil_enabled", py.eval(c"lambda: False", None, None)?)?;
+                let rejected = ensure_gil_enabled(py);
+                sys.setattr("_is_gil_enabled", py.eval(c"lambda: True", None, None)?)?;
+                let accepted = ensure_gil_enabled(py);
+                Ok((rejected, accepted))
+            })();
+            if let Some(original) = original {
+                sys.setattr("_is_gil_enabled", original).unwrap();
+            } else {
+                sys.delattr("_is_gil_enabled").unwrap();
+            }
+            let (rejected, accepted) = result.unwrap();
+            assert!(
+                rejected
+                    .unwrap_err()
+                    .is_instance_of::<pyo3::exceptions::PyRuntimeError>(py)
+            );
+            accepted.unwrap();
+        });
+    }
 
     #[test]
     fn exported_signatures_and_shared_validation() {

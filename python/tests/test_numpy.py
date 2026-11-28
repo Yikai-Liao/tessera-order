@@ -664,7 +664,18 @@ def test_key_buffer_fallback():
     )
 
 
-def test_key_pod_padding_and_bits():
+@pytest.mark.parametrize(
+    "name",
+    [
+        "sort",
+        "sort_inplace",
+        "argsort",
+        "partition",
+        "partition_inplace",
+        "argpartition",
+    ],
+)
+def test_key_pod_padding_and_bits(name):
     dtype = np.dtype(
         {"names": ["score"], "formats": ["i4"], "offsets": [4], "itemsize": 16}
     )
@@ -672,10 +683,34 @@ def test_key_pod_padding_and_bits():
     a = data.view(dtype)
     a["score"] = [3, 1, 2, 1]
     order = [1, 3, 2, 0]
+    saved = data.copy()
     expected = b"".join(a[i : i + 1].tobytes() for i in order)
-    assert ts.sort(a, key=lambda r: r["score"]).tobytes() == expected
-    assert ts.sort_inplace(a, key=lambda r: r["score"]) is None
-    assert a.tobytes() == expected
+    args = ([0, 1, 2, 3],) if "partition" in name else ()
+    result = getattr(ts, name)(a, *args, key=lambda r: r["score"])
+    if name.endswith("inplace"):
+        assert result is None
+        result = a
+    if name.startswith("arg"):
+        assert result.tolist() == order
+        assert b"".join(a[i : i + 1].tobytes() for i in result) == expected
+    else:
+        assert result.tobytes() == expected
+
+    data[:] = saved
+    edited = False
+
+    def key(record):
+        nonlocal edited
+        if not edited:
+            data[0] ^= np.uint8(0xFF)
+            edited = True
+        return record["score"]
+
+    saved[0] ^= np.uint8(0xFF)
+    with pytest.raises(ValueError, match="array modified during sort"):
+        getattr(ts, name)(a, *args, key=key)
+    assert edited
+    assert data.tobytes() == saved.tobytes()
 
 
 @pytest.mark.skipif(
@@ -930,3 +965,96 @@ def test_key_extended_float_signed_zero_mutation():
     with pytest.raises(ValueError, match="array modified during sort"):
         ts.sort_inplace(a, key=key)
     assert bool(np.signbit(a[0])) is True
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+@pytest.mark.parametrize("key", [None, int])
+@pytest.mark.parametrize("negative", [False, True])
+def test_large_interleaved_layout(name, key, negative):
+    a = np.ndarray((2, 65_536), dtype="i4", buffer=bytearray(524_296), strides=(12, 8))
+    a[...] = (np.arange(a.size).reshape(a.shape) * 1777) % 100_003
+    if negative:
+        a = a[::-1, ::-1]
+    expected = np.sort(a, axis=-1, kind="stable")
+    ranks = [0, a.shape[-1] // 2, -1]
+    args = (ranks,) if "partition" in name else ()
+    assert getattr(ts, name)(a, *args, key=key) is None
+    if "partition" in name:
+        np.testing.assert_array_equal(a[:, ranks], expected[:, ranks])
+        for rank in (0, a.shape[-1] // 2, a.shape[-1] - 1):
+            assert np.all(a[:, :rank] <= a[:, rank, None])
+            assert np.all(a[:, rank + 1 :] >= a[:, rank, None])
+        np.testing.assert_array_equal(np.sort(a, axis=-1), expected)
+    else:
+        np.testing.assert_array_equal(a, expected)
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+@pytest.mark.parametrize("key", [None, int])
+@pytest.mark.parametrize(
+    "shape,strides", [((3, 65_536), (12, 8)), ((2, 65_536), (10, 8))]
+)
+def test_large_interleaved_overlap_rejected(name, key, shape, strides):
+    a = np.ndarray(shape, dtype="i4", buffer=bytearray(524_308), strides=strides)
+    before = a.tobytes()
+    with pytest.raises(ValueError, match="overlapping"):
+        getattr(ts, name)(a, *([0] if "partition" in name else []), key=key)
+    assert a.tobytes() == before
+
+
+def test_large_3d_interleaved_layout_beyond_65536():
+    # (257, 257, 257) with strides (1028, 1032, 527356) has rest=66049 > 65536
+    # yet every 4-byte element occupies a disjoint slot.
+    backing = bytearray(135_532_000)
+    a = np.ndarray(
+        (257, 257, 257),
+        dtype="i4",
+        buffer=backing,
+        strides=(1028, 1032, 527_356),
+    )
+    a[0, 0, :] = np.arange(257, 0, -1, dtype="i4")
+    assert ts.partition_inplace(a, 0, axis=2) is None
+    assert a[0, 0, 0] == 1
+    bad = np.ndarray(
+        (257, 257, 257),
+        dtype="i4",
+        buffer=backing,
+        strides=(1028, 1032, 527_358),
+    )
+    with pytest.raises(ValueError, match="overlapping"):
+        ts.partition_inplace(bad, 0, axis=2)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "sort",
+        "sort_inplace",
+        "argsort",
+        "partition",
+        "partition_inplace",
+        "argpartition",
+    ],
+)
+def test_key_many_empty_lanes(name):
+    a = np.empty((1_000_000, 0), dtype="i8")
+    args = ([],) if "partition" in name else ()
+
+    def key(_):
+        pytest.fail("key called for an empty array")
+
+    result = getattr(ts, name)(a, *args, key=key)
+    if name.endswith("inplace"):
+        assert result is None
+    else:
+        assert result.shape == a.shape
+        assert result.dtype == (
+            np.dtype(np.intp) if name.startswith("arg") else a.dtype
+        )
+    if "partition" in name:
+        with pytest.raises(ValueError):
+            getattr(ts, name)(a, [0], key=key)
+    a.flags.writeable = False
+    if name.endswith("inplace"):
+        with pytest.raises(ValueError, match="read-only"):
+            getattr(ts, name)(a, *args, key=key)

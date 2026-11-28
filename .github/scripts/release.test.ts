@@ -34,15 +34,44 @@ test("Rust releases require a matching tag and a publishable crate", async (t) =
     await assert.rejects(verifyRelease(tag, root), /Unsupported release tag.*rust\/v.*python\/v/);
 });
 
-test("Python releases align package and adapter versions with the Rust core", async (t) => {
+test("Python releases align package, adapter and embedded Rust core with the published Rust tag", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tessera-python-release-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, "rust/tessera-order"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=A",
+        "-c",
+        "user.email=a@b",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "tag.gpgSign=false",
+        ...args,
+      ],
+      { cwd: root, encoding: "utf8" },
+    ).trim();
+  git("init", "-q");
+  mkdirSync(join(root, "rust/tessera-order/src"), { recursive: true });
   mkdirSync(join(root, "python"));
   writeFileSync(join(root, "rust/tessera-order/Cargo.toml"), '[package]\nversion = "0.2.0"\n');
+  writeFileSync(join(root, "rust/tessera-order/src/lib.rs"), "pub fn core() {}\n");
   const pyproject = join(root, "python/pyproject.toml");
   const adapter = join(root, "python/Cargo.toml");
-  writeFileSync(adapter, '[package]\nversion = "0.2.0"\npublish = false\n');
+  const validAdapter =
+    '[package]\nversion = "0.2.0"\npublish = false\n[dependencies]\ntessera-order = { path = "../rust/tessera-order" }\n';
+  writeFileSync(adapter, validAdapter);
+  writeFileSync(pyproject, '[project]\nversion = "0.2.0"\n');
+  git("add", ".");
+  git("commit", "-q", "-m", "initial");
+  await assert.rejects(verifyPythonRelease("python/v0.2.0", root), /Published Rust release tag/);
+  git("tag", "rust/v0.2.0");
+  // Adapter-only changes stay valid for synchronized and .postN releases.
+  writeFileSync(join(root, "python/note.txt"), "adapter fix\n");
+  git("add", "python/note.txt");
+  git("commit", "-q", "-m", "adapter fix");
   for (const version of ["0.2.0", "0.2.0.post1", "0.2.0.post12"]) {
     writeFileSync(pyproject, `[project]\nversion = "${version}"\n`);
     const tag = `python/v${version}`;
@@ -74,12 +103,39 @@ test("Python releases align package and adapter versions with the Rust core", as
     'version = "0.2.0"\npublish = true',
     'version = "0.2.0"',
   ]) {
-    writeFileSync(adapter, `[package]\n${metadata}\n`);
+    writeFileSync(
+      adapter,
+      `[package]\n${metadata}\n[dependencies]\ntessera-order = { path = "../rust/tessera-order" }\n`,
+    );
     await assert.rejects(
       verifyPythonRelease("python/v0.2.0", root),
       /Python Cargo package.version/,
     );
   }
+  writeFileSync(
+    adapter,
+    '[package]\nversion = "0.2.0"\npublish = false\n[dependencies]\ntessera-order = "0.2.0"\n',
+  );
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0", root),
+    /must point to \.\.\/rust\/tessera-order/,
+  );
+  writeFileSync(adapter, validAdapter);
+  writeFileSync(pyproject, '[project]\nversion = "0.2.0.post1"\n');
+  // Unreleased Rust edits (uncommitted or committed) must block a .postN release.
+  writeFileSync(join(root, "rust/tessera-order/src/extra.rs"), "// untracked\n");
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0.post1", root),
+    /differs from published tag rust\/v0\.2\.0/,
+  );
+  rmSync(join(root, "rust/tessera-order/src/extra.rs"));
+  writeFileSync(join(root, "rust/tessera-order/src/lib.rs"), "pub fn core() { let _ = 1; }\n");
+  git("add", "rust/tessera-order/src/lib.rs");
+  git("commit", "-q", "-m", "unreleased core edit");
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0.post1", root),
+    /differs from published tag rust\/v0\.2\.0/,
+  );
 });
 
 test("tag notes drop the header and every git signature format", () => {

@@ -2,7 +2,7 @@
 
 Status: implemented. The code and tests in `python/` are authoritative for runtime behavior; this page keeps the design rationale and contracts.
 
-The binding wraps the Rust crate and does not wait for the C++ implementation. Its package version synchronizes `X.Y.Z` with the embedded `tessera-order` Rust crate (`python/v0.2.0` embeds Rust `0.2.0`), using PEP 440 post-releases (`python/v0.2.0.post1`) for Python-only adapter or packaging fixes ([releases](../../RELEASING.md)). The module exposes both `__version__` (Python package version) and `__core_version__` (embedded Rust crate version).
+The binding wraps the Rust crate and does not wait for the C++ implementation; [releases](../../RELEASING.md) owns its versioning and tag policy. The module exposes `__version__` (Python package version) and `__core_version__` (embedded Rust crate version).
 
 ## Public API
 
@@ -30,7 +30,7 @@ Parameter contracts (shared by one argument parser across all six functions):
 - `threads`: `int | None = 1`.
   - `1` (default): serial Rust engine with zero thread-pool involvement, matching single-threaded `np.sort` and avoiding oversubscription inside worker processes.
   - `None`: Rayon global thread pool (respects `RAYON_NUM_THREADS`, defaults to available hardware parallelism).
-  - Integer `>= 2`: runs in a single-slot cached Rayon pool of that exact width (`Mutex<Option<(usize, Arc<ThreadPool>)>>`), so repeated calls with the same thread count pay no pool-creation cost and changing the count drops the old pool without accumulating idle threads.
+  - Integer `>= 2`: runs in a single-slot cached Rayon pool of that exact width, so repeated calls with the same thread count pay no pool-creation cost and changing the count drops the old pool without accumulating idle threads.
   - `bool` raises `TypeError`; integers `< 1` raise `ValueError`.
 
 | Input | `sort` / `partition` output | `sort_inplace` / `partition_inplace` | `argsort` / `argpartition` output |
@@ -49,7 +49,7 @@ Numeric lists (`key=None`) and arbitrary object lists (`key=callable`) are suppo
 
 On a successful call, each element's key is evaluated exactly once. No radix pass calls back into Python. Key extraction and validation finish before any writeback begins; a failing key or range check leaves writeback unstarted (callback side effects are not rolled back).
 
-Reentrant mutation contract: before calling `key`, snapshot the input list's strong references and raw element pointers. Check the list length immediately before and after each `key` callback. After extraction and again before in-place writeback, verify the length and every element pointer against the snapshot. These full checks take O(n) total work, rather than scanning the list for each callback. A detected mutation raises `ValueError("list modified during sort")` without writing back stale positions. The `array.array` and `ndarray` `key=` paths also detect in-place mutations before writeback.
+Reentrant mutation contract: before calling `key`, snapshot the input list's strong references. Check the list length immediately before and after each `key` callback. After key extraction and before every in-place writeback (including `key=None`), verify the length and every element pointer against the snapshot. These full checks take O(n) total work, rather than scanning the list for each callback. A detected mutation raises `ValueError("list modified during sort")` without writing back stale positions. The `array.array` and `ndarray` `key=` paths also detect in-place mutations before writeback.
 
 ### `array.array`
 
@@ -71,8 +71,10 @@ With `key=None`, direct numeric dtypes are `int8/16/32/64`, `uint8/16/32/64`, an
 
 With `key=callable`, **any `numpy.ndarray` dtype** (including structured, custom, string, `bool`, `complex`, and `object`) is supported along any valid `axis` (and `axis=None` for `sort`/`argsort`):
 
-- For non-object dtypes (`!dtype.hasobject`), elements are plain `itemsize`-byte values: extract keys once per lane element, sort indices in Rust, and permute the raw element bytes into the output (or back into `a` for `sort_inplace`, rejecting read-only / self-overlapping views).
+- For POD dtypes admitted by the exported PEP 3118 format, elements are plain `itemsize`-byte values: extract keys once per lane element, sort indices in Rust, and permute the raw element bytes into the output (or back into `a` for `sort_inplace`, rejecting read-only / self-overlapping views).
 - For object-containing dtypes (`dtype.hasobject`), never raw-`memcpy` `PyObject*` bytes; perform refcount-safe permutation through Python/NumPy element operations after sorting indices in Rust.
+
+Padded POD records use the same raw snapshot for writeback and a NumPy `tobytes()` snapshot for byte-accurate mutation detection, including initialized padding edits. Rust retains potentially uninitialized padding as `MaybeUninit<u8>` throughout raw copying. Dtypes without an admitted POD format use NumPy-owned copies and element operations.
 
 Indices for a view or axis lane are relative to that lane (or flattened C-order for `axis=None`), not the backing array. Sorted copies preserve dtype including byte order by allocating output with `numpy.empty(shape, dtype=a.dtype)`.
 
@@ -111,7 +113,8 @@ All unsafe raw-pointer-to-slice and strided-element access is isolated inside `b
 - Direct external-buffer operations keep the GIL held on the calling thread for the call's duration. These include contiguous native `sort` / `partition` copies that write directly into pinned output buffers, `sort_inplace` / `partition_inplace`, and zero-copy `argsort` / `argpartition`. When `threads != 1`, Rayon worker threads execute only pure-Rust numeric kernels and encoders and never acquire the GIL, so holding the GIL on the caller thread prevents concurrent Python bytecode mutation of the buffer without deadlock risk.
 - For multi-lane N-D arrays when `threads != 1`: single-lane inputs call `par_sort` / `par_argsort`; multi-lane inputs parallelize across independent disjoint lanes inside the selected Rayon pool (and large lanes can nest `par_sort`/`par_argsort` cleanly through Rayon work-stealing).
 - The GIL cannot stop foreign C or NumPy threads that already released it; document that concurrent C-level mutation of the same buffer during a call is undefined by the caller.
-- Require a GIL-enabled interpreter with `#[pymodule(gil_used = true)]` (PyO3 0.28+ defaults to `gil_used = false`), and do not advertise free-threaded wheels until a separate no-GIL buffer access design is validated.
+- Require a GIL-enabled interpreter with `#[pymodule(gil_used = true)]` and an import-time `sys._is_gil_enabled()` check when available; importing with the GIL disabled raises `RuntimeError`. Do not advertise free-threaded wheels until a separate no-GIL buffer access design is validated.
+- On POSIX after `fork`, discard inherited cached pool ownership without dropping the parent pool and create child-local Rayon pools. Calls with `threads=None` also use a child-local pool if the parent used the global pool, honoring a positive `RAYON_NUM_THREADS` or available parallelism.
 
 ## Space and benchmarks
 

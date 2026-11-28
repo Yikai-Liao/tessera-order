@@ -24,6 +24,7 @@ _T = TypeVar("_T")
 _Value = TypeVar("_Value", int, float, str)
 _DType = TypeVar("_DType", bound="np.dtype[Any]")
 _Axis = Optional[SupportsIndex]
+_Threads = Optional[SupportsIndex]
 _Kth = Union[SupportsIndex, Sequence[SupportsIndex], "np.ndarray[Any, Any]"]
 
 @overload
@@ -33,7 +34,7 @@ def sort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[_T]: ...
 @overload
 def sort(
@@ -42,7 +43,7 @@ def sort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> array[_Value]: ...
 @overload
 def sort(
@@ -51,7 +52,7 @@ def sort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> np.ndarray[Any, _DType]: ...
 @overload
 def sort_inplace(
@@ -60,7 +61,7 @@ def sort_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def sort_inplace(
@@ -69,7 +70,7 @@ def sort_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def sort_inplace(
@@ -78,7 +79,7 @@ def sort_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def argsort(
@@ -87,7 +88,7 @@ def argsort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[int]: ...
 @overload
 def argsort(
@@ -96,7 +97,7 @@ def argsort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[int]: ...
 @overload
 def argsort(
@@ -105,7 +106,7 @@ def argsort(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> np.ndarray[Any, np.dtype[np.intp]]: ...
 @overload
 def partition(
@@ -115,7 +116,7 @@ def partition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[_T]: ...
 @overload
 def partition(
@@ -125,7 +126,7 @@ def partition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> array[_Value]: ...
 @overload
 def partition(
@@ -135,7 +136,7 @@ def partition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> np.ndarray[Any, _DType]: ...
 @overload
 def partition_inplace(
@@ -145,7 +146,7 @@ def partition_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def partition_inplace(
@@ -155,7 +156,7 @@ def partition_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def partition_inplace(
@@ -165,7 +166,7 @@ def partition_inplace(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> None: ...
 @overload
 def argpartition(
@@ -175,7 +176,7 @@ def argpartition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_T], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[int]: ...
 @overload
 def argpartition(
@@ -185,7 +186,7 @@ def argpartition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[_Value], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> list[int]: ...
 @overload
 def argpartition(
@@ -195,5 +196,5 @@ def argpartition(
     *,
     descending: Optional[bool] = ...,
     key: Optional[Callable[[Any], Any]] = ...,
-    threads: Optional[int] = ...,
+    threads: _Threads = ...,
 ) -> np.ndarray[Any, np.dtype[np.intp]]: ...

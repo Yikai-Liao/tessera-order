@@ -125,13 +125,20 @@ onMounted(() => {
   watch([selection, from, to, filters, axis, horizontal, firstRun, lastRun], writeHash, { deep: true });
   window.addEventListener("hashchange", onHashChange);
 });
-onUnmounted(() => window.removeEventListener("hashchange", onHashChange));
+onUnmounted(() => {
+  window.removeEventListener("hashchange", onHashChange);
+  liveController?.abort();
+});
 
 // The index first, then only the monthly journals the range needs, each once.
 const index = shallowRef<ReturnType<typeof indexSchema.parse> | null>(null);
 const journals = shallowRef(new Map<string, TrackingRun[]>());
 const error = ref("");
+const staleNotice = ref("");
+const retryingLive = ref(false);
 const loading = ref(true);
+let activeSeededMonth: string | null = null;
+let liveController: AbortController | null = null;
 
 /** A failure readers can act on; the underlying cause goes to the console only. */
 class DataError extends Error {}
@@ -173,18 +180,69 @@ const months = computed(() => {
     (month) => (!start || month >= start) && (!end || month <= end),
   );
 });
+async function refreshLive(source: string, signal: AbortSignal) {
+  const text = await download(source, "index.json", signal);
+  const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
+  if (signal.aborted) return;
+  if (activeSeededMonth) {
+    const start = from.value.slice(0, 7);
+    const end = to.value.slice(0, 7);
+    const needed = liveIndex.months.filter(
+      (month) => (!start || month >= start) && (!end || month <= end),
+    );
+    const batches = await Promise.all(
+      needed.map(async (month) => {
+        const raw = await download(source, `${month}.jsonl`, signal);
+        return [month, readable(() => parseRuns(raw))] as const;
+      }),
+    );
+    if (signal.aborted) return;
+    // Evict the provisional snapshot month so changing ranges during initial refresh never
+    // leaves stale build-time data cached for that month.
+    const next = new Map(journals.value);
+    next.delete(activeSeededMonth);
+    for (const [month, runs] of batches) next.set(month, runs);
+    journals.value = next;
+    activeSeededMonth = null;
+  }
+  staleNotice.value = "";
+  error.value = "";
+  index.value = liveIndex;
+}
+async function retryLiveRefresh() {
+  if (retryingLive.value) return;
+  liveController?.abort();
+  const controller = new AbortController();
+  liveController = controller;
+  retryingLive.value = true;
+  try {
+    await refreshLive(props.source, controller.signal);
+  } catch (cause) {
+    if (!controller.signal.aborted) {
+      console.error("Performance history:", cause);
+      staleNotice.value =
+        "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+    }
+  } finally {
+    if (!controller.signal.aborted) retryingLive.value = false;
+  }
+}
 onMounted(() => {
   watch(
     () => props.source,
     async (source, _, cleanup) => {
+      liveController?.abort();
       const controller = new AbortController();
+      liveController = controller;
       cleanup(() => controller.abort());
       loading.value = true;
       error.value = "";
+      staleNotice.value = "";
+      retryingLive.value = false;
+      activeSeededMonth = null;
       index.value = null;
       journals.value = new Map();
       // Seed from the same-origin build snapshot only when its latest month overlaps the active range.
-      let seededMonth: string | null = null;
       if (source === HISTORY_DATA_SOURCE) {
         try {
           const snapshotBase = withBase("/benchmarks/data/tessera/");
@@ -205,7 +263,7 @@ onMounted(() => {
               journals.value = new Map([[latestMonth, seededRuns]]);
               index.value = snapIndex;
               loading.value = false;
-              seededMonth = latestMonth;
+              activeSeededMonth = latestMonth;
             }
           }
         } catch {
@@ -213,32 +271,15 @@ onMounted(() => {
         }
       }
       try {
-        const text = await download(source, "index.json", controller.signal);
-        const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
-        if (controller.signal.aborted) return;
-        if (seededMonth) {
-          const start = from.value.slice(0, 7);
-          const end = to.value.slice(0, 7);
-          const needed = liveIndex.months.filter(
-            (month) => (!start || month >= start) && (!end || month <= end),
-          );
-          const batches = await Promise.all(
-            needed.map(async (month) => {
-              const raw = await download(source, `${month}.jsonl`, controller.signal);
-              return [month, readable(() => parseRuns(raw))] as const;
-            }),
-          );
-          if (controller.signal.aborted) return;
-          // Evict the provisional snapshot month so changing ranges during initial refresh never
-          // leaves stale build-time data cached for that month.
-          const next = new Map(journals.value);
-          next.delete(seededMonth);
-          for (const [month, runs] of batches) next.set(month, runs);
-          journals.value = next;
-        }
-        index.value = liveIndex;
+        await refreshLive(source, controller.signal);
       } catch (cause) {
-        if (controller.signal.aborted || seededMonth) return;
+        if (controller.signal.aborted) return;
+        if (activeSeededMonth) {
+          console.error("Performance history:", cause);
+          staleNotice.value =
+            "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+          return;
+        }
         fail(cause);
         loading.value = false;
       }
@@ -609,6 +650,17 @@ const emptyMessage = computed(() => {
         </fieldset>
         <span v-if="loading" role="status" class="status">Loading…</span>
       </div>
+      <p v-if="staleNotice && !error" class="chart-note" role="status">
+        {{ staleNotice }}
+        <button
+          type="button"
+          class="reset-zoom"
+          :disabled="retryingLive"
+          @click="retryLiveRefresh"
+        >
+          {{ retryingLive ? "Retrying…" : "Retry live refresh" }}
+        </button>
+      </p>
       <p v-if="firstRun || lastRun" class="chart-note" role="status">
         Zoomed to a report range. <button type="button" class="reset-zoom" @click="clearZoom">Reset zoom</button>
       </p>

@@ -53,22 +53,31 @@ export function canonicalSiteUrl(docsBase = "/tessera-order/"): string {
 }
 
 /** Parse the single-owner chapter sequence from `docs/explain/index.md#reading-order`. */
-export function explainReadingOrder(raw: string): string[] {
+export async function explainReadingOrder(raw: string): Promise<string[]> {
   const start = raw.search(/^##\s+Reading order\b/m);
   const tail = start >= 0 ? raw.slice(start).replace(/^##\s+Reading order\b[^\n]*\n?/, "") : "";
   const nextHeading = tail.search(/^##\s/m);
   const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
+  renderer ??= createMarkdownRenderer(process.cwd());
+  const md = await renderer;
+  const { document } = parseHTML(md.render(section, {}));
   const seen = new Set<string>(["explain/index.md"]);
   const order = ["explain/index.md"];
-  for (const line of section.split("\n")) {
-    // Only chapter-entry links (the table's Page column or top-level list items) define order;
-    // cross-reference links inside descriptions must not reorder chapters.
-    const match =
-      line.match(/^\s*\|\s*\[[^\]]+\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)\s*\|/) ??
-      line.match(/^\s*(?:[-*]|\d+\.)\s*\[[^\]]+\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)/);
-    const target = match?.[1];
-    if (!target || /^[a-z][a-z0-9+.-]*:|\.\./i.test(target)) continue;
-    const normalized = `explain/${target.replace(/^\.\//, "")}`;
+  // Use VitePress's rendered table first column (or list item lead links) so optional table syntax
+  // such as omitted leading pipes works while links in description columns never reorder chapters.
+  const tableLinks = [...document.querySelectorAll("tbody tr td:first-child a[href]")];
+  const entries = tableLinks.length
+    ? tableLinks
+    : [...document.querySelectorAll("li")].flatMap((li) => {
+        const first = li.querySelector("a[href]");
+        return first ? [first] : [];
+      });
+  for (const link of entries) {
+    const rawHref = link.getAttribute("href")?.split(/[?#]/, 1)[0] ?? "";
+    if (!rawHref || /^[a-z][a-z0-9+.-]*:|\.\.|^\//i.test(rawHref)) continue;
+    const stem = rawHref.replace(/^\.\//, "").replace(/\.(?:md|html)$/i, "");
+    if (!stem) continue;
+    const normalized = `explain/${stem}.md`;
     if (!seen.has(normalized)) {
       seen.add(normalized);
       order.push(normalized);
@@ -89,7 +98,7 @@ export async function discoverSitePages(repoRoot: string) {
     allMarkdown.filter(isPage).map(async (sourcePath) => {
       const raw = await readFile(resolve(repoRoot, sourcePath), "utf8");
       const path = sitePath(sourcePath);
-      if (path === "explain/index.md") explainOrder = explainReadingOrder(raw);
+      if (path === "explain/index.md") explainOrder = await explainReadingOrder(raw);
       return { sourcePath, sitePath: path, ...(await extractPageMetadata(raw)) };
     }),
   );

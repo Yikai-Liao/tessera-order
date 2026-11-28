@@ -98,6 +98,7 @@ function makeFixture(validOverview = true, validOperation = validOverview) {
         name: "memory",
         title: "Grows as √n",
         summary: "Peak heap allocation beyond the input.",
+        table: "| Sort | Peak extra memory |\n| --- | --- |\n| Tessera | 1.2 MB |",
       },
     ],
   };
@@ -141,6 +142,7 @@ test("renderComparisonMarkdown renders headlines, overview, all, and empty views
     /\| Stable \\\| selection \| Ranked 2nd of 4 stable selections \| 1\.04× \| — \|/,
   );
   assert.doesNotMatch(headlines, /^\| Tessera \| 2\.6× \|$/m);
+  assert.doesNotMatch(headlines, /^\| Tessera \| 1\.2 MB \|$/m);
 
   const overview = renderComparisonMarkdown(data, "overview");
   assert.doesNotMatch(overview, /^#{1,6}\s/m);
@@ -154,6 +156,8 @@ test("renderComparisonMarkdown renders headlines, overview, all, and empty views
   assert.match(all, /^## At a glance$/m);
   assert.match(all, /^## Full sort$/m);
   assert.match(all, /^### Grows as √n\n\nPeak heap allocation beyond the input\./m);
+  assert.match(all, /^\| Tessera \| 2\.6× \|$/m);
+  assert.match(all, /^\| Tessera \| 1\.2 MB \|$/m);
   assert.match(all, /bare metal, 2026-11-27; Tessera at \[d849b68\]/);
 
   const empty = comparisonSchema.parse({ spec: null, overview: null, operations: [] });

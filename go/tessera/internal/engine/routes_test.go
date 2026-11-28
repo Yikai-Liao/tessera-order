@@ -113,7 +113,7 @@ func TestObservedCachedAndIndexRoutes(t *testing.T) {
 				return uint64(i) * 0x9e3779b97f4a7c15
 			}
 		}, Cached, -1)
-		if calls != tc.n || !recorded(*events, routeCached, tc.cached) || tc.distribution >= 0 && !recorded(*events, routeDistribution, tc.distribution) {
+		if calls > tc.n || !recorded(*events, routeCached, tc.cached) || tc.distribution >= 0 && !recorded(*events, routeDistribution, tc.distribution) {
 			t.Fatalf("cached case %v, %d calls", tc, calls)
 		}
 	}

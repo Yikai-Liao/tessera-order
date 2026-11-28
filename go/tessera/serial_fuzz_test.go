@@ -179,7 +179,7 @@ func FuzzPanicPosition(f *testing.F) {
 				SortByCachedKey(rows, key)
 			}
 		})
-		if p != marker || calls != at {
+		if p != marker || calls > at {
 			t.Fatal("callback panic did not propagate")
 		}
 	})

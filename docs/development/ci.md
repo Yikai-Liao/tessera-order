@@ -8,7 +8,8 @@
 | Library tests or Rust validation workflow | Rust validation |
 | Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, implementation comparison checks and PR revision measurement |
 | Native adapters or implementation-session tooling | Implementation comparison checks |
-| Go benchmark worker or shared benchmark input digests | Implementation comparison checks |
+| Go benchmark worker (`bench/go/`) | Implementation comparison checks and Go PR revision measurement |
+| Shared benchmark input digests | Implementation comparison checks |
 | Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Implementation comparison checks and PR revision measurement |
 | Revision execution or shard validation | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
@@ -18,7 +19,7 @@
 | Go rules or the Go CI workflow | Go validation |
 | Shared golden vectors (`conformance/vectors/`) | Rust and Go validation |
 
-An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust, C++ and Go)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
+Rows that select PR revision measurement for shared tooling (plan, sampling, catalog, build configuration, package and Cargo manifests) select it for Go as well, since Go preparation runs the same plan and sampler; Rust engine sources and Rust-only harness code select only the Rust measurement. An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust, C++ and Go)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 

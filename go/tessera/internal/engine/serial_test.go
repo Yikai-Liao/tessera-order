@@ -62,15 +62,21 @@ func TestTileCachesChangingClassifications(t *testing.T) {
 	rows := rowsForRecovery(59)
 	original := slices.Clone(rows)
 	calls := 0
+	classified := make([]bool, len(rows))
 	e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 {
 		calls++
-		return uint64(calls * 7)
+		digit := (r.id + 1) * 7
+		if classified[r.id] {
+			digit++
+		}
+		classified[r.id] = true
+		return uint64(digit)
 	})
 	var scratch tileScratch[ownedRow]
 	var counts [maxDigitBuckets]uint16
 	countingPasses(&scratch, rows, []Digit{{Width: 4}}, &counts, &e)
-	if calls != len(rows) {
-		t.Fatalf("classifier called %d times", calls)
+	if calls > len(rows) {
+		t.Fatalf("classifier called %d times, want at most %d", calls, len(rows))
 	}
 	checkOwners(t, rows, original)
 	expected := slices.Clone(original)

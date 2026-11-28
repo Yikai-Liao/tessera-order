@@ -8,6 +8,7 @@ permissions:
 
 env:
   GOTOOLCHAIN: go1.27.4
+  TESSERA_REQUIRE_VECTORS: '1'
 
 defaults:
   run:

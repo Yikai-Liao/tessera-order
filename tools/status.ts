@@ -299,17 +299,24 @@ async function readGoTracking(
   );
   const headRuns = new Map<string, ReturnType<typeof parseRuns>[number]>();
   const latest = new Map(headRuns);
+  const executions = ["serial", "t4"];
   const firstMonth = new Date(headCommitDate).toISOString().slice(0, 7);
   for (const month of index.months.toReversed()) {
-    if (month < firstMonth) break;
-    const monthRuns = parseRuns(
-      await api.getRaw(`contents/${path}/${month}.jsonl?ref=benchmark-data`),
-    );
+    const canContainHead = month >= firstMonth;
+    if (!canContainHead && executions.every((execution) => latest.has(execution))) break;
+    let monthRuns: ReturnType<typeof parseRuns>;
+    try {
+      monthRuns = parseRuns(await api.getRaw(`contents/${path}/${month}.jsonl?ref=${ref}`));
+    } catch (error) {
+      if (canContainHead) throw error;
+      break;
+    }
     for (const run of monthRuns.toReversed()) {
       if (!latest.has(run.execution)) latest.set(run.execution, run);
-      if (run.hash === head && !headRuns.has(run.execution)) headRuns.set(run.execution, run);
+      if (canContainHead && run.hash === head && !headRuns.has(run.execution))
+        headRuns.set(run.execution, run);
     }
-    if (["serial", "t4"].every((execution) => headRuns.has(execution))) break;
+    if (executions.every((execution) => headRuns.has(execution))) break;
   }
   const runs = [...latest].map(([execution, prior]) => {
     const { hash, values, workflow } = headRuns.get(execution) ?? prior;
@@ -324,7 +331,7 @@ async function readGoTracking(
     };
   });
   return {
-    state: ["serial", "t4"].every((execution) => headRuns.has(execution))
+    state: executions.every((execution) => headRuns.has(execution))
       ? "measured"
       : headRuns.size
         ? "partial"

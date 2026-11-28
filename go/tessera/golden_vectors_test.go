@@ -26,12 +26,15 @@ type orderingVector struct {
 	StableOrder []int    `json:"stable_order"`
 }
 
-const orderingVectorsPath = "../../conformance/vectors/ordering.json"
+const (
+	orderingVectorsPath = "../../conformance/vectors/ordering.json"
+	requireVectorsEnv   = "TESSERA_REQUIRE_VECTORS"
+)
 
 func readOrderingVectors(t testing.TB) []orderingVector {
 	t.Helper()
 	data, err := os.ReadFile(orderingVectorsPath)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) && os.Getenv(requireVectorsEnv) != "1" {
 		return nil
 	}
 	if err != nil {
@@ -217,7 +220,7 @@ func sameFloat64(a, b float64) bool { return math.Float64bits(a) == math.Float64
 func TestGoldenKeyEncodings(t *testing.T) {
 	vectors := readOrderingVectors(t)
 	if vectors == nil {
-		t.Skipf("requires repository fixture %s", orderingVectorsPath)
+		t.Skipf("repository fixture %s is missing (set %s=1 to require it)", orderingVectorsPath, requireVectorsEnv)
 	}
 	for _, vector := range vectors {
 		t.Run(vector.Name, func(t *testing.T) {

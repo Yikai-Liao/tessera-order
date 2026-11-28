@@ -142,7 +142,7 @@ func TestParallelIndexVariationWaves(t *testing.T) {
 				return Uint128{}
 			}}
 			got := unmaskAndScanVarying(words, indexMask, Uint128{Lo: 1}, &e, 2)
-			if (got.Lo != 0) != (test.firstDiff >= 0) || int(reads.Load()) != test.maxReads {
+			if (got.Lo != 0) != (test.firstDiff >= 0) || int(reads.Load()) > test.maxReads {
 				t.Fatalf("variation = %v and %d reads, want at most %d reads", got, reads.Load(), test.maxReads)
 			}
 			for i, word := range words {

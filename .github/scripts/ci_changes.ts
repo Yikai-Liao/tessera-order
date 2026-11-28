@@ -32,7 +32,8 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^go\/tessera\//, ["go", "benchmark_go"]],
   [/^\.github\/workflows\/pr-benchmarks\.yml$/, ["benchmark", "benchmark_go"]],
   [/^(go\/|\.github\/actions\/go-test\/|\.github\/workflows\/go-ci\.yml$)/, ["go"]],
-  [/^(bench\/go\/|conformance\/vectors\/benchmark-inputs\.json$)/, ["comparison"]],
+  [/^bench\/go\//, ["comparison", "benchmark_go"]],
+  [/^conformance\/vectors\/benchmark-inputs\.json$/, ["comparison"]],
   [/^conformance\/vectors\//, ["rust", "go"]],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
@@ -48,41 +49,47 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // The figures replay the library through this WebAssembly crate.
   [/^rust\/tessera-trace\//, ["docs"]],
-  [/^rust\/tessera-order\/(src\/|Cargo\.toml$)/, ["rust", "benchmark", "docs"]],
+  [/^rust\/tessera-order\/Cargo\.toml$/, ["rust", "benchmark", "benchmark_go", "docs"]],
+  [/^rust\/tessera-order\/src\//, ["rust", "benchmark", "docs"]],
   [/^rust\//, ["rust", "benchmark"]],
   [
     /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
-    ["rust", "comparison", "benchmark"],
+    ["rust", "comparison", "benchmark", "benchmark_go"],
   ],
   [
     /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
     ["cpp"],
   ],
   [/^\.github\/scripts\/install_native_tools\.sh$/, ["comparison"]],
-  // Tooling that renders or reads results and never builds or times a sorting implementation.
   [/^bench\/plot\//, ["docs"]],
   [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
   // The site serializes these colours into its implementation picker at build time.
   [/^bench\/report\/implementation-tone\.ts$/, ["docs"]],
   [
-    /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
+    /^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
+    ["benchmark", "benchmark_go"],
+  ],
+  // Tooling that renders or reads results and never builds or times a sorting implementation.
+  [
+    /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
+  [/^bench\/tracking\//, ["benchmark"]],
+  [/^bench\/session\.ts$|^bench\/rust\/src\/bin\/compare\.rs$/, ["comparison", "benchmark_go"]],
+  [/^bench\/revisions\.ts$/, ["comparison"]],
+  [/^bench\/rust\/(native\/|tests\/|src\/(allocation\.rs$|bin\/memory\.rs$))/, ["comparison"]],
   [
-    /^bench\/tracking\/|^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
-    ["benchmark"],
-  ],
-  [/^bench\/(session|revisions)\.ts$/, ["comparison"]],
-  [
-    /^bench\/rust\/(native\/|tests\/|src\/(allocation\.rs$|bin\/(compare|memory)\.rs$))/,
-    ["comparison"],
+    /^bench\/rust\/(build\.rs|Cargo\.toml|src\/lib\.rs)$/,
+    ["comparison", "benchmark", "benchmark_go"],
   ],
   [/^bench\/rust\//, ["comparison", "benchmark"]],
   [/^bench\/plans\/diagnostics\.toml$/, []],
+  [/^bench\/plans\/continuous\.toml$/, ["comparison", "benchmark", "benchmark_go"]],
   [/^bench\/plans\//, ["comparison", "benchmark"]],
+  [/^bench\/catalog\.(toml|ts)$/, ["comparison", "benchmark", "benchmark_go", "docs"]],
   [/^bench\/catalog\./, ["comparison", "benchmark", "docs"]],
-  [/^(bench|tools)\//, ["comparison", "benchmark"]],
-  [/^(package\.json|bun\.lock)$/, ["comparison", "benchmark", "docs"]],
+  [/^(bench|tools)\//, ["comparison", "benchmark", "benchmark_go"]],
+  [/^(package\.json|bun\.lock)$/, ["comparison", "benchmark", "benchmark_go", "docs"]],
   [/^\.github\/workflows\/docs\.yml$/, ["docs"]],
 ];
 

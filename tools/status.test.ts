@@ -238,7 +238,7 @@ test("API failures fail the command instead of returning empty success", async (
   assert.throws(() => f.run("status", "missing"));
 });
 
-test("main scans Go journals from the head month onward", async (t) => {
+test("main finds exact Go runs and fills missing executions from earlier journals", async (t) => {
   const head = "a".repeat(40);
   const stale = "b".repeat(40);
   const encoded = (data: string) => ({ content: Buffer.from(data).toString("base64") });
@@ -255,46 +255,67 @@ test("main scans Go journals from the head month onward", async (t) => {
     values: { [`go/argsort/u64/random/32/s1/${execution}`]: [100, 90, 110] },
   });
   const journal = (month: string) => `contents/go-tessera/${month}.jsonl?ref=benchmark-data`;
-  const prior = [tracked(stale, "serial"), tracked(stale, "t4")];
+  const jsonl = (entries: ReturnType<typeof tracked>[]) =>
+    entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
+  const priorSerial = tracked(stale, "serial", "2026-10-20T00:00:00Z");
+  const priorT4 = tracked(stale, "t4", "2026-10-20T00:00:00Z");
   const currentSerial = tracked(head, "serial");
   const currentT4 = tracked(head, "t4");
   const late = tracked(head, "t4", "2026-12-03T00:00:00Z");
   for (const scenario of [
     {
-      name: "missing",
+      name: "missing head with prior runs in two earlier months",
       state: "unmeasured",
-      november: prior,
+      september: [
+        { ...priorT4, time: "2026-09-20T00:00:00Z", commit_time: "2026-09-19T00:00:00Z" },
+      ],
+      october: [tracked("c".repeat(40), "serial", "2026-10-19T00:00:00Z"), priorSerial],
+      november: [],
       december: [],
+      requested: ["2026-11", "2026-10", "2026-09"],
       serial: stale,
       t4: stale,
     },
     {
-      name: "partial",
+      name: "partial head with October fallback",
       state: "partial",
-      november: [...prior, { ...currentSerial, padding: "x".repeat(1_100_000) }],
+      october: [priorSerial, priorT4],
+      november: [{ ...currentSerial, padding: "x".repeat(1_100_000) }],
       december: [],
+      requested: ["2026-11", "2026-10"],
       serial: head,
       t4: stale,
     },
     {
-      name: "complete",
+      name: "complete head takes precedence over a newer run of another commit",
       state: "measured",
-      november: [...prior, currentSerial, currentT4],
+      november: [currentSerial, currentT4],
       december: [tracked(stale, "serial", "2026-12-01T00:00:00Z")],
+      requested: ["2026-12", "2026-11"],
       serial: head,
       t4: head,
     },
     {
-      name: "delayed into a later month",
+      name: "head delayed into a later month",
       state: "measured",
-      november: [...prior, currentSerial],
+      november: [tracked(stale, "t4"), currentSerial],
       december: [late],
+      requested: ["2026-12", "2026-11"],
       serial: head,
       t4: head,
     },
+    {
+      name: "unreadable October stops the fallback scan",
+      state: "partial",
+      november: [currentSerial],
+      december: [],
+      requested: ["2026-11", "2026-10"],
+      serial: head,
+      t4: undefined,
+    },
   ]) {
     await t.test(scenario.name, async (t) => {
-      const months = ["2026-10", "2026-11"];
+      const months = ["2026-08", "2026-09", "2026-10", "2026-11"];
       if (scenario.december.length) months.push("2026-12");
       const f = await fixture(t, {
         "commits/main": commit(head),
@@ -309,11 +330,10 @@ test("main scans Go journals from the head month onward", async (t) => {
             facets: { type: [], input: [], length: [], group: [] },
           }),
         ),
-        [journal("2026-11")]:
-          `${scenario.november.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-        [journal("2026-12")]:
-          `${scenario.december.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-        // The indexed October journal has no API response.
+        [journal("2026-11")]: jsonl(scenario.november),
+        [journal("2026-12")]: jsonl(scenario.december),
+        ...(scenario.september ? { [journal("2026-09")]: jsonl(scenario.september) } : {}),
+        ...(scenario.october ? { [journal("2026-10")]: jsonl(scenario.october) } : {}),
       });
       const { goTracking } = JSON.parse(f.run("status", "main", "--details"));
       assert.equal(goTracking.state, scenario.state);
@@ -321,17 +341,15 @@ test("main scans Go journals from the head month onward", async (t) => {
         const result = goTracking.runs.find(
           (run: { execution: string }) => run.execution === execution,
         );
-        assert.equal(result.hash, scenario[execution]);
+        assert.equal(result?.hash, scenario[execution]);
+        if (!result) continue;
         assert.deepEqual(result.values, {
           [`go/argsort/u64/random/32/s1/${execution}`]: [100, 90, 110],
         });
       }
       assert.deepEqual(
         (await f.requests()).filter((request) => request.endsWith(".jsonl?ref=benchmark-data")),
-        months
-          .slice(1)
-          .reverse()
-          .map((month) => `raw ${journal(month)}`),
+        scenario.requested.map((month) => `raw ${journal(month)}`),
       );
     });
   }

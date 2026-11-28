@@ -173,12 +173,13 @@ function fail(cause: unknown) {
   error.value =
     cause instanceof DataError ? cause.message : "The performance data could not be displayed.";
 }
-const months = computed<string[]>((previous) => {
+function monthsInRange(available: readonly string[]) {
   const start = from.value.slice(0, 7);
   const end = to.value.slice(0, 7);
-  const next = (index.value?.months ?? []).filter(
-    (month) => (!start || month >= start) && (!end || month <= end),
-  );
+  return available.filter((month) => (!start || month >= start) && (!end || month <= end));
+}
+const months = computed<string[]>((previous) => {
+  const next = monthsInRange(index.value?.months ?? []);
   // Keep reference stability when live index confirms the same months so in-flight range loads
   // started from the build snapshot are not aborted and fetched twice.
   return previous && previous.length === next.length && previous.every((m, i) => m === next[i])
@@ -189,21 +190,29 @@ async function refreshLive(source: string, signal: AbortSignal, retryMissing = f
   const text = await download(source, "index.json", signal);
   const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
   if (signal.aborted) return;
-  const start = from.value.slice(0, 7);
-  const end = to.value.slice(0, 7);
-  const inRange = liveIndex.months.filter(
-    (month) => (!start || month >= start) && (!end || month <= end),
-  );
-  const toFetch = inRange.filter(
+  const toFetch = monthsInRange(liveIndex.months).filter(
     (month) => month === activeSeededMonth || (retryMissing && !journals.value.has(month)),
   );
-  const batches = await Promise.all(
+  const batches: [string, TrackingRun[]][] = await Promise.all(
     toFetch.map(async (month) => {
       const raw = await download(source, `${month}.jsonl`, signal);
-      return [month, readable(() => parseRuns(raw))] as const;
+      return [month, readable(() => parseRuns(raw))] as [string, TrackingRun[]];
     }),
   );
   if (signal.aborted) return;
+  const fetched = new Set(batches.map(([month]) => month));
+  // If the reader switched back to the provisional month while other downloads were in flight,
+  // fetch its live journal before evicting the provisional copy so it is never stranded.
+  if (
+    activeSeededMonth &&
+    !fetched.has(activeSeededMonth) &&
+    monthsInRange(liveIndex.months).includes(activeSeededMonth)
+  ) {
+    const raw = await download(source, `${activeSeededMonth}.jsonl`, signal);
+    const liveSeeded = readable(() => parseRuns(raw));
+    if (signal.aborted) return;
+    batches.push([activeSeededMonth, liveSeeded]);
+  }
   if (activeSeededMonth || batches.length) {
     const next = new Map(journals.value);
     if (activeSeededMonth) next.delete(activeSeededMonth);
@@ -212,7 +221,12 @@ async function refreshLive(source: string, signal: AbortSignal, retryMissing = f
     activeSeededMonth = null;
   }
   staleNotice.value = "";
-  error.value = "";
+  const nowNeeded = monthsInRange(liveIndex.months);
+  const rangeComplete = nowNeeded.every((month) => journals.value.has(month));
+  if (rangeComplete) {
+    error.value = "";
+    loading.value = false;
+  }
   index.value = liveIndex;
 }
 async function retryLiveRefresh() {
@@ -226,8 +240,12 @@ async function retryLiveRefresh() {
   } catch (cause) {
     if (!controller.signal.aborted) {
       console.error("Performance history:", cause);
-      staleNotice.value =
-        "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+      if (activeSeededMonth) {
+        staleNotice.value =
+          "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
+      } else {
+        fail(cause);
+      }
     }
   } finally {
     if (!controller.signal.aborted) retryingLive.value = false;
@@ -707,7 +725,17 @@ const emptyMessage = computed(() => {
           </template>
         </ul>
       </div>
-      <p v-if="error" class="notice" role="alert">{{ error }}</p>
+      <p v-if="error" class="notice" role="alert">
+        {{ error }}
+        <button
+          type="button"
+          class="reset-zoom"
+          :disabled="retryingLive"
+          @click="retryLiveRefresh"
+        >
+          {{ retryingLive ? "Retrying…" : "Retry" }}
+        </button>
+      </p>
       <div
         v-else-if="comparison"
         ref="chart"

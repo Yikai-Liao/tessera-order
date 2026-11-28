@@ -33,6 +33,8 @@ const defaultSource =
 const usingSnapshot = props.source === defaultSource;
 const data = shallowRef<ComparisonData | null>(usingSnapshot ? snapshot.data : null);
 const error = shallowRef("");
+const staleNotice = shallowRef("");
+const retrying = shallowRef(false);
 let scrolledToHash = false;
 function scrollToFragment() {
   if (!location.hash || scrolledToHash) return;
@@ -68,6 +70,66 @@ watch(
 
 // Each card names the operation, Tessera's standing and the two numbers behind it.
 const cards = computed(() => (data.value ? comparisonHeadlines(data.value) : []));
+let refreshController: AbortController | null = null;
+
+async function refreshLive() {
+  refreshController?.abort();
+  const controller = new AbortController();
+  refreshController = controller;
+  retrying.value = true;
+  try {
+    let response: Response;
+    try {
+      response = await fetch(props.source, { cache: "no-cache", signal: controller.signal });
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      console.error("Implementation comparison:", cause);
+      if (data.value) {
+        staleNotice.value =
+          "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be published.";
+      } else {
+        error.value = "The comparison data could not be reached. Check the connection and reload.";
+      }
+      return;
+    }
+    if (!response.ok) {
+      if (data.value) {
+        staleNotice.value = `Live refresh failed (HTTP ${response.status}); showing the site's build-time snapshot.`;
+      } else {
+        error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
+      }
+      return;
+    }
+    try {
+      const next = comparisonSchema.parse(await response.json());
+      if (controller.signal.aborted) return;
+      if (data.value && JSON.stringify(next) === JSON.stringify(data.value)) {
+        error.value = "";
+        staleNotice.value = "";
+        return;
+      }
+      // Validate only the charts this view renders so unchanged or non-chart views do zero extra SVG work.
+      for (const fig of comparisonSections(next, props.view).flatMap((section) => section.figures)) {
+        if (fig.kind === "curves") renderCurves({ ...(fig.chart as CurveChart), id: "check" });
+        else renderRows({ ...(fig.chart as RowChart), id: "check" });
+      }
+      error.value = "";
+      staleNotice.value = "";
+      data.value = next;
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      console.error("Implementation comparison:", cause);
+      if (data.value) {
+        staleNotice.value =
+          "Live comparison data could not be read; showing the site's build-time snapshot.";
+      } else {
+        error.value = "The published comparison data has a format this page cannot read.";
+      }
+    }
+  } finally {
+    if (!controller.signal.aborted) retrying.value = false;
+  }
+}
 
 onMounted(async () => {
   window.addEventListener("keydown", clearOnEscape);
@@ -76,40 +138,12 @@ onMounted(async () => {
     scrollToFragment();
   }
   if (usingSnapshot && snapshot.overridden && data.value) return;
-  let response: Response;
-  try {
-    response = await fetch(props.source, { cache: "no-cache" });
-  } catch (cause) {
-    console.error("Implementation comparison:", cause);
-    if (!data.value)
-      error.value = "The comparison data could not be reached. Check the connection and reload.";
-    return;
-  }
-  if (!response.ok) {
-    if (!data.value)
-      error.value = `The comparison data could not be downloaded (HTTP ${response.status}).`;
-    return;
-  }
-  try {
-    const next = comparisonSchema.parse(await response.json());
-    if (data.value && JSON.stringify(next) === JSON.stringify(data.value)) {
-      error.value = "";
-      return;
-    }
-    // Validate only the charts this view renders so unchanged or non-chart views do zero extra SVG work.
-    for (const fig of comparisonSections(next, props.view).flatMap((section) => section.figures)) {
-      if (fig.kind === "curves") renderCurves({ ...(fig.chart as CurveChart), id: "check" });
-      else renderRows({ ...(fig.chart as RowChart), id: "check" });
-    }
-    error.value = "";
-    data.value = next;
-  } catch (cause) {
-    console.error("Implementation comparison:", cause);
-    if (!data.value)
-      error.value = "The published comparison data has a format this page cannot read.";
-  }
+  await refreshLive();
 });
-onUnmounted(() => window.removeEventListener("keydown", clearOnEscape));
+onUnmounted(() => {
+  window.removeEventListener("keydown", clearOnEscape);
+  refreshController?.abort();
+});
 
 // Inline SVG follows the page's light or dark class; each chart needs its own element ids.
 const id = useId();
@@ -171,7 +205,14 @@ function clearOnEscape(event: KeyboardEvent) {
       </a>
     </div>
     <p v-if="view === 'headlines'" class="proof-foot">
-      <span>{{ cards.length ? 'Measured on Bencher Intel v1 bare metal against Rust & C++ sorts.' : 'Live benchmark measurements are published on the comparison page.' }}</span>
+      <span v-if="staleNotice" role="status">
+        {{ staleNotice }}
+        <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
+          {{ retrying ? "Retrying…" : "Retry" }}
+        </button>
+        · <a :href="props.source" target="_blank" rel="noopener">Live JSON</a>
+      </span>
+      <span v-else>{{ cards.length ? 'Measured on Bencher Intel v1 bare metal against Rust & C++ sorts.' : 'Live benchmark measurements are published on the comparison page.' }}</span>
       <a :href="withBase('/benchmarks/implementations')">Full comparison →</a>
     </p>
     <p v-else-if="error" class="notice" role="alert">{{ error }}</p>
@@ -180,6 +221,13 @@ function clearOnEscape(event: KeyboardEvent) {
       No cross-implementation figure is published yet.
     </p>
     <template v-else>
+      <p v-if="staleNotice" class="notice stale-notice" role="status">
+        {{ staleNotice }}
+        <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
+          {{ retrying ? "Retrying…" : "Retry" }}
+        </button>
+        · <a :href="props.source" target="_blank" rel="noopener">Live comparison.json</a>
+      </p>
       <template v-if="view === 'all'">
         <p class="lead">
           <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,
@@ -551,6 +599,27 @@ function clearOnEscape(event: KeyboardEvent) {
   border-radius: 8px;
   color: var(--vp-c-text-2);
   font-size: 14px;
+}
+.stale-notice {
+  margin-bottom: 16px;
+}
+.stale-retry {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-size: 12px;
+  cursor: pointer;
+}
+.stale-retry:hover:not(:disabled) {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+.stale-retry:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .is-strip .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .is-strip .card { gap: 4px; padding: 16px 18px; transition: border-color 0.2s ease, transform 0.15s ease; }

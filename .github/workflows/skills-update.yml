@@ -1,0 +1,55 @@
+name: Skills update
+
+# Dependabot does not read skills-lock.json, so this workflow plays its role for
+# the vendored agent skills: it refreshes them to their sources' latest commits
+# and opens a pull request when anything changed.
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skills-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: chore/skills-update
+      # A pull request opened with the default token would not run CI, so pushes and
+      # the pull request use a token with contents and pull-requests write access.
+      GH_TOKEN: ${{ secrets.SKILLS_UPDATE_TOKEN }}
+      DO_NOT_TRACK: "1"
+      DISABLE_TELEMETRY: "1"
+    steps:
+      - name: Require the update token
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set the SKILLS_UPDATE_TOKEN secret"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SKILLS_UPDATE_TOKEN }}
+      - name: Update project skills
+        run: npx -y skills@1.9.1 update -p -y
+      - name: Open or refresh the pull request
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Skills are up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add .agents skills-lock.json
+          git commit -s -m "chore: update agent skills"
+          git push --force origin "$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --base main --head "$BRANCH" --title "chore: update agent skills" \
+              --body "Updates the vendored agent skills to the commits recorded in \`skills-lock.json\`. Review the skill text diff before merging; \`.agentic-review.md\` relies on it."
+          fi

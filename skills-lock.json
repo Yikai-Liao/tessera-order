@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "skills": {
+    "software-design-philosophy": {
+      "source": "Yikai-Liao/skills",
+      "commit": "b46982e21f8ac50b41074a78a4c0c39d82e14a70",
+      "sourceType": "github",
+      "skillPath": "software-design-philosophy/SKILL.md",
+      "computedHash": "5bbb37bbbe767b6ea51d4e5f45b558edc1691cbf5ab60e2ea7a84bda5dcb9103",
+      "installMode": "copy"
+    }
+  }
+}

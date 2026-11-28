@@ -80,28 +80,28 @@ test("Python releases align package, adapter and embedded Rust core with the pub
   }
   writeFileSync(pyproject, '[project]\nversion = "0.2.0.post1"\n');
   assert.deepEqual(
-    await verifyPythonRelease("python/v0.2.0.post1", root, {
+    await verifyRelease("python/v0.2.0.post1", root, {
       checkPublished: true,
       fetchIndex: async () => '{"vers":"0.1.0","yanked":false}\n{"vers":"0.2.0","yanked":false}\n',
     }),
     { tag: "python/v0.2.0.post1", state: "verified" },
   );
   await assert.rejects(
-    verifyPythonRelease("python/v0.2.0.post1", root, {
+    verifyRelease("python/v0.2.0.post1", root, {
       checkPublished: true,
       fetchIndex: async () => '{"vers":"0.1.0","yanked":false}\n',
     }),
     /not published/,
   );
   await assert.rejects(
-    verifyPythonRelease("python/v0.2.0.post1", root, {
+    verifyRelease("python/v0.2.0.post1", root, {
       checkPublished: true,
       fetchIndex: async () => '{"vers":"0.2.0","yanked":true}\n',
     }),
     /not published/,
   );
   await assert.rejects(
-    verifyPythonRelease("python/v0.2.0.post1", root, {
+    verifyRelease("python/v0.2.0.post1", root, {
       checkPublished: true,
       fetchIndex: async () => {
         throw new Error("network unavailable");

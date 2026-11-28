@@ -67,21 +67,22 @@ fn layout(a: &Bound<'_, PyAny>, axis: Axis) -> PyResult<Layout> {
     )
 }
 
-fn writable(a: &Bound<'_, PyAny>, layout: &Layout) -> PyResult<()> {
-    if !a
+fn writable(base: &Bound<'_, PyAny>, layout: &Layout) -> PyResult<()> {
+    if !base
         .getattr("flags")?
         .getattr("writeable")?
         .extract::<bool>()?
     {
         return Err(PyValueError::new_err("array is read-only"));
     }
-    layout.non_overlapping(a.getattr("itemsize")?.extract()?)
+    layout.non_overlapping()
 }
 
 /// Allocates and validates NumPy-owned output before any element writeback.
 fn allocate_output<'py>(
     a: &Bound<'py, PyAny>,
     np: &Bound<'py, PyAny>,
+    ndarray: &Bound<'py, PyAny>,
     source: &Layout,
     request: Request<'_>,
     dtype: &Bound<'py, PyAny>,
@@ -93,9 +94,12 @@ fn allocate_output<'py>(
         dtype.clone()
     };
     let output = empty(np, &shape, &dtype)?;
-    if !output.is_instance(&np.getattr("ndarray")?)?
-        || output.getattr("shape")?.extract::<Vec<usize>>()? != shape
-        || !output.getattr("dtype")?.eq(&dtype)?
+    if !output.is_instance(ndarray)? {
+        return Err(PyTypeError::new_err("output array does not match request"));
+    }
+    let output_base = ndarray.getattr("view")?.call1((&output, ndarray))?;
+    if output_base.getattr("shape")?.extract::<Vec<usize>>()? != shape
+        || !output_base.getattr("dtype")?.eq(&dtype)?
     {
         return Err(PyTypeError::new_err("output array does not match request"));
     }
@@ -112,7 +116,7 @@ fn allocate_output<'py>(
     } else {
         request.axis
     };
-    writable(&output, &layout(&output, axis)?)?;
+    writable(&output_base, &layout(&output_base, axis)?)?;
     Ok(output)
 }
 
@@ -199,14 +203,14 @@ fn execute_key(
         .map(|raw| normalize_kth(raw, source.lane_len))
         .transpose()?;
     if request.output == Output::Inplace {
-        writable(a, &source)?;
+        writable(&base, &source)?;
     }
     let dtype = base.getattr("dtype")?;
     if source.total_len == 0 || source.lane_len == 0 {
         return if request.output == Output::Inplace {
             Ok(py.None())
         } else {
-            Ok(allocate_output(a, np, &source, request, &dtype)?.unbind())
+            Ok(allocate_output(a, np, &ndarray, &source, request, &dtype)?.unbind())
         };
     }
     let reported_dtype = a.getattr("dtype")?;
@@ -261,11 +265,12 @@ fn execute_key(
     let output = if request.output == Output::Inplace {
         a.clone()
     } else {
-        allocate_output(a, np, &source, request, &dtype)?
+        allocate_output(a, np, &ndarray, &source, request, &dtype)?
     };
     content_unchanged()?;
-    let target = layout(&output, out_axis)?;
-    writable(&output, &target)?;
+    let output_base = ndarray.getattr("view")?.call1((&output, &ndarray))?;
+    let target = layout(&output_base, out_axis)?;
+    writable(&output_base, &target)?;
     match request.output {
         Output::Indices => buffer::write_indices(&output, out_axis, &indices)?,
         _ => snapshot.write(&output, &ndarray, out_axis, &source, &target, &indices)?,

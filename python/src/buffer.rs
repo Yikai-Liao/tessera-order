@@ -129,7 +129,7 @@ impl<'py> PyBuf<'py> {
         if self.raw.readonly != 0 {
             return Err(PyValueError::new_err("buffer is read-only"));
         }
-        layout.non_overlapping(layout.itemsize)?;
+        layout.non_overlapping()?;
         Ok(())
     }
 }
@@ -268,7 +268,8 @@ impl Layout {
         }
     }
 
-    pub(crate) fn non_overlapping(&self, itemsize: usize) -> PyResult<()> {
+    pub(crate) fn non_overlapping(&self) -> PyResult<()> {
+        let itemsize = self.itemsize;
         // Empty layouts and zero-byte records occupy no bytes that could overlap.
         if self.total_len == 0 || itemsize == 0 {
             return Ok(());
@@ -1123,7 +1124,7 @@ mod tests {
         for (shape, strides, valid) in cases {
             let layout = Layout::from_shape(shape, strides, 4, Axis::Index(-1)).unwrap();
             assert_eq!(
-                layout.non_overlapping(4).is_ok(),
+                layout.non_overlapping().is_ok(),
                 valid,
                 "{:?} {:?}",
                 layout.shape,
@@ -1132,7 +1133,7 @@ mod tests {
         }
         let zero_byte =
             Layout::from_shape(vec![2, 2, 2], vec![1, 1, 1], 0, Axis::Index(-1)).unwrap();
-        assert!(zero_byte.non_overlapping(0).is_ok());
+        assert!(zero_byte.non_overlapping().is_ok());
     }
 
     #[test]
@@ -1156,7 +1157,7 @@ mod tests {
                                 offsets.sort_unstable();
                                 let expected = offsets.windows(2).all(|p| p[1] - p[0] >= 4);
                                 assert_eq!(
-                                    layout.non_overlapping(4).is_ok(),
+                                    layout.non_overlapping().is_ok(),
                                     expected,
                                     "{:?} {:?}",
                                     layout.shape,

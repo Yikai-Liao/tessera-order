@@ -24,7 +24,9 @@ def assert_array_partition(result, expected, ranks, key=None, descending=False):
     assert sorted(result, key=key, reverse=descending) == list(expected)
 
 
-def assert_index_partition(indices, expected_indices, ranks):
+def assert_index_partition(
+    indices, expected_indices, ranks, index_key, descending=False
+):
     ranks = [ranks] if isinstance(ranks, int) else ranks
     ranks = sorted({rank % len(expected_indices) for rank in ranks})
     assert sorted(indices) == list(range(len(expected_indices)))
@@ -32,6 +34,7 @@ def assert_index_partition(indices, expected_indices, ranks):
         assert indices[rank] == expected_indices[rank]
     for lo, hi in zip([-1, *ranks], [*ranks, len(expected_indices)]):
         assert sorted(indices[lo + 1 : hi]) == sorted(expected_indices[lo + 1 : hi])
+    assert sorted(indices, key=index_key, reverse=descending) == expected_indices
 
 
 def test_array_partition_assertion():
@@ -41,6 +44,11 @@ def test_array_partition_assertion():
         assert_array_partition(bad, expected, [0, 2, 5])
     valid = array.array("i", [0, 1, 1, 3, 2, 3])
     assert_array_partition(valid, expected, [0, 2, 5])
+    values = [3, 1, 3, 0, 2, 1]
+    order = [3, 1, 5, 4, 0, 2]
+    with pytest.raises(AssertionError):
+        assert_index_partition([3, 5, 1, 4, 0, 2], order, [0, 3], values.__getitem__)
+    assert_index_partition([3, 1, 5, 4, 0, 2], order, [0, 3], values.__getitem__)
 
 
 @pytest.mark.parametrize("typecode", "bBhHiIlLqQfd")
@@ -57,7 +65,9 @@ def test_array_operations(typecode, descending, threads):
         assert ts.argsort(a, axis, **opts) == expected_indices
         indices = ts.argpartition(a, [0, -1, 2, 2], axis, **opts)
         values = ts.partition(a, [0, -1, 2, 2], axis, **opts)
-        assert_index_partition(indices, expected_indices, [0, -1, 2, 2])
+        assert_index_partition(
+            indices, expected_indices, [0, -1, 2, 2], a.__getitem__, descending
+        )
         assert_array_partition(values, expected, [0, -1, 2, 2], descending=descending)
     assert a.tobytes() == before
     for axis in (-1, 0):
@@ -230,7 +240,13 @@ def test_key_operations(typecode, values, key, descending, threads):
                 assert copy.tobytes() == before
             if name.startswith("arg"):
                 if "partition" in name:
-                    assert_index_partition(result, expected_indices, [0, 2, -1])
+                    assert_index_partition(
+                        result,
+                        expected_indices,
+                        [0, 2, -1],
+                        lambda i: key(a[i]),
+                        descending,
+                    )
                 else:
                     assert result == expected_indices
                 continue

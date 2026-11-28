@@ -36,7 +36,7 @@ def assert_list_partition(result, expected, ranks, key=None, descending=False):
     assert all(x is y for x, y in zip(reordered, expected))
 
 
-def assert_index_partition(indices, order, ranks):
+def assert_index_partition(indices, order, ranks, index_key, descending=False):
     ranks = [ranks] if isinstance(ranks, int) else ranks
     ranks = sorted({rank % len(order) for rank in ranks})
     assert sorted(indices) == list(range(len(order)))
@@ -44,8 +44,8 @@ def assert_index_partition(indices, order, ranks):
         assert indices[rank] == order[rank]
     for lo, hi in zip([-1, *ranks], [*ranks, len(order)]):
         assert sorted(indices[lo + 1 : hi]) == sorted(order[lo + 1 : hi])
-    positions = {index: pos for pos, index in enumerate(order)}
-    assert sorted(indices, key=positions.__getitem__) == order
+    # Stable sort by actual ordering key must preserve equal-key source order in every region.
+    assert sorted(indices, key=index_key, reverse=descending) == order
 
 
 def test_list_partition_assertion():
@@ -58,11 +58,16 @@ def test_list_partition_assertion():
     valid = expected.copy()
     valid[1], valid[2] = valid[2], valid[1]
     assert_list_partition(valid, expected, [0, 3, 4])
-    # Duplicate object references must still check exact source indices for argpartition.
+    # Duplicate object references and equal-key tie order must both be enforced for argpartition.
+    values = [2, 1, 2, 2, 0]
     order = [4, 1, 0, 2, 3]
     with pytest.raises(AssertionError):
-        assert_index_partition([4, 1, 2, 0, 3], order, [0, 2, 4])
-    assert_index_partition([1, 4, 0, 3, 2], order, [2])
+        assert_index_partition([4, 1, 2, 0, 3], order, [0, 2, 4], values.__getitem__)
+    # Reversing two equal-key indices (2 and 3) inside the same region must fail.
+    with pytest.raises(AssertionError):
+        assert_index_partition([4, 1, 0, 3, 2], order, [0, 2], values.__getitem__)
+    # Swapping distinct-key indices (4 and 1) inside the same region remains valid.
+    assert_index_partition([1, 4, 0, 2, 3], order, [2], values.__getitem__)
 
 
 def check_operations(a, key=None, descending=False, threads=1):
@@ -97,7 +102,9 @@ def check_operations(a, key=None, descending=False, threads=1):
             assert sorted(map(id, result)) == sorted(map(id, a))
         if "partition" in name:
             if name.startswith("arg"):
-                assert_index_partition(result, order, ranks)
+                assert_index_partition(
+                    result, order, ranks, values.__getitem__, descending
+                )
             else:
                 assert_list_partition(result, expected, ranks, key, descending)
         elif name.startswith("arg"):
@@ -167,7 +174,9 @@ def test_float_bits(descending, threads):
         inplace = a.copy()
         ts.partition_inplace(inplace, kth, descending=descending, threads=threads)
         float_key = lambda x: (math.isnan(x), -x if descending else x)
-        assert_index_partition(indices, expected_order, kth)
+        assert_index_partition(
+            indices, expected_order, kth, lambda i: float_key(a[i]), False
+        )
         for result in (part, inplace):
             assert_list_partition(result, expected, kth, float_key, False)
 
@@ -282,7 +291,7 @@ def test_key_exception_and_partition_ranks(name):
                 continue
             order = sorted(range(len(a)), key=a.__getitem__)
             if name.startswith("arg"):
-                assert_index_partition(result, order, kth)
+                assert_index_partition(result, order, kth, a.__getitem__)
             else:
                 assert_list_partition(result, [a[i] for i in order], kth)
 
@@ -304,7 +313,7 @@ def test_large_lists(threads):
             assert result is None
             assert_list_partition(work, expected, [0, 10000, -1])
         elif fn is ts.argpartition:
-            assert_index_partition(result, expected_order, [0, 10000, -1])
+            assert_index_partition(result, expected_order, [0, 10000, -1], a.__getitem__)
         else:
             assert_list_partition(result, expected, [0, 10000, -1])
 

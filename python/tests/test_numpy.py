@@ -904,7 +904,7 @@ def test_key_rejects_object_destination_for_raw_snapshot(monkeypatch):
     output = np.array([first, second], dtype=object).view(LyingDType)
     before = (sys.getrefcount(first), sys.getrefcount(second))
     monkeypatch.setattr(np, "empty", lambda *args, **kwargs: output)
-    with pytest.raises(TypeError, match="not POD"):
+    with pytest.raises(TypeError, match="output array does not match request|not POD"):
         ts.sort(np.array([2, 1], dtype="i8"), key=int)
     assert output[0] is first and output[1] is second
     assert (sys.getrefcount(first), sys.getrefcount(second)) == before
@@ -1060,6 +1060,28 @@ def test_key_object_subclass_overridden_setitem(name):
         assert a[0] is r1 and a[2] is r3
     else:
         assert [a[0], a[1], a[2]] == [r1, r2, r3]
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+def test_key_subclass_lying_zero_itemsize_overlapping_rejected(name):
+    class ZeroItemsize(np.ndarray):
+        @property
+        def itemsize(self):
+            return 0
+
+    class Record:
+        def __init__(self, score):
+            self.score = score
+
+    r3, r1, r2 = Record(3), Record(1), Record(2)
+    backing = np.array([r3, r1, r2], dtype=object)
+    overlap = np.lib.stride_tricks.as_strided(
+        backing, shape=(2, 2), strides=(backing.strides[0], backing.strides[0])
+    ).view(ZeroItemsize)
+    args = ([0],) if "partition" in name else ()
+    with pytest.raises(ValueError, match="overlapping"):
+        getattr(ts, name)(overlap, *args, key=lambda r: r.score)
+    assert [backing[0], backing[1], backing[2]] == [r3, r1, r2]
 
 
 @pytest.mark.skipif(

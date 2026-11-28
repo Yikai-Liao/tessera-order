@@ -212,3 +212,22 @@ func TestOneWorkerIsParallel(t *testing.T) {
 		t.Fatalf("serial = %q, t1 = %q", serial, parallel)
 	}
 }
+
+// The bucket contract reduces the full encoded key: 2^64 mod 17 is 1, which a
+// low-word-only classifier would put in bucket 0.
+func TestCategoryUsesTheFullKey(t *testing.T) {
+	for _, tc := range []struct {
+		key   word
+		count int
+		want  int
+	}{
+		{word{Hi: 1}, 17, 1},
+		{word{}, 17, 0},
+		{word{Hi: 1, Lo: 16}, 17, 0},
+		{word{Hi: math.MaxUint64, Lo: math.MaxUint64}, 1000, 455},
+	} {
+		if got := category(tc.key, tc.count); got != tc.want {
+			t.Errorf("category(%v, %d) = %d, want %d", tc.key, tc.count, got, tc.want)
+		}
+	}
+}

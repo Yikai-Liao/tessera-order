@@ -69,8 +69,11 @@ func runParallel[T any, V encoded](records []T, e extractor[T, V], op Serial, wo
 	return nil
 }
 
-// runTasks joins the entire phase before propagating a worker panic. The
-// queue lock covers claims and cancellation and is released before user code.
+// runTasks joins the entire phase before propagating a worker panic. A worker
+// that leaves through runtime.Goexit has not finished its task, so the caller
+// leaves the same way after the join, as singleflight does, rather than
+// returning a partial result. The queue lock covers claims and cancellation
+// and is released before user code.
 func runTasks(workers, tasks int, run func(worker, task int)) {
 	if min(workers, tasks) <= 1 {
 		for task := range tasks {
@@ -82,22 +85,29 @@ func runTasks(workers, tasks int, run func(worker, task int)) {
 	var group sync.WaitGroup
 	var queue sync.Mutex
 	var panicValue any
+	exited := false
 	next := 0
 	for worker := range min(workers, tasks) {
 		group.Go(func() {
+			finished := false
 			defer func() {
-				if value := recover(); value != nil {
-					queue.Lock()
-					if panicValue == nil {
-						panicValue = value
-					}
-					queue.Unlock()
+				value := recover()
+				if finished {
+					return
 				}
+				queue.Lock()
+				if value == nil {
+					exited = true
+				} else if panicValue == nil {
+					panicValue = value
+				}
+				queue.Unlock()
 			}()
 			for {
 				queue.Lock()
-				if next == tasks || panicValue != nil {
+				if next == tasks || panicValue != nil || exited {
 					queue.Unlock()
+					finished = true
 					return
 				}
 				task := next
@@ -110,6 +120,9 @@ func runTasks(workers, tasks int, run func(worker, task int)) {
 	group.Wait()
 	if panicValue != nil {
 		panic(panicValue)
+	}
+	if exited {
+		runtime.Goexit()
 	}
 }
 

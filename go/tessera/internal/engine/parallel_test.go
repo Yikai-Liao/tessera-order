@@ -72,6 +72,24 @@ func TestParallelWorkerPanicStopsClaimingAndJoins(t *testing.T) {
 	}
 }
 
+func TestParallelWorkerGoexitExitsCaller(t *testing.T) {
+	var returned atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runTasks(2, 10, func(_, task int) {
+			if task == 0 {
+				runtime.Goexit()
+			}
+		})
+		returned.Store(true)
+	}()
+	<-done
+	if returned.Load() {
+		t.Fatal("runTasks returned after a worker called runtime.Goexit")
+	}
+}
+
 func TestParallelEntryGates(t *testing.T) {
 	indexGate := 4 * tileCapacity[int](tileBytes)
 	wordBytes := recordBytes[int]()

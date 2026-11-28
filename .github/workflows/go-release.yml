@@ -46,12 +46,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$RELEASE_TAG" --json tagName,body,isDraft > "$RUNNER_TEMP/github-release.json"; then
-            jq -e --arg tag "$RELEASE_TAG" --rawfile notes "$RUNNER_TEMP/release-notes.md" \
-              '.tagName == $tag and (.isDraft | not) and ((.body | rtrimstr("\n")) == ($notes | rtrimstr("\n")))' \
+          # A SemVer prerelease suffix makes the GitHub release a prerelease.
+          prerelease=$(jq -r '.version | contains("-")' "$RUNNER_TEMP/go-release.json")
+          if gh release view "$RELEASE_TAG" --json tagName,body,isDraft,isPrerelease > "$RUNNER_TEMP/github-release.json"; then
+            jq -e --arg tag "$RELEASE_TAG" --argjson prerelease "$prerelease" --rawfile notes "$RUNNER_TEMP/release-notes.md" \
+              '.tagName == $tag and (.isDraft | not) and .isPrerelease == $prerelease and ((.body | rtrimstr("\n")) == ($notes | rtrimstr("\n")))' \
               "$RUNNER_TEMP/github-release.json"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --latest=false
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --latest=false --prerelease="$prerelease"
           fi
       - name: Request indexing and verify the public module
         env:

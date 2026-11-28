@@ -120,11 +120,15 @@ pub enum ParallelSort {
 pub(crate) struct RecordType {
     pub(crate) id: String,
     bytes: usize,
+    #[serde(default)]
+    pub(crate) collection: bool,
 }
 /// A supported input distribution.
 #[derive(Deserialize)]
 struct Distribution {
     id: String,
+    #[serde(default)]
+    collection: bool,
 }
 /// An operation's identity and the order of its identity parameters.
 #[derive(Deserialize)]
@@ -132,6 +136,8 @@ struct OperationEntry {
     id: String,
     /// The implementation whose serial column every case of this operation pairs as a control.
     reference: String,
+    #[serde(default)]
+    collection: bool,
     #[serde(default)]
     parameters: Vec<Parameter>,
 }
@@ -247,6 +253,14 @@ pub(crate) fn operation_reference(operation: &Operation) -> &'static str {
         .reference
 }
 
+pub(crate) fn comparison_control(operation: &Operation) -> &'static str {
+    if operation.is_collection() {
+        operation_reference(operation)
+    } else {
+        "tessera"
+    }
+}
+
 /// Decodes a canonical nonnegative integer identity component.
 fn parse_count(text: &str) -> Option<usize> {
     (text == "0" || (!text.starts_with('0') && text.bytes().all(|b| b.is_ascii_digit())))
@@ -324,8 +338,26 @@ impl InputCase {
             len,
             operation: serde_json::from_value(operation.into()).map_err(|_| invalid())?,
         };
-        case.operation.validate(len)?;
+        case.validate()?;
         Ok(case)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let collection = self.operation.is_collection();
+        if !catalog()
+            .types
+            .iter()
+            .any(|ty| ty.id == self.ty && ty.collection == collection)
+            || !catalog().distributions.iter().any(|d| {
+                d.id == self.distribution && (d.id == "random" || d.collection == collection)
+            })
+        {
+            return Err(format!("input axes do not match operation: {}", self.id()));
+        }
+        if collection && self.len > (1 << 29) {
+            return Err("collection input exceeds the supported key domain".into());
+        }
+        self.operation.validate(self.len)
     }
 
     /// Formats the Criterion group `rust/<case>`, whose functions are executions.
@@ -530,14 +562,21 @@ impl Plan {
     pub fn cases(&self) -> Result<Vec<(InputCase, Vec<Execution>)>, String> {
         let mut cases = BTreeMap::<InputCase, BTreeSet<Execution>>::new();
         for rule in &self.include {
-            let types = rule
-                .types
-                .clone()
-                .unwrap_or_else(|| catalog().types.iter().map(|ty| ty.id.clone()).collect());
+            let operation = rule.operation.clone().unwrap_or_default();
+            let collection = operation.is_collection();
+            let types = rule.types.clone().unwrap_or_else(|| {
+                catalog()
+                    .types
+                    .iter()
+                    .filter(|ty| ty.collection == collection)
+                    .map(|ty| ty.id.clone())
+                    .collect()
+            });
             let distribution_ids = rule.distributions.clone().unwrap_or_else(|| {
                 catalog()
                     .distributions
                     .iter()
+                    .filter(|d| d.id == "random" || d.collection == collection)
                     .map(|d| d.id.clone())
                     .collect()
             });
@@ -549,7 +588,6 @@ impl Plan {
                     .map(|&len| Length::Count(len))
                     .collect()
             });
-            let operation = rule.operation.clone().unwrap_or_default();
             let executions = rule
                 .executions
                 .clone()
@@ -569,7 +607,10 @@ impl Plan {
                             .filter(|&e| !self.exclude.iter().any(|rule| rule.matches(&case, e)))
                             .collect();
                         if !surviving.is_empty() {
-                            case.operation.validate(case.len)?;
+                            case.validate()?;
+                            if collection && surviving.iter().any(|&e| e != Execution::Serial) {
+                                return Err("ordered collections require serial execution".into());
+                            }
                             cases.entry(case).or_default().extend(surviving);
                         }
                     }
@@ -704,8 +745,35 @@ mod tests {
 
     #[test]
     fn catalog_names_every_operation() {
-        let ids: Vec<_> = catalog().operations.iter().map(|o| o.id.as_str()).collect();
+        let ids: Vec<_> = catalog()
+            .operations
+            .iter()
+            .filter(|o| !o.collection)
+            .map(|o| o.id.as_str())
+            .collect();
         assert_eq!(ids, ["sort", "argsort", "select_nth", "partition-buckets"]);
+        let plan = Plan::parse(include_str!("../../plans/collections-smoke.toml")).unwrap();
+        let collection_cases = plan.cases().unwrap();
+        let kinds: BTreeSet<_> = collection_cases
+            .iter()
+            .map(|(case, _)| case.operation.kind())
+            .collect();
+        assert_eq!(
+            kinds,
+            catalog()
+                .operations
+                .iter()
+                .filter(|o| o.collection)
+                .map(|o| o.id.as_str())
+                .collect()
+        );
+        for (case, _) in collection_cases {
+            assert_eq!(
+                serde_json::to_value(&case.operation).unwrap()["kind"],
+                case.operation.kind()
+            );
+            assert_eq!(InputCase::parse_id(&case.id()).unwrap(), case);
+        }
         for operation in [
             Operation::Sort {},
             Operation::Argsort {},

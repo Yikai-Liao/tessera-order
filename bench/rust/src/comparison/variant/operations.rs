@@ -313,6 +313,7 @@ pub(super) fn prepare<T: TesseraAdapter>(
             ),
             _ => return None,
         }),
+        _ => None,
     }
 }
 

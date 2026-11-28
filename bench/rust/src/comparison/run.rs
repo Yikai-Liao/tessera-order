@@ -79,7 +79,10 @@ pub(super) fn validate_controls(
             .into());
         }
         let input = super::record::CaseInput::new(&case.probe());
-        for name in ["tessera", crate::plan::operation_reference(&case.operation)] {
+        for name in [
+            crate::plan::comparison_control(&case.operation),
+            crate::plan::operation_reference(&case.operation),
+        ] {
             let control = variants
                 .iter()
                 .find(|v| v.name == name)
@@ -107,13 +110,14 @@ pub(super) fn measure_case(
 ) -> super::Result<()> {
     let input = super::record::CaseInput::new(case);
     let mut active = columns.to_vec();
+    let control_name = crate::plan::comparison_control(&case.operation);
     let control = active
         .iter()
-        .find(|(v, e)| v.name == "tessera" && *e == Execution::Serial)
+        .find(|(v, e)| v.name == control_name && *e == Execution::Serial)
         .copied()
         .ok_or_else(|| {
             format!(
-                "required control tessera/serial does not support {}",
+                "required control {control_name}/serial does not support {}",
                 case.id()
             )
         })?;
@@ -140,7 +144,12 @@ pub(super) fn measure_case(
                 case_id: case.id(),
                 group: case.group(),
                 column: if index == active.len() - 1 {
-                    "tessera-aa".into()
+                    if case.operation.is_collection() {
+                        "reference-aa"
+                    } else {
+                        "tessera-aa"
+                    }
+                    .into()
                 } else {
                     column_id(variant, execution)
                 },

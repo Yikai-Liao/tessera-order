@@ -1,0 +1,562 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 3
+implementations = ["std-btree", "sorted-vec", "blart", "indexset", "index-db"]
+
+[[include]]
+operation = { kind = "map-build" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-insert-random" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-insert-random" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-insert-random" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-insert-ascending" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-insert-ascending" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-insert-ascending" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-hit", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-get-miss", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-insert-new" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-insert-new" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-insert-new" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-insert-overwrite" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-insert-overwrite" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-insert-overwrite" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-remove" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-remove" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-remove" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-iterate" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-iterate" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-iterate" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-first" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-first" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-first" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-last" }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-last" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-last" }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 50, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-rank", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-select", hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 0 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random", "dense", "clustered"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["random"]
+lengths = [1024, 65536, 1048576]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 90 }
+types = ["map_u32_u32", "map_u64_payload32", "set_u64"]
+distributions = ["dense", "clustered"]
+lengths = [65536]

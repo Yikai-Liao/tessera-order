@@ -13,8 +13,9 @@ Run `bun run tools` from the repository root after `bun install --frozen-lockfil
 | Compare fixed-work counters | `bun run tools compare counters COMMIT` | Verified serial batches with Callgrind instruction and simulated cache/branch counts |
 | Probe local PMU access | `bun run tools compare probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare linked source revisions | `bun run tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation and retained executables |
-| Compare implementations | `bun run tools compare implementations` | Registered implementations in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
+| Compare implementations | `bun run tools compare implementations` | Registered implementations in one timing executable, three shuffled blocks by default, two control calls for A/A (Tessera, or std for collections), verification and allocation measurement |
 | Local parallel comparison | `bun run tools compare implementations --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
+| Compare ordered collections | `bun run tools compare implementations --plan collections-smoke` | Ordered maps and sets against `BTreeMap`, with a std A/A control; [collection comparisons](#ordered-collection-comparisons) |
 | Full implementation comparison | `bun run tools compare implementations --plan release` | Release coverage and native opponents |
 | Resume an interrupted comparison | `bun run tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `bun run --silent tools plan NAME` | Validated selection without compiling or measuring |
@@ -234,7 +235,7 @@ New plans admit four operations. Admission is for a caller-visible result worth 
 - **Selection.** Tessera calls `select_nth` or `select_nth_by_key`. `std-stable`, the denominator, and Glidesort, Radsort and the optional `tessera-full` control sort the whole input as semantic references, not as partial selectors. `std-unstable` uses partial selection and may choose arbitrary equal-key members, including on payload records; so do Highway's `VQSelect` and x86-simd-sort's `qselect`, the dedicated SIMD selectors, on `u32` and `u64` keys. It must still return the correct ranked key, partition membership by key and preserve every record. Stable routes also preserve the exact stable member identities at the rank and on each side. Ratios between these routes do not isolate the cost of stability.
 - **Bucket partition.** The category is the encoded key modulo R, not the complete original key. Tessera calls `sort_by_cached_key` using the narrowest unsigned key width that represents the categories, then computes offsets. On inputs of at least two records, the cached-key sort evaluates the classifier once per record; the offset pass evaluates it again. `std-stable`, Glidesort, Radsort and `tessera-full` stably sort by the same category and compute the same offsets. These are sorting compositions, not dedicated output-buffer partition implementations. The checker verifies stable category order and every offset.
 
-`compare implementations` measures one operation at a time; parallel executions apply to operations with a parallel entry point (`sort` and `argsort`). Typed Rust preparation admits only supported adapter/input pairs; every case's manifest records each measured column's route, the exact call it makes, and each omission, and reports list them under Capabilities. Tessera and the operation's serial denominator are required controls for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
+`compare implementations` measures one operation per session; a collection preset that mixes operations shares one build across one session per operation and parameter set. Parallel executions apply to operations with a parallel entry point (`sort` and `argsort`). Typed Rust preparation admits only supported adapter/input pairs; every case's manifest records each measured column's route, the exact call it makes, and each omission, and reports list them under Capabilities. The operation's control (Tessera for array operations, `std-btree` for collections) and its serial denominator are required for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
 
 ```sh
 bun run --silent tools plan smoke --operation select_nth --index 32768 \
@@ -256,6 +257,56 @@ The timer covers each complete call, including scratch allocation, classificatio
 The separate allocation worker verifies one complete call for every admitted case and variant. Peak extra heap includes output: O(n) indices for argsort, O(R) offsets for bucket partition and no heap output for in-place selection. Memory rows retain peak extra heap and output bytes separately; reports estimate workspace by subtracting retained output bytes from peak extra heap.
 
 The manifest keeps the exact operation and frozen plan. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their cohorts and meaning. A non-sort report's speed table divides the operation's serial denominator's median time by each column's on the same case and states the denominator's route and stability; these speeds are not paired, so verdicts stay with the paired Tessera ratios in Full results.
+
+## Ordered-collection comparisons
+
+Collection operations measure ordered maps and sets behind one adapter interface. They answer whether a container beats `std::collections::BTreeMap` on every operation a caller performs and on retained memory, and how it compares with other ordered containers. The bench crate's `collections` feature carries the adapters and their benchmark-only dependencies; the library has none of them.
+
+| Implementation | Route | Role |
+|---|---|---|
+| `std-btree` | `BTreeMap` and `BTreeSet` | Denominator and A/A control for every operation it supports |
+| `sorted-vec` | Sorted `Vec<(K, V)>` with binary search | Layout control; denominator for rank and select, which std lacks |
+| `blart` | Adaptive radix tree over big-endian key bytes | Radix tree |
+| `indexset` | B-tree with rank and indexed select | Order-statistics B-tree |
+| `index-db` | B+ tree | B+ tree |
+
+Shapes are `map_u64_u64`, `map_u32_u32`, `map_u64_payload32` and `set_u64`. The case length is the number of distinct resident entries. Resident keys are `random`, `dense` (`0..n`) or `clustered` (a few dense runs at seeded offsets); insertion order is generated independently. Bulk input is shuffled and carries 10% extra duplicate keys with distinct values, and the last value wins.
+
+| Operation | Timed work | Parameters |
+|---|---|---|
+| `map-build` | Build from the unsorted, duplicate-bearing vector | |
+| `map-build-insert-random`, `map-build-insert-ascending` | Empty construction and `n` single inserts | |
+| `map-get-hit`, `map-get-miss` | A fixed lookup trace on a built and fully visited map | `hot_pct` |
+| `map-insert-new`, `map-insert-overwrite`, `map-remove` | A mutation trace on a freshly restored map | |
+| `map-range` | Bounded ranges that return exactly `visit_len` entries | `visit_len`, `hot_pct` |
+| `map-iterate` | One full in-order visit | |
+| `map-first`, `map-last` | Endpoint reads | |
+| `map-mixed` | Get, insert and remove calls; writes pair inserts with removals so the length stays constant | `write_pct`, `hot_pct` |
+| `map-rank`, `map-select` | Count of keys below a query; entry at a zero-based position | `hot_pct` |
+| `map-build-get` | Build plus the first `ceil(query_pct × n / 100)` lookups, with nothing in between | `query_pct`, `hot_pct` |
+
+`hot_pct = 90` sends 90% of queries to a fixed 1% window; `0` is uniform. Misses come from a disjoint key population. Point and mutation traces are capped at 4,096 calls. Lookup cases build and visit the map before the clock so that a container which defers ordering work pays it there; `map-build-get` charges that deferred work to the first queries instead, which makes deferred and eager designs comparable end to end. A bounded range passes both key bounds to the container, so an interface that visits a whole range is not charged for entries past the last one returned.
+
+The checker replays every trace against an independent model built from the input: each returned value, presence, endpoint, rank and selected entry, every visited sequence, and the final ordered contents. Results go to preallocated buffers inside the clock and are checked outside it.
+
+The memory worker records retained heap bytes per live entry twice: after `map-build`, and after `map-mixed`'s churn of `n` replacement pairs (remove one live key, insert one absent key) outside the clock. The first shows the built layout; the second shows the occupancy a container settles at under random updates. Counting starts before the owned input is created, so storage a container adopts from its input is counted. Peak bytes are kept separately.
+
+A collection session judges each case separately against the paired std column under the [shared statistic](#timing-and-statistics); rank and select report std as unsupported, not as a loss. Presets:
+
+| Preset | Coverage |
+|---|---|
+| `collections-smoke` | Every operation and shape at 16 entries, for correctness |
+| `collections-pilot` | 1,024 and 65,536 entries, to check hosted runtime and noise |
+| `collections-decision` | 1,024, 65,536 and 1,048,576 entries; all key distributions for `u64 → u64`, random keys for the other shapes plus dense and clustered at 65,536 |
+| `collections-large` | 16,777,216 `u64 → u64` entries: bulk build, build plus lookups, scans, iteration and retained memory |
+
+Collection evidence comes from GitHub-hosted runners, where every column of a case runs in the same shuffled blocks on one pinned CPU:
+
+```sh
+gh workflow run bench-diagnostics.yml --ref BRANCH -f mode=collections -f plan=collections-pilot
+```
+
+Each operation group is one job; results, journals and logs stay as 14-day artifacts, and `bun run tools report DIR` regenerates any downloaded directory. Collections are not part of PR revision feedback or main tracking.
 
 ## Local parallel comparisons
 

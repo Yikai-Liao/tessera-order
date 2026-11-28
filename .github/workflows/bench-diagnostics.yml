@@ -9,11 +9,16 @@ on:
       mode:
         description: Evidence to collect
         type: choice
-        options: [counters, layout]
+        options: [counters, layout, collections]
         default: counters
       baseline:
         description: Baseline commit (empty uses the selected head)
         type: string
+      plan:
+        description: Collection benchmark preset
+        type: choice
+        options: [collections-pilot, collections-decision, collections-large, collections-smoke]
+        default: collections-pilot
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ concurrency:
 
 jobs:
   evidence:
+    if: inputs.mode != 'collections'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -60,5 +66,54 @@ jobs:
         with:
           name: benchmark-diagnostics-${{ github.run_id }}
           path: bench/results/diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+  collection-matrix:
+    if: inputs.mode == 'collections'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - id: shards
+        env:
+          PLAN: ${{ inputs.plan }}
+        run: bun .github/scripts/collection-benchmarks.ts matrix "$PLAN"
+
+  collections:
+    needs: collection-matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.collection-matrix.outputs.matrix) }}
+    env:
+      CARGO_BUILD_JOBS: 4
+      PLAN: ${{ inputs.plan }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun .github/scripts/collection-benchmarks.ts run "$PLAN" "$SHARD"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: collection-benchmarks-${{ github.run_id }}-${{ matrix.shard }}
+          path: |
+            bench/results/diagnostics
+            !bench/results/diagnostics/**/bin/**
           retention-days: 14
           if-no-files-found: warn

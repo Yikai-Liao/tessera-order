@@ -18,6 +18,16 @@ pub fn end() -> usize {
     ACTIVE.store(false, Ordering::Relaxed);
     PEAK_BYTES.load(Ordering::Relaxed)
 }
+/// Reads the live bytes before the measured collection is dropped.
+///
+/// # Panics
+/// Panics if the measurement frees more bytes than it allocated.
+pub fn live_bytes() -> usize {
+    LIVE_BYTES
+        .load(Ordering::Relaxed)
+        .try_into()
+        .expect("negative retained bytes")
+}
 /// Records an allocation or deallocation in the active measurement.
 #[unsafe(no_mangle)]
 pub extern "C" fn bench_allocation_change(bytes: isize) {

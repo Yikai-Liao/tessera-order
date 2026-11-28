@@ -165,6 +165,7 @@ pub(super) fn prepare<T: NativeRecord>(
         }
         Operation::PartitionBuckets { .. } => return None,
         Operation::Sort {} => {}
+        _ => return None,
     }
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(implementation as u32, T::TYPE as u32) }?;

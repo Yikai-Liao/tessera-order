@@ -165,7 +165,7 @@ function terms(operation: Operation) {
 type Terms = ReturnType<typeof terms>;
 const DISTRIBUTION_GROUPS = [
   ...Map.groupBy(
-    catalog.distributions.filter((entry) => entry.group),
+    catalog.distributions.filter((entry) => entry.group && !entry.collection),
     (entry) => entry.group!,
   ),
 ].map(([title, entries]) => ({
@@ -182,7 +182,7 @@ const typeGroups = (t: Terms) =>
     ...group,
     title: `${group.keys ? "Keys" : "Records"} · against ${group.against}`,
     types: catalog.types
-      .filter((type) => (type.task === "keys") === group.keys)
+      .filter((type) => !type.collection && (type.task === "keys") === group.keys)
       .map((type) => [type.id, type.label, type.detail] as const),
   }));
 

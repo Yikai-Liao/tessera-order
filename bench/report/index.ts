@@ -6,6 +6,7 @@ import {
   catalog,
   columnId,
   executionThreads,
+  isCollection,
   type Operation,
   operationDescription,
   referenceColumn,
@@ -18,10 +19,9 @@ import {
   caseId,
   type Dataset,
   measurementId,
+  pairedColumns,
   type Summary,
   summarize,
-  TESSERA,
-  TESSERA_AA,
   types,
 } from "./model.ts";
 
@@ -86,21 +86,36 @@ export function collectWarnings(dataset: Dataset): string[] {
   return warnings;
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
-  let output =
-    "## Full results\n\nTimes include each complete call's scratch and mandatory output allocation. Ratios divide the column's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the column relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
-  const columns = [...dataset.manifest.columns.map((column) => column.id), TESSERA_AA];
-  output +=
-    "Each cell gives ratio, ns / input record, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the column is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
+  const operation = dataset.manifest.cases[0].operation;
+  const collection = isCollection(operation);
+  const { control, repeat } = pairedColumns(operation);
+  let output = collection
+    ? "## Full results\n\nTime ratios divide by the paired mean of " +
+      control +
+      ". Lower time and retained bytes are better. Bounds show the observed block range.\n\n"
+    : "## Full results\n\nTimes include each complete call's scratch and mandatory output allocation. Ratios divide the column's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the column relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
+  const columns = [...dataset.manifest.columns.map((column) => column.id), repeat];
+  output += collection
+    ? "Times are ns per lookup, mutation, endpoint, order-statistics call, or bounded scan. Builds, build-plus-query traces and full iteration use total ns.\n\n"
+    : "Each cell gives ratio, ns / input record, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the column is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
   for (const ty of new Set([...types, ...dataset.manifest.cases.map((c) => c.ty)])) {
     const rows: string[][] = [];
     const manifest = dataset.manifest;
     const build = "default";
     for (const c of manifest.cases.filter((c) => c.ty === ty)) {
-      const baseline = summaries.get(measurementId(build, caseId(c), TESSERA));
+      const baseline = summaries.get(measurementId(build, caseId(c), control));
       if (!baseline) continue;
       rows.push([
         c.distribution,
         c.len.toLocaleString("en-US"),
+        ...(collection
+          ? [
+              String(c.input_entries),
+              String(c.work_items),
+              String(c.cold_queries),
+              String(c.churn_pairs),
+            ]
+          : []),
         build,
         `${baseline.aaLow.toFixed(4)}–${baseline.aaHigh.toFixed(4)}`,
         ...columns.map((column) => {
@@ -111,15 +126,18 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
               measurementId(m.build, m.case_id, m.column) ===
               measurementId(build, caseId(c), column),
           );
-          const heap = memory
-            ? `${memory.peak_extra_bytes} B peak${memory.output_bytes !== undefined ? `<br>${memory.output_bytes} B output + ${memory.peak_extra_bytes - memory.output_bytes} B workspace peak` : ""}`
-            : "heap unmeasured";
-          return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${heap}`;
+          const heap =
+            memory?.retained_bytes !== undefined
+              ? `${memory.retained_bytes} B retained, ${(memory.retained_bytes / memory.live_entries!).toFixed(3)} B/entry<br>${memory.peak_extra_bytes} B peak`
+              : memory
+                ? `${memory.peak_extra_bytes} B peak${memory.output_bytes !== undefined ? `<br>${memory.output_bytes} B output + ${memory.peak_extra_bytes - memory.output_bytes} B workspace peak` : ""}`
+                : "heap unmeasured";
+          return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns${s.nsPerEntry === undefined ? "" : "<br>" + s.nsPerEntry.toFixed(3) + " ns/entry"}<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${heap}`;
         }),
       ]);
     }
     if (rows.length)
-      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", "Build", "A/A range", ...columns], rows)}\n</details>\n\n`;
+      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", ...(collection ? ["Input entries", "Calls per trace", "Cold queries", "Churn pairs"] : []), "Build", "A/A range", ...columns], rows)}\n</details>\n\n`;
   }
   return output;
 }
@@ -244,11 +262,13 @@ export async function writeReport(directories: string[], partial = false) {
     summaries = summarize(dataset),
     operation = dataset.manifest.cases[0].operation,
     sort = operation.kind === "sort",
+    collection = isCollection(operation),
+    { control, repeat } = pairedColumns(operation),
     charts = sort ? renderFigures(dataset, summaries) : [];
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
   let markdown = `# ${sort ? "Sorting comparison" : operationDescription(operation)}\n\n${partial ? "Partial plan; only completed groups are shown." : `${dataset.manifest.plan_name} plan.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
-  if (!sort)
+  if (!sort && !collection)
     markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by output count.\n\n`;
   markdown +=
     "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different columns, changing the prepared-buffer working set and cache behavior.\n\n";
@@ -278,11 +298,12 @@ export async function writeReport(directories: string[], partial = false) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.subject}\n\n${chart.summary}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
   }
-  if (!sort) markdown += renderReferenceSpeeds(dataset, summaries, operation);
+  if (!sort && !collection) markdown += renderReferenceSpeeds(dataset, summaries, operation);
   markdown += renderResults(dataset, summaries);
-  markdown +=
-    "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
-  if (!sort)
+  markdown += collection
+    ? "## Memory accounting\n\nRetained heap is measured after the bulk build or after the reported replacement pairs, before checking. Requested allocator bytes include buffers the collection retains.\n"
+    : "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
+  if (!sort && !collection)
     markdown +=
       "Mandatory heap output is allocated inside the measured call and included in peak extra heap bytes. Estimated workspace is the recorded peak minus retained output bytes. Calls without a heap-allocated result have zero output bytes. No sorting figures are generated for these result shapes.\n";
   await writeFile(join(out, "index.md"), markdown);
@@ -305,13 +326,15 @@ export async function writeReport(directories: string[], partial = false) {
     partial,
     protocol: "paired-blocks-aa",
     blocks: count,
-    ratio: "implementation / paired Tessera mean",
+    ratio: collection
+      ? "implementation / paired " + control + " mean"
+      : "implementation / paired Tessera mean",
     range: "observed block range",
     affinity: dataset.host.affinity ?? "unknown",
     // Ratios name the opponent: an opponent faster than Tessera is the actionable loss.
     ...resultSummary(
       [...summaries.values()]
-        .filter((row) => row.column !== TESSERA && row.column !== TESSERA_AA)
+        .filter((row) => row.column !== control && row.column !== repeat)
         .map((row) => ({ ...row, id: `${row.caseId}/${row.column}` })),
       "faster",
     ),

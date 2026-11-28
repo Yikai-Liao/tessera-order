@@ -124,7 +124,7 @@ impl Wide {
 }
 
 /// `SplitMix64` state used to draw reproducible input keys.
-pub struct SplitMix64(u64);
+pub struct SplitMix64(pub(crate) u64);
 
 impl SplitMix64 {
     /// Advances the generator and returns its next 64 bits.

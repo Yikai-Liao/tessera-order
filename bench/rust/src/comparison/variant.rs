@@ -2,6 +2,8 @@
 
 //! Operation adapters and restorable, verified batch kernels.
 
+#[cfg(feature = "collections")]
+pub(super) mod collections;
 #[cfg(feature = "operations")]
 pub(super) mod operations;
 #[cfg(feature = "rayon")]
@@ -233,6 +235,14 @@ pub trait Kernel {
     fn output_bytes(&self) -> usize {
         0
     }
+    /// Runs the retained-heap case in the allocation worker, if supported.
+    fn retained_heap(&mut self) -> Option<(usize, usize)> {
+        None
+    }
+    /// Route used for the after-churn heap checkpoint.
+    fn churn_route(&self) -> Option<&'static str> {
+        None
+    }
     /// Exact implementation route, retained in every case's capability evidence.
     fn description(&self) -> &'static str;
 }
@@ -319,6 +329,7 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
             });
         }
         Operation::Sort {} => {}
+        _ => unreachable!("collection operation in an array adapter"),
     }
     variant.prepare_call(input, "radsort::sort_by_key", move |values| {
         radsort::sort_by_key(values, key);
@@ -346,6 +357,7 @@ pub fn list_variants() -> Vec<Variant> {
                 || (implementation.adapter == "reference" && cfg!(feature = "operations"))
                 || (implementation.adapter == "rayon" && cfg!(feature = "rayon"))
                 || (implementation.adapter == "revision" && cfg!(tessera_bench_revisions))
+                || (implementation.adapter == "collections" && cfg!(feature = "collections"))
                 || implementation.adapter == "rust"
                 || (implementation.adapter == "native" && cfg!(feature = "compare-native"))
         })
@@ -450,13 +462,21 @@ impl Variant {
     /// The exact call this column makes, or none for an unsupported combination.
     /// A parallel capability probe never starts or warms a worker pool.
     pub(super) fn route(self, input: &CaseInput, execution: Execution) -> Option<&'static str> {
+        self.routes(input, execution).map(|(timed, _)| timed)
+    }
+
+    pub(super) fn routes(
+        self,
+        input: &CaseInput,
+        execution: Execution,
+    ) -> Option<(&'static str, Option<&'static str>)> {
         match execution {
             Execution::Serial => self
                 .prepare(input, execution, 0)
-                .map(|kernel| kernel.description()),
+                .map(|kernel| (kernel.description(), kernel.churn_route())),
             #[cfg(feature = "rayon")]
             Execution::Threads(_) if self.parallel(input.operation()) => {
-                Some(input.parallel_route(self.name))
+                Some((input.parallel_route(self.name), None))
             }
             Execution::Threads(_) => None,
         }
@@ -471,6 +491,15 @@ impl Variant {
         execution: Execution,
         scratch_bytes: usize,
     ) -> Option<Box<dyn Kernel>> {
+        #[cfg(feature = "collections")]
+        if let CaseInput::Collection(input) = input {
+            return (execution == Execution::Serial)
+                .then(|| collections::prepare(self.name, input))
+                .flatten();
+        }
+        if self.adapter == "collections" {
+            return None;
+        }
         if let Some(threads) = execution.threads() {
             if !self.parallel(input.operation()) {
                 return None;
@@ -504,6 +533,8 @@ impl Variant {
             LAYOUTS.get_or_init(super::native::check_layouts);
         }
         match (self.name, input) {
+            #[cfg(feature = "collections")]
+            (_, CaseInput::Collection(_)) => unreachable!(),
             ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
             ("radsort", CaseInput::OwnedRecord(v)) => {
                 Some(prepare_radsort(self, Rc::clone(v), |r| r.key))
@@ -544,6 +575,8 @@ impl CaseInput {
     /// Records offsets for current, baseline A, baseline B and current B in order.
     pub(super) fn revision_entries(&self) -> Vec<String> {
         match self {
+            #[cfg(feature = "collections")]
+            Self::Collection(_) => unreachable!(),
             Self::U32(_) => u32::revision_entries(),
             Self::U64(_) => u64::revision_entries(),
             Self::U128(_) => u128::revision_entries(),
@@ -565,7 +598,12 @@ mod tests {
     #[cfg(tessera_bench_revisions)]
     #[test]
     fn revisions_preserve_records() {
-        for ty in crate::plan::catalog().types.iter().map(|ty| &ty.id) {
+        for ty in crate::plan::catalog()
+            .types
+            .iter()
+            .filter(|ty| !ty.collection)
+            .map(|ty| &ty.id)
+        {
             for distribution in ["random", "equal", "reverse", "d16"] {
                 let input = CaseInput::new(&InputCase {
                     ty: ty.clone(),
@@ -604,7 +642,12 @@ mod tests {
 
     #[test]
     fn capabilities_match_preparation() {
-        for ty in crate::plan::catalog().types.iter().map(|ty| &ty.id) {
+        for ty in crate::plan::catalog()
+            .types
+            .iter()
+            .filter(|ty| !ty.collection)
+            .map(|ty| &ty.id)
+        {
             let input = CaseInput::new(&InputCase {
                 ty: ty.clone(),
                 distribution: "random".into(),
@@ -653,17 +696,21 @@ mod tests {
             }
             for operation in &operations {
                 let kind = operation.kind();
-                let supported = crate::plan::catalog().types.iter().any(|ty| {
-                    let input = CaseInput::new(&InputCase {
-                        ty: ty.id.clone(),
-                        distribution: "random".into(),
-                        len: 32,
-                        operation: operation.clone(),
+                let supported = crate::plan::catalog()
+                    .types
+                    .iter()
+                    .filter(|ty| !ty.collection)
+                    .any(|ty| {
+                        let input = CaseInput::new(&InputCase {
+                            ty: ty.id.clone(),
+                            distribution: "random".into(),
+                            len: 32,
+                            operation: operation.clone(),
+                        });
+                        variant.supports(&input, Execution::Serial)
+                            || (cfg!(feature = "rayon")
+                                && variant.supports(&input, "t2".parse().unwrap()))
                     });
-                    variant.supports(&input, Execution::Serial)
-                        || (cfg!(feature = "rayon")
-                            && variant.supports(&input, "t2".parse().unwrap()))
-                });
                 assert_eq!(
                     variant.implementation.routes.contains_key(kind),
                     supported,

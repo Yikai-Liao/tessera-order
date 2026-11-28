@@ -70,7 +70,7 @@ A cached Cargo target keeps workspace outputs, including native objects, keyed b
 
 The docs workflow builds and lints the figure engine for WebAssembly, runs the model and replay tests and site type checks, then builds the site and checks its links.
 
-The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch: fixed-work counters or a five-layout sample on the four serial inputs of the diagnostics plan, with an optional baseline. It has read-only permissions, no Cloud submission and a 45-minute timeout, and keeps results and logs as 14-day artifacts.
+The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch: fixed-work counters or a five-layout sample on the four serial inputs of the diagnostics plan, with an optional baseline. Its `collections` mode runs one [ordered-collection preset](benchmarking.md#ordered-collection-comparisons), one job per operation group, with a 120-minute timeout per job. It has read-only permissions and no Cloud submission, and keeps results and logs as 14-day artifacts; other modes time out after 45 minutes.
 
 ## Optional faster local tests
 

@@ -79,6 +79,54 @@ pub(super) fn selection<T: BenchmarkRecord>(
     Ok(())
 }
 
+#[cfg(feature = "collections")]
+pub(super) fn collection_sequence<T: PartialEq + std::fmt::Debug>(
+    label: &str,
+    expected: &[T],
+    results: &[T],
+) -> Result<(), String> {
+    if expected.len() != results.len() {
+        return Err(format!(
+            "{label}: expected {} entries, got {}",
+            expected.len(),
+            results.len()
+        ));
+    }
+    for (i, (expected, actual)) in expected.iter().zip(results).enumerate() {
+        if actual != expected {
+            return Err(format!(
+                "{label} at {i}: expected {expected:?}, got {actual:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "collections")]
+pub(super) fn collection_contents<T: PartialEq>(
+    expected: &[T],
+    visit: impl FnOnce(&mut dyn FnMut(T)),
+) -> Result<(), String> {
+    let mut index = 0;
+    let mut mismatch = None;
+    visit(&mut |actual| {
+        if expected.get(index) != Some(&actual) {
+            mismatch.get_or_insert(index);
+        }
+        index += 1;
+    });
+    if let Some(index) = mismatch {
+        return Err(format!("incorrect collection entry at index {index}"));
+    }
+    if index != expected.len() {
+        return Err(format!(
+            "expected {} collection entries, got {index}",
+            expected.len()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

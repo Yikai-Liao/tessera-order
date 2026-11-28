@@ -27,7 +27,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks|skills-update)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 3
-implementations = ["std-btree", "sorted-vec", "blart", "indexset", "index-db"]
+implementations = ["std-btree", "sorted-vec", "blart", "indexset", "index-db", "tessera-map", "tessera-bplus"]
 
 [[include]]
 operation = { kind = "map-build" }

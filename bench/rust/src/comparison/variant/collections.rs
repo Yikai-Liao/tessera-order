@@ -2,11 +2,13 @@
 
 mod adapters;
 mod input;
+mod prototypes;
 
 use super::Kernel;
 use crate::plan::{InputCase, Operation};
 use adapters::*;
 use input::{Action, Expected, Fixture, IntKey, Value};
+use prototypes::bplus::{BPlus, leaf_capacity};
 use std::{hint::black_box, mem, rc::Rc};
 
 /// Collection inputs retain their concrete key and value types.
@@ -41,19 +43,22 @@ impl CollectionInput {
 pub(super) fn prepare(name: &str, input: &CollectionInput) -> Option<Box<dyn Kernel>> {
     let operation = &input.case.operation;
     match &input.data {
-        Data::Map32(data) => map(name, operation, data),
-        Data::Map64(data) => map(name, operation, data),
-        Data::Wide(data) => map(name, operation, data),
+        Data::Map32(data) => map::<_, _, { leaf_capacity::<u32, u32>() }>(name, operation, data),
+        Data::Map64(data) => map::<_, _, { leaf_capacity::<u64, u64>() }>(name, operation, data),
+        Data::Wide(data) => {
+            map::<_, _, { leaf_capacity::<u64, [u8; 32]>() }>(name, operation, data)
+        }
         Data::Set(data) => match name {
             "std-btree" => kernel::<_, _, StdSet>(data, operation),
             "indexset" => kernel::<_, _, IndexedSet>(data, operation),
             "blart" => kernel::<_, _, ArtSet>(data, operation),
-            _ => map(name, operation, data),
+            "tessera-map" => kernel::<_, _, LazySet>(data, operation),
+            _ => map::<_, _, { leaf_capacity::<u64, ()>() }>(name, operation, data),
         },
     }
 }
 
-fn map<K: IntKey, V: Value>(
+fn map<K: IntKey, V: Value, const CAP: usize>(
     name: &str,
     operation: &Operation,
     data: &Rc<Fixture<K, V>>,
@@ -64,6 +69,8 @@ fn map<K: IntKey, V: Value>(
         "blart" => kernel::<_, _, ArtMap<K, V>>(data, operation),
         "indexset" => kernel::<_, _, IndexedMap<K, V>>(data, operation),
         "index-db" => kernel::<_, _, DbMap<K, V>>(data, operation),
+        "tessera-map" => kernel::<_, _, LazyMap<K, V>>(data, operation),
+        "tessera-bplus" => kernel::<_, _, BPlus<K, V, CAP>>(data, operation),
         _ => None,
     }
 }

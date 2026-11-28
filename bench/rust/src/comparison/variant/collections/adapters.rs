@@ -311,3 +311,103 @@ impl<K: IntKey, V: Value> Collection<K, V> for DbMap<K, V> {
         if last { iter.next_back() } else { iter.next() }.map(|(&k, &v)| (k, v))
     }
 }
+
+pub(super) struct LazyMap<K: tessera_order::RadixKey, V>(tessera_order::TesseraMap<K, V>);
+
+impl<K: IntKey, V: Value> Collection<K, V> for LazyMap<K, V> {
+    const NAME: &'static str = "TesseraMap";
+    const BUILD: &'static str = "TesseraMap::from(Vec)";
+    const ENDPOINTS: &'static str = "TesseraMap::first / last";
+
+    fn route(operation: &Operation) -> Option<&'static str> {
+        match operation {
+            Operation::MapRank { .. } => None,
+            Operation::MapSelect { .. } => Some("TesseraMap::select_nth"),
+            Operation::MapBuild {} | Operation::MapBuildGet { .. } => Some(Self::BUILD),
+            Operation::MapFirst {} | Operation::MapLast {} => Some(Self::ENDPOINTS),
+            _ => Some(Self::NAME),
+        }
+    }
+
+    fn empty() -> Self {
+        Self(tessera_order::TesseraMap::new())
+    }
+    fn build(entries: Vec<(K, V)>) -> Self {
+        Self(entries.into())
+    }
+    fn get(&self, key: K) -> Option<V> {
+        self.0.get(key).copied()
+    }
+    fn insert(&mut self, key: K, value: V) -> Option<V> {
+        self.0.insert(key, value)
+    }
+    fn remove(&mut self, key: K) -> Option<V> {
+        self.0.remove(key)
+    }
+    fn visit(&self, bounds: Option<(K, K)>, mut visit: impl FnMut((K, V))) {
+        if let Some((lo, hi)) = bounds {
+            self.0.range(lo..=hi, |k, &v| visit((k, v)));
+        } else {
+            self.0.range(.., |k, &v| visit((k, v)));
+        }
+    }
+    fn endpoint(&self, last: bool) -> Option<(K, V)> {
+        if last { self.0.last() } else { self.0.first() }.map(|(k, &v)| (k, v))
+    }
+    fn select(&self, index: usize) -> Option<(K, V)> {
+        self.0.select_nth(index).map(|(k, &v)| (k, v))
+    }
+}
+
+pub(super) struct LazySet(tessera_order::TesseraSet<u64>);
+
+impl Collection<u64, ()> for LazySet {
+    const NAME: &'static str = "TesseraSet";
+    const BUILD: &'static str = "TesseraSet::from(Vec)";
+    const ENDPOINTS: &'static str = "TesseraSet::first / last";
+
+    fn route(operation: &Operation) -> Option<&'static str> {
+        match operation {
+            Operation::MapRank { .. } => None,
+            Operation::MapSelect { .. } => Some("TesseraSet::select_nth"),
+            Operation::MapBuild {} | Operation::MapBuildGet { .. } => Some(Self::BUILD),
+            Operation::MapFirst {} | Operation::MapLast {} => Some(Self::ENDPOINTS),
+            _ => Some(Self::NAME),
+        }
+    }
+
+    fn empty() -> Self {
+        Self(tessera_order::TesseraSet::new())
+    }
+    fn build(entries: Vec<(u64, ())>) -> Self {
+        Self(
+            entries
+                .into_iter()
+                .map(|(k, ())| k)
+                .collect::<Vec<_>>()
+                .into(),
+        )
+    }
+    fn get(&self, key: u64) -> Option<()> {
+        self.0.contains(key).then_some(())
+    }
+    fn insert(&mut self, key: u64, (): ()) -> Option<()> {
+        (!self.0.insert(key)).then_some(())
+    }
+    fn remove(&mut self, key: u64) -> Option<()> {
+        self.0.remove(key).then_some(())
+    }
+    fn visit(&self, bounds: Option<(u64, u64)>, mut visit: impl FnMut((u64, ()))) {
+        if let Some((lo, hi)) = bounds {
+            self.0.range(lo..=hi, |k| visit((k, ())));
+        } else {
+            self.0.range(.., |k| visit((k, ())));
+        }
+    }
+    fn endpoint(&self, last: bool) -> Option<(u64, ())> {
+        if last { self.0.last() } else { self.0.first() }.map(|k| (k, ()))
+    }
+    fn select(&self, index: usize) -> Option<(u64, ())> {
+        self.0.select_nth(index).map(|k| (k, ()))
+    }
+}

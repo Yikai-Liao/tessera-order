@@ -45,6 +45,8 @@ implementations = [
   { id = "blart", label = "blart", stable = true, family = "Ordered collections", adapter = "collections" },
   { id = "indexset", label = "indexset", stable = true, family = "Ordered collections", adapter = "collections" },
   { id = "index-db", label = "index-db", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "tessera-map", label = "Tessera map (#320, lazy)", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "tessera-bplus", label = "Counted B+ tree (prototype)", stable = true, family = "Ordered collections", adapter = "collections" },
 ]
 
 types = [

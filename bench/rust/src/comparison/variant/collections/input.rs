@@ -8,7 +8,7 @@ use crate::{
 use blart::{AsBytes, Mapped, NoPrefixesBytes, ToUBE};
 use std::{collections::BTreeMap, fmt::Debug};
 
-pub(super) trait IntKey: Ord + Copy + Debug + 'static {
+pub(super) trait IntKey: tessera_order::RadixKey + Ord + Debug + 'static {
     type Art: AsBytes + NoPrefixesBytes + Ord + Copy;
     const BITS: u32;
     fn from_u64(value: u64) -> Self;

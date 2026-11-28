@@ -243,7 +243,7 @@ async function retryLiveRefresh() {
       if (activeSeededMonth) {
         staleNotice.value =
           "Live refresh failed; showing the site's build-time snapshot. Newer measurements may be missing.";
-      } else {
+      } else if (!index.value || months.value.some((month) => !journals.value.has(month))) {
         fail(cause);
       }
     }

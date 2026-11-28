@@ -204,6 +204,13 @@ function clearOnEscape(event: KeyboardEvent) {
         </span>
       </a>
     </div>
+    <p v-if="view !== 'headlines' && staleNotice && !error" class="notice stale-notice" role="status">
+      {{ staleNotice }}
+      <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
+        {{ retrying ? "Retrying…" : "Retry" }}
+      </button>
+      · <a :href="props.source" target="_blank" rel="noopener">Live comparison.json</a>
+    </p>
     <p v-if="view === 'headlines'" class="proof-foot">
       <span v-if="staleNotice" role="status">
         {{ staleNotice }}
@@ -221,13 +228,6 @@ function clearOnEscape(event: KeyboardEvent) {
       No cross-implementation figure is published yet.
     </p>
     <template v-else>
-      <p v-if="staleNotice" class="notice stale-notice" role="status">
-        {{ staleNotice }}
-        <button type="button" class="stale-retry" :disabled="retrying" @click="refreshLive">
-          {{ retrying ? "Retrying…" : "Retry" }}
-        </button>
-        · <a :href="props.source" target="_blank" rel="noopener">Live comparison.json</a>
-      </p>
       <template v-if="view === 'all'">
         <p class="lead">
           <strong>How to read the figures.</strong> In a speed figure each dot is one implementation,

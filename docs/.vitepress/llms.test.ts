@@ -206,15 +206,21 @@ test("every page has a clean mirror, unique metadata and exactly one audience ti
   assert.ok(
     chapters.every((position, i) => position >= 0 && (i === 0 || position > chapters[i - 1])),
   );
-  // Reordering chapters in docs/explain/index.md#reading-order must reorder sections and bundles directly.
+  // Reordering chapters in docs/explain/index.md#reading-order must reorder sections and bundles directly,
+  // while cross-reference links inside descriptions must not affect chapter order.
   const swapped = explainReadingOrder(
-    "## Reading order\n\n| Page | Notes |\n|---|---|\n| [Keys](keys.md) | a |\n| [Radix](radix-sort.md) | b |\n\n## Memory\n",
+    "## Reading order\n\n| Page | You will learn |\n|---|---|\n| [Keys](keys.md) | see [tiles](tiles.md) first |\n| [Radix](radix-sort.md) | intro |\n| [Tiles](tiles.md) | leaf |\n\n## Memory\n",
   );
   const reordered = pageSections(catalog.pages, swapped)
     .find((s) => s.id === "explain")!
-    .pages.slice(0, 3)
+    .pages.slice(0, 4)
     .map((p) => p.sitePath);
-  assert.deepEqual(reordered, ["explain/index.md", "explain/keys.md", "explain/radix-sort.md"]);
+  assert.deepEqual(reordered, [
+    "explain/index.md",
+    "explain/keys.md",
+    "explain/radix-sort.md",
+    "explain/tiles.md",
+  ]);
   const figureMirror = await readFile(join(outDir, "development/benchmark-figures.md"), "utf8");
   assert.ok(figureMirror.includes("Tessera 2.6×") && figureMirror.includes("fluxsort 1.5×"));
 });

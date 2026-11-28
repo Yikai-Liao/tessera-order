@@ -60,8 +60,14 @@ export function explainReadingOrder(raw: string): string[] {
   const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
   const seen = new Set<string>(["explain/index.md"]);
   const order = ["explain/index.md"];
-  for (const [, target] of section.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)/g)) {
-    if (/^[a-z][a-z0-9+.-]*:|\.\./i.test(target)) continue;
+  for (const line of section.split("\n")) {
+    // Only chapter-entry links (the table's Page column or top-level list items) define order;
+    // cross-reference links inside descriptions must not reorder chapters.
+    const match =
+      line.match(/^\s*\|\s*\[[^\]]+\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)\s*\|/) ??
+      line.match(/^\s*(?:[-*]|\d+\.)\s*\[[^\]]+\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)/);
+    const target = match?.[1];
+    if (!target || /^[a-z][a-z0-9+.-]*:|\.\./i.test(target)) continue;
     const normalized = `explain/${target.replace(/^\.\//, "")}`;
     if (!seen.has(normalized)) {
       seen.add(normalized);

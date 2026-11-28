@@ -173,34 +173,40 @@ function fail(cause: unknown) {
   error.value =
     cause instanceof DataError ? cause.message : "The performance data could not be displayed.";
 }
-const months = computed(() => {
+const months = computed<string[]>((previous) => {
   const start = from.value.slice(0, 7);
   const end = to.value.slice(0, 7);
-  return (index.value?.months ?? []).filter(
+  const next = (index.value?.months ?? []).filter(
     (month) => (!start || month >= start) && (!end || month <= end),
   );
+  // Keep reference stability when live index confirms the same months so in-flight range loads
+  // started from the build snapshot are not aborted and fetched twice.
+  return previous && previous.length === next.length && previous.every((m, i) => m === next[i])
+    ? previous
+    : next;
 });
-async function refreshLive(source: string, signal: AbortSignal) {
+async function refreshLive(source: string, signal: AbortSignal, retryMissing = false) {
   const text = await download(source, "index.json", signal);
   const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
   if (signal.aborted) return;
-  if (activeSeededMonth) {
-    const start = from.value.slice(0, 7);
-    const end = to.value.slice(0, 7);
-    const needed = liveIndex.months.filter(
-      (month) => (!start || month >= start) && (!end || month <= end),
-    );
-    const batches = await Promise.all(
-      needed.map(async (month) => {
-        const raw = await download(source, `${month}.jsonl`, signal);
-        return [month, readable(() => parseRuns(raw))] as const;
-      }),
-    );
-    if (signal.aborted) return;
-    // Evict the provisional snapshot month so changing ranges during initial refresh never
-    // leaves stale build-time data cached for that month.
+  const start = from.value.slice(0, 7);
+  const end = to.value.slice(0, 7);
+  const inRange = liveIndex.months.filter(
+    (month) => (!start || month >= start) && (!end || month <= end),
+  );
+  const toFetch = inRange.filter(
+    (month) => month === activeSeededMonth || (retryMissing && !journals.value.has(month)),
+  );
+  const batches = await Promise.all(
+    toFetch.map(async (month) => {
+      const raw = await download(source, `${month}.jsonl`, signal);
+      return [month, readable(() => parseRuns(raw))] as const;
+    }),
+  );
+  if (signal.aborted) return;
+  if (activeSeededMonth || batches.length) {
     const next = new Map(journals.value);
-    next.delete(activeSeededMonth);
+    if (activeSeededMonth) next.delete(activeSeededMonth);
     for (const [month, runs] of batches) next.set(month, runs);
     journals.value = next;
     activeSeededMonth = null;
@@ -216,7 +222,7 @@ async function retryLiveRefresh() {
   liveController = controller;
   retryingLive.value = true;
   try {
-    await refreshLive(props.source, controller.signal);
+    await refreshLive(props.source, controller.signal, true);
   } catch (cause) {
     if (!controller.signal.aborted) {
       console.error("Performance history:", cause);

@@ -8,6 +8,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  TESSERA_REQUIRE_VECTORS: '1'
 
 jobs:
   # The check name defaults to the job id plus the matrix values. A skipped job

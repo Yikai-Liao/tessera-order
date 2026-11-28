@@ -2,9 +2,10 @@
 
 //! Batch timing and paired block scheduling.
 
-use super::{InputCase, variant::Kernel, variant::Variant};
+use super::{InputCase, go, record, variant::Kernel, variant::Variant};
 use crate::plan::{Column, Execution};
 use serde::Serialize;
+use std::{cell::LazyCell, fs::File, path::Path};
 
 /// Fixed block budget and limits for calibrating each verified sample.
 pub(super) struct Sampling {
@@ -34,8 +35,16 @@ pub(super) fn calibrate(
     prepared_cap_bytes: usize,
 ) -> Result<usize, String> {
     let elapsed = k.measure_batch(1)?.as_nanos().max(1) as u64;
-    Ok(((min_sample_ns.div_ceil(elapsed)) as usize)
-        .clamp(1, (prepared_cap_bytes / k.buffer_bytes()).max(1)))
+    Ok(batch_count(
+        min_sample_ns,
+        prepared_cap_bytes,
+        elapsed,
+        k.buffer_bytes(),
+    ))
+}
+
+fn batch_count(min_sample_ns: u64, prepared_cap_bytes: usize, elapsed: u64, bytes: usize) -> usize {
+    (min_sample_ns.div_ceil(elapsed) as usize).clamp(1, (prepared_cap_bytes / bytes).max(1))
 }
 /// Shuffles adapter slots reproducibly from the case identity and block.
 pub(super) fn shuffle_variants(n: usize, block: usize, c: &InputCase) -> Vec<usize> {
@@ -103,9 +112,11 @@ pub(super) fn measure_case(
     scratch_bytes: usize,
     sampling: &Sampling,
     build: &str,
+    go_worker: Option<(&Path, &File)>,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
-    let input = super::record::CaseInput::new(case);
+    let input = record::CaseInput::new(case);
+    let digest = LazyCell::new(|| format!("{:016x}", record::input_digest(&input)));
     let mut active = columns.to_vec();
     let control = active
         .iter()
@@ -124,17 +135,39 @@ pub(super) fn measure_case(
             .enumerate()
         {
             let (variant, execution) = active[index];
-            let mut kernel = variant.prepare(&input, execution, scratch_bytes).unwrap();
-            let batch = calibrate(
-                &mut *kernel,
-                sampling.min_sample_ns,
-                sampling.prepared_cap_bytes,
-            )?;
-            let elapsed_ns = kernel
-                .measure_batch(batch)
-                .map_err(|e| format!("{} {}: {e}", case.id(), column_id(variant, execution)))?
-                .as_nanos()
-                .max(1) as u64;
+            let (batch, elapsed_ns) = if variant.adapter == "go" {
+                let (binary, lock) = go_worker.ok_or("missing Go worker")?;
+                let mut worker = go::Worker::start(binary, execution, Some(lock))?;
+                let ready = worker.case("prepare", variant.name, case, execution)?;
+                go::check_input_digest(case, variant.name, &digest, &ready)?;
+                let bytes = ready["buffer_bytes"]
+                    .as_u64()
+                    .filter(|&n| n > 0)
+                    .ok_or("invalid Go batch buffer size")?;
+                let bytes = usize::try_from(bytes)?;
+                let warm = worker.batch(1)?.as_nanos().max(1) as u64;
+                let batch = batch_count(
+                    sampling.min_sample_ns,
+                    sampling.prepared_cap_bytes,
+                    warm,
+                    bytes,
+                );
+                let elapsed = worker.batch(batch)?.as_nanos().max(1) as u64;
+                (batch, elapsed)
+            } else {
+                let mut kernel = variant.prepare(&input, execution, scratch_bytes).unwrap();
+                let batch = calibrate(
+                    &mut *kernel,
+                    sampling.min_sample_ns,
+                    sampling.prepared_cap_bytes,
+                )?;
+                let elapsed = kernel
+                    .measure_batch(batch)
+                    .map_err(|e| format!("{} {}: {e}", case.id(), column_id(variant, execution)))?
+                    .as_nanos()
+                    .max(1) as u64;
+                (batch, elapsed)
+            };
             publish(Sample {
                 kind: "sample",
                 case_id: case.id(),

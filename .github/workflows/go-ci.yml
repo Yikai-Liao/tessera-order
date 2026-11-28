@@ -1,0 +1,72 @@
+name: Go CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: go1.27.4
+  TESSERA_REQUIRE_VECTORS: '1'
+
+defaults:
+  run:
+    working-directory: go/tessera
+    shell: bash
+
+jobs:
+  test:
+    name: Go (${{ matrix.os }}, ${{ matrix.mode }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mode: scalar
+          - os: ubuntu-latest
+            mode: simd
+            experiment: simd
+          - os: macos-latest
+            mode: simd
+            experiment: simd
+    env:
+      GOEXPERIMENT: ${{ matrix.experiment || '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-test
+
+  test-other-platforms:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-test
+
+  linux-checks:
+    name: Go race, trace and fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GOTOOLCHAIN }}
+          cache: false
+      - run: go test -race ./... -count=1
+      - run: go test -race ./... -count=1
+        env:
+          GOEXPERIMENT: simd
+      - run: go test -tags tessera_trace ./... -count=1
+      - name: Fuzz each target
+        run: |
+          tests=$(go test -list '^Fuzz' .)
+          mapfile -t targets < <(printf '%s\n' "$tests" | awk '/^Fuzz[[:alnum:]_]+$/')
+          test "${#targets[@]}" -gt 0
+          for target in "${targets[@]}"; do
+            go test -run '^$' -fuzz "^${target}$" -fuzztime 20s -parallel 2 .
+          done

@@ -83,6 +83,9 @@ test("identities match the shared language fixture in both directions", () => {
     assert.deepEqual(parseCaseId(entry.case_id), input);
     assert.deepEqual(parseColumnId(entry.column_id), column);
     assert.deepEqual(parseCriterionId(entry.criterion), { ...input, execution: column.execution });
+    const go = criterionId(input, column.execution, "go");
+    assert.equal(go, entry.criterion.replace(/^rust\//, "go/"));
+    assert.deepEqual(parseCriterionId(go), { ...input, execution: column.execution });
   }
 });
 

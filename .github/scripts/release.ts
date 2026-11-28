@@ -14,6 +14,31 @@ export async function verifyRustRelease(tag: string, root: string) {
   return { tag, state: "verified" };
 }
 
+export const GO_MODULE = "github.com/Yikai-Liao/tessera-order/go/tessera";
+
+export function goReleaseVersion(tag: string, manifest: string) {
+  const match =
+    /^go\/tessera\/v(0|1)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
+      tag,
+    );
+  if (!match || match[4]?.split(".").some((part) => /^0\d+$/.test(part)))
+    throw new Error("Expected a canonical Go submodule tag for major version 0 or 1");
+  if (!manifest.split(/\r?\n/).some((line) => line.trim() === `module ${GO_MODULE}`))
+    throw new Error("Go tag/module path mismatch");
+  return tag.slice("go/tessera/".length);
+}
+
+/** Verify the module at the commit the annotated tag actually names. */
+export function verifyGoRelease(tag: string, root: string, commit?: string) {
+  if (!tag.startsWith("go/tessera/v")) throw new Error("Invalid Go release tag");
+  readTagNotes(tag, root, commit);
+  const manifest = execFileSync("git", ["show", `refs/tags/${tag}:go/tessera/go.mod`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  return { tag, version: goReleaseVersion(tag, manifest), module: GO_MODULE, state: "verified" };
+}
+
 /**
  * Release notes are the message of the annotated release tag, so publication
  * needs no manual step. Reject a lightweight tag, a tag that does not point at

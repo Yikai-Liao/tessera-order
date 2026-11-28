@@ -390,3 +390,122 @@ mod tests {
         assert!(nan.order(&other_nan).is_gt());
     }
 }
+/// Hashes logical record fields with their canonical little-endian encoding.
+pub(super) fn input_digest(input: &CaseInput) -> u64 {
+    fn digest<T: BenchmarkRecord>(
+        records: &PreparedRecords<T>,
+        bytes: impl Fn(&T, &mut Vec<u8>),
+    ) -> u64 {
+        let mut record = Vec::with_capacity(128);
+        let mut hash = 0xcbf29ce484222325u64;
+        for value in records.original() {
+            record.clear();
+            bytes(value, &mut record);
+            for &byte in &record {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        hash
+    }
+    match input {
+        CaseInput::U32(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U64(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U128(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::F64(v) => digest(v, |v, b| b.extend(v.to_bits().to_le_bytes())),
+        CaseInput::ReverseU64(v) => digest(v, |v, b| b.extend(v.0.to_le_bytes())),
+        CaseInput::ReverseF64(v) => digest(v, |v, b| b.extend(v.0.to_bits().to_le_bytes())),
+        CaseInput::Row32(v) => digest(v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.row.to_le_bytes());
+        }),
+        CaseInput::Row64(v) => digest(v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.row.to_le_bytes());
+        }),
+        CaseInput::WideRecord(v) => digest(v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend(v.payload);
+        }),
+        CaseInput::OwnedRecord(v) => digest(v, |v, b| {
+            b.extend(v.key.to_le_bytes());
+            b.extend((v.payload.len() as u64).to_le_bytes());
+            b.extend(v.payload.as_bytes());
+        }),
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::input_digest;
+    use crate::plan::{InputCase, Operation, catalog};
+    use serde_json::{Value, json};
+
+    #[test]
+    fn benchmark_input_vectors() {
+        // All generator branches, both sides of the sorted-tail boundary,
+        // and records long enough to exercise run transitions.
+        let lengths = [127, 4097];
+        let mut types = serde_json::Map::new();
+        for ty in &catalog().types {
+            let mut distributions = serde_json::Map::new();
+            for distribution in &catalog().distributions {
+                let digests = lengths.map(|len| {
+                    let case = InputCase {
+                        ty: ty.id.clone(),
+                        distribution: distribution.id.clone(),
+                        len,
+                        operation: Operation::default(),
+                    };
+                    format!("{:016x}", input_digest(&super::CaseInput::new(&case)))
+                });
+                distributions.insert(distribution.id.clone(), json!(digests));
+            }
+            types.insert(
+                ty.id.clone(),
+                json!({
+                    "record_bytes": crate::plan::record_bytes(&ty.id),
+                    "distributions": distributions,
+                }),
+            );
+        }
+        let actual = json!({"schema": 2, "seed": 1, "lengths": lengths, "types": types});
+        if let Some(path) = std::env::var_os("TESSERA_WRITE_INPUT_VECTORS") {
+            // Keep one distribution's digests per line so generator changes are reviewable.
+            use std::io::Write;
+            let mut file = std::fs::File::create(path).unwrap();
+            writeln!(
+                file,
+                "{{\"schema\":2,\"seed\":1,\"lengths\":{},\"types\":{{",
+                actual["lengths"]
+            )
+            .unwrap();
+            let types = actual["types"].as_object().unwrap();
+            for (index, (ty, spec)) in types.iter().enumerate() {
+                writeln!(
+                    file,
+                    "  {}:{{\"record_bytes\":{},\"distributions\":{{",
+                    json!(ty),
+                    spec["record_bytes"]
+                )
+                .unwrap();
+                let distributions = spec["distributions"].as_object().unwrap();
+                for (index, (distribution, digests)) in distributions.iter().enumerate() {
+                    let comma = if index + 1 == distributions.len() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    writeln!(file, "    {}:{digests}{comma}", json!(distribution)).unwrap();
+                }
+                let comma = if index + 1 == types.len() { "" } else { "," };
+                writeln!(file, "  }}}}{comma}").unwrap();
+            }
+            writeln!(file, "}}}}").unwrap();
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conformance/vectors/benchmark-inputs.json");
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(actual, expected);
+    }
+}

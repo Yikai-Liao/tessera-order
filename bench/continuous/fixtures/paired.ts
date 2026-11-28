@@ -80,15 +80,19 @@ export function pairedRun(
 export async function writePaired(
   directory: string,
   ratio = 1.2,
-  selection?: Pick<PreparedPair, "cases" | "plan">,
+  selection?: Pick<PreparedPair, "cases" | "plan" | "go">,
   count = CONTINUOUS_SHARDS,
 ) {
   const plan = selection?.plan ?? (await loadPlan("continuous"));
   const runs: LocalRun[] = [];
   for (let index = 1; index <= count; index++) {
-    const out = join(directory, `paired-${index}`);
+    const out = join(directory, `paired-${index}${selection?.go ? "-go-123" : ""}`);
     await mkdir(out, { recursive: true });
     const run = pairedRun(index, ratio, selection?.cases, count);
+    if (selection?.go) {
+      run.go = selection.go;
+      delete run.builds;
+    }
     await writeFile(join(out, "local.json"), JSON.stringify(run));
     await writeFile(join(out, "plan.json"), JSON.stringify(plan));
     runs.push(run);

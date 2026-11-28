@@ -13,8 +13,9 @@ import {
   parseCaseId,
   SORT,
 } from "../catalog.ts";
+import { goBuildInfo, goRequests, listGo } from "../local/go.ts";
 import { loadPlan, type Plan, plansByOperation } from "../plan.ts";
-import { withComparisonWorkspace } from "../release.ts";
+import { buildGoWorker, withComparisonWorkspace } from "../release.ts";
 import {
   benchmarkEnvironment,
   buildBenchmark,
@@ -24,7 +25,7 @@ import {
 import { reportFailure } from "./failure.ts";
 import { columnSlug, trackingColumn, trackingImplementation } from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
-import { runSchema, type TrackingRun } from "./result.ts";
+import { type GoBuild, runSchema, type TrackingRun } from "./result.ts";
 
 /** Local image name shared by the build and measurement stages; the registry tag is the measurer's. */
 export const localImage = (column: Column) => `tessera-tracking:${columnSlug(column)}`;
@@ -35,11 +36,12 @@ export type TrackingBuild = {
   column: string;
   hash: string;
   commit_time: string;
-  rustc: string;
-  rustflags: string;
+  rustc?: string;
+  rustflags?: string;
+  go?: GoBuild;
   native?: TrackingRun["native"];
   /** Peak extra allocation bytes per timed case ID. */
-  memory: Record<string, number>;
+  memory?: Record<string, number>;
   /** Case IDs of each remote job, in run order; `job-N.ids` in the image holds job N. */
   jobs: string[][];
 };
@@ -123,69 +125,108 @@ if (import.meta.main) {
       await mkdir(out);
       const native = implementation.adapter === "native";
       return withComparisonWorkspace(root, native, async ({ tree, target }) => {
-        const env = await benchmarkEnvironment(tree, {
-          targetTriple: "x86_64-unknown-linux-gnu",
-          env: { CC: "clang", CXX: "clang++" },
-        });
-        const features = [...continuous.features, ...(native ? ["compare-native"] : [])];
-        const built = await buildBenchmark(tree, target, "smoke", features, {
-          targetTriple: "x86_64-unknown-linux-gnu",
-          env,
-        });
-        const headers = await command("readelf", ["-l", "-d", built.executable], { capture: true });
-        if (!native && /INTERP|\(NEEDED\)/.test(headers))
-          throw new Error("Benchmark is not statically linked");
-        if (native) {
-          const libraries = await command("ldd", [built.executable], { capture: true });
-          if (/libtbb|libgomp|libomp/.test(libraries))
-            throw new Error("Unexpected parallel native runtime");
-        }
+        const workspace = { tree, target, directory: join(out, "build") };
         const context = join(out, "image");
         await mkdir(context);
-        await copyFile(built.executable, join(context, "benchmark"));
-        await command("strip", ["--strip-debug", join(context, "benchmark")]);
         const plan = columnPlan(await loadPlan("continuous"), column);
-        await writeFile(join(context, "plan.json"), JSON.stringify(plan));
-        // Peak extra allocation per case, measured by the same instrumented worker as local
-        // comparisons. Counts do not depend on the host, so Actions measures them once per build.
-        // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
-        const memory = await buildBenchmark(tree, target, "memory", features, {
-          profile: "bench",
-          targetTriple: "x86_64-unknown-linux-gnu",
-          env,
-        });
-        const memoryImplementations =
-          implementation.id === "glidesort-sqrt"
-            ? ["tessera", implementation.id]
-            : [implementation.id];
-        // The worker measures one operation per session. The sort session's directory is the
-        // image's scratch evidence; every session's rows give the peaks.
-        const journals: string[] = [];
-        for (const [index, part] of plansByOperation(plan).entries()) {
-          const sort = (part.include[0].operation ?? SORT).kind === SORT.kind;
-          const directory = sort ? join(context, "scratch") : join(out, `memory-${index}`);
-          const partPlan = join(out, `memory-plan-${index}.json`);
-          await writeFile(
-            partPlan,
-            JSON.stringify({ ...part, implementations: memoryImplementations }),
-          );
-          await command(memory.executable, ["--plan", partPlan, "--out", directory]);
-          journals.push(await readFile(join(directory, "memory.jsonl"), "utf8"));
-        }
-        const ids = (
-          await command(built.executable, [], {
+        const planPath = join(context, "plan.json");
+        await writeFile(planPath, JSON.stringify(plan));
+        let ids: string[];
+        let provenance: Pick<TrackingBuild, "rustc" | "rustflags" | "native" | "memory" | "go">;
+        const requests =
+          implementation.adapter === "go"
+            ? await goRequests(workspace, planPath, implementation.id)
+            : undefined;
+        if (requests) {
+          await mkdir(workspace.directory);
+          const binary = await buildGoWorker(root, workspace);
+          ids = await listGo(binary, requests);
+          await copyFile(binary, join(context, "benchmark"));
+          provenance = { go: await goBuildInfo(binary) };
+        } else {
+          const env = await benchmarkEnvironment(tree, {
+            targetTriple: "x86_64-unknown-linux-gnu",
+            env: { CC: "clang", CXX: "clang++" },
+          });
+          const features = [...continuous.features, ...(native ? ["compare-native"] : [])];
+          const built = await buildBenchmark(tree, target, "smoke", features, {
+            targetTriple: "x86_64-unknown-linux-gnu",
+            env,
+          });
+          const headers = await command("readelf", ["-l", "-d", built.executable], {
             capture: true,
-            env: { TESSERA_BENCH_PLAN: join(context, "plan.json"), TESSERA_BENCH_LIST: "1" },
-          })
-        )
-          .split("\n")
-          .filter(Boolean);
+          });
+          if (!native && /INTERP|\(NEEDED\)/.test(headers))
+            throw new Error("Benchmark is not statically linked");
+          if (native) {
+            const libraries = await command("ldd", [built.executable], { capture: true });
+            if (/libtbb|libgomp|libomp/.test(libraries))
+              throw new Error("Unexpected parallel native runtime");
+          }
+          await copyFile(built.executable, join(context, "benchmark"));
+          await command("strip", ["--strip-debug", join(context, "benchmark")]);
+          // Peak extra allocation per case, measured by the same instrumented worker as local
+          // comparisons. Counts do not depend on the host, so Actions measures them once per build.
+          // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
+          const memory = await buildBenchmark(tree, target, "memory", features, {
+            profile: "bench",
+            targetTriple: "x86_64-unknown-linux-gnu",
+            env,
+          });
+          const memoryImplementations =
+            implementation.id === "glidesort-sqrt"
+              ? ["tessera", implementation.id]
+              : [implementation.id];
+          // The worker measures one operation per session. The sort session's directory is the
+          // image's scratch evidence; every session's rows give the peaks.
+          const journals: string[] = [];
+          for (const [index, part] of plansByOperation(plan).entries()) {
+            const sort = (part.include[0].operation ?? SORT).kind === SORT.kind;
+            const directory = sort ? join(context, "scratch") : join(out, `memory-${index}`);
+            const partPlan = join(out, `memory-plan-${index}.json`);
+            await writeFile(
+              partPlan,
+              JSON.stringify({ ...part, implementations: memoryImplementations }),
+            );
+            await command(memory.executable, ["--plan", partPlan, "--out", directory]);
+            journals.push(await readFile(join(directory, "memory.jsonl"), "utf8"));
+          }
+          ids = (
+            await command(built.executable, [], {
+              capture: true,
+              env: { TESSERA_BENCH_PLAN: planPath, TESSERA_BENCH_LIST: "1" },
+            })
+          )
+            .split("\n")
+            .filter(Boolean);
+          provenance = {
+            rustc: built.provenance.rustc,
+            rustflags: built.provenance.cargo_encoded_rustflags,
+            ...(native
+              ? {
+                  native: runSchema.shape.native.parse({
+                    cc: built.provenance.cc,
+                    cxx: built.provenance.cxx,
+                    build: built.provenance.native_build,
+                  }),
+                }
+              : {}),
+            memory: trackingMemory(journals.join("\n"), column, ids),
+          };
+        }
         if (!ids.length) throw new Error("Tracking plan selects no supported cases");
-        await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
-        const peaks = trackingMemory(journals.join("\n"), column, ids);
         const jobs = remoteJobs(ids);
-        for (const [index, job] of jobs.entries())
-          await writeFile(join(context, `job-${index + 1}.ids`), job.join("\n") + "\n");
+        for (const [name, cases] of [
+          ["cases", ids] as const,
+          ...jobs.map((job, index) => [`job-${index + 1}`, job] as const),
+        ]) {
+          await writeFile(join(context, name + ".ids"), cases.join("\n") + "\n");
+          if (requests)
+            await writeFile(
+              join(context, name + ".jsonl"),
+              cases.map((id) => JSON.stringify(requests[id])).join("\n") + "\n",
+            );
+        }
         for (const name of ["Dockerfile", "run.sh"])
           await copyFile(join(root, "bench/tracking", name), join(context, name));
         const image = localImage(column);
@@ -204,19 +245,7 @@ if (import.meta.main) {
           column: columnId(column),
           hash: source,
           commit_time: commitTime,
-          rustc: built.provenance.rustc,
-          rustflags: built.provenance.cargo_encoded_rustflags,
-          // Validated here so that a build without complete provenance fails before measurement.
-          ...(native
-            ? {
-                native: runSchema.shape.native.parse({
-                  cc: built.provenance.cc,
-                  cxx: built.provenance.cxx,
-                  build: built.provenance.native_build,
-                }),
-              }
-            : {}),
-          memory: peaks,
+          ...provenance,
           jobs,
         };
         await writeFile(join(out, "build.json"), JSON.stringify(build));

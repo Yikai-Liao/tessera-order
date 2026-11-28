@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -74,5 +74,81 @@ test("release notes come only from an annotated tag at the published commit", ()
     assert.throws(() => readTagNotes("rust/v9.0.2", root), /no line starting with #/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Go release workflow retries the exact proxy version and reuses matching notes", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tessera-go-release-"));
+  try {
+    const workflow = readFileSync(new URL("../workflows/go-release.yml", import.meta.url), "utf8");
+    const step = (name: string) => {
+      const section = workflow.split(`      - name: ${name}\n`)[1].split("\n      - ")[0];
+      return section
+        .split("        run: |\n")[1]
+        .split("\n")
+        .filter((line) => line.startsWith("          "))
+        .map((line) => line.slice(10))
+        .join("\n");
+    };
+    const log = join(directory, "calls");
+    const executable = (name: string, source: string) =>
+      writeFileSync(join(directory, name), "#!/bin/sh\n" + source, { mode: 0o755 });
+    executable(
+      "gh",
+      `printf '%s\\n' "$*" >> "$CALLS"
+case "$2" in
+view)
+  [ "$EXISTING" = yes ] || exit 1
+  printf '{"tagName":"go/tessera/v0.1.0","body":"%s","isDraft":false}\\n' "$NOTES";;
+create) exit 0;;
+*) exit 1;;
+esac`,
+    );
+    executable(
+      "go",
+      `printf '%s\\n' "$*" >> "$CALLS"
+case "$2" in
+download)
+  if [ ! -e tried ]; then touch tried; exit 1; fi
+  printf '{"Path":"%s","Version":"%s","Sum":"h1:fixture"}\\n' "$MODULE" "$PROXY_VERSION";;
+esac`,
+    );
+    executable("sleep", "exit 0");
+    const module = "github.com/Yikai-Liao/tessera-order/go/tessera";
+    writeFileSync(
+      join(directory, "go-release.json"),
+      JSON.stringify({ module, version: "v0.1.0" }),
+    );
+    writeFileSync(join(directory, "release-notes.md"), "## Release\n");
+    const bash = (name: string, extra: Record<string, string>) =>
+      execFileSync("bash", ["-ec", step(name)], {
+        env: {
+          ...process.env,
+          PATH: `${directory}:${process.env.PATH}`,
+          RUNNER_TEMP: directory,
+          RELEASE_TAG: "go/tessera/v0.1.0",
+          MODULE: module,
+          PROXY_VERSION: "v0.1.0",
+          CALLS: log,
+          NOTES: "## Release",
+          ...extra,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    const publish = "Publish or verify the GitHub release";
+    bash(publish, { EXISTING: "no" });
+    bash(publish, { EXISTING: "yes" });
+    assert.throws(() => bash(publish, { EXISTING: "yes", NOTES: "## Wrong" }));
+    bash("Request indexing and verify the public module", {});
+    const calls = readFileSync(log, "utf8");
+    assert.equal(calls.match(/release create/g)?.length, 1);
+    assert.equal(calls.match(/mod download/g)?.length, 2);
+    assert.ok(calls.includes(`${module}@v0.1.0`));
+    rmSync(join(directory, "go-release-consumer"), { recursive: true });
+    assert.throws(() =>
+      bash("Request indexing and verify the public module", { PROXY_VERSION: "v1.0.0" }),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });

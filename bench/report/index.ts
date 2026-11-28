@@ -113,7 +113,9 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
           );
           const heap = memory
             ? `${memory.peak_extra_bytes} B peak${memory.output_bytes !== undefined ? `<br>${memory.output_bytes} B output + ${memory.peak_extra_bytes - memory.output_bytes} B workspace peak` : ""}`
-            : "heap unmeasured";
+            : manifest.columns.some((entry) => entry.id === column && entry.adapter === "go")
+              ? "Go memory unavailable"
+              : "heap unmeasured";
           return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${heap}`;
         }),
       ]);
@@ -237,6 +239,25 @@ function renderProvenance(dataset: Dataset) {
       : [];
   });
   out += `${renderTable(["Rust crate", "Version"], packages)}\n`;
+  if (manifest.go_build) {
+    const go = manifest.go_build;
+    const info = go.build_info;
+    out += `### Go worker
+
+Toolchain \`${info.GoVersion}\`. Executable SHA-256 \`${go.binary_sha256}\`.
+
+`;
+    out += renderTable(
+      ["Go build setting", "Value"],
+      info.Settings.map(({ Key, Value }) => [Key, Value]),
+    );
+    out += "\n";
+    out += renderTable(
+      ["Go module", "Version"],
+      info.Deps.map(({ Path, Version }) => [Path, Version]),
+    );
+    out += "\n";
+  }
   return out;
 }
 export async function writeReport(directories: string[], partial = false) {

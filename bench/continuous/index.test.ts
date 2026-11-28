@@ -6,16 +6,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { continuous } from "../catalog.ts";
+import { loadPlan } from "../plan.ts";
 import { mockGitHub } from "./fixtures/github.ts";
-import { writePaired } from "./fixtures/paired.ts";
+import { pairedRun, writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
-import { pairedBmf } from "./paired.ts";
+import { pairedBmf, readPaired } from "./paired.ts";
 
-async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
+async function publication(
+  t: TestContext,
+  cloud = true,
+  moved = false,
+  ratio?: number,
+  selection?: Parameters<typeof writePaired>[2],
+  count?: number,
+) {
   const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const runs = await writePaired(dir, ratio ?? 1.2);
+  const runs = await writePaired(dir, ratio ?? 1.2, selection, count);
   if (cloud) {
     const report = fixture();
     report.testbed.name = continuous.testbed;
@@ -307,4 +315,47 @@ test("a changed inventory without shared history retains both current figures", 
     .flatMap((request) => request.body.tree as { content: string }[]);
   assert.equal(images.length, 2);
   assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+});
+
+test("Go absent baseline is neutral, while missing evidence is a failure", async (t) => {
+  const action = await publication(t);
+  const inputs = { ...action.inputs, language: "go" as const, prepared: "/absent" };
+  await publishReport({ ...action, inputs: { ...inputs, noBaseline: true } });
+  assert.ok(action.requests.some((request) => request.body.name === "Benchmarks (go)"));
+  assert.ok(action.requests.some((request) => request.body.conclusion === "neutral"));
+  assert.match(action.summaries[0], /No comparable baseline/);
+  await assert.rejects(publishReport({ ...action, inputs }), /could not be validated/);
+  assert.ok(action.requests.some((request) => request.body.conclusion === "failure"));
+});
+
+test("the Rust prepared pair cannot publish a Go verdict", async (t) => {
+  const action = await publication(t);
+  await assert.rejects(
+    publishReport({ ...action, inputs: { ...action.inputs, language: "go" } }),
+    /could not be validated/,
+  );
+  assert.match(action.summaries[0], /wrong benchmark language/);
+});
+
+test("Go paired provenance accepts one- and two-shard download layouts", async (t) => {
+  const cases = pairedRun().shard!.allCases.map((id) => id.replace(/^rust\//, "go/"));
+  const plan = { ...(await loadPlan("continuous")), implementations: ["go-tessera"] };
+  const build = {
+    GoVersion: "go1.27.4-X:simd",
+    Settings: [{ Key: "GOEXPERIMENT", Value: "simd" }],
+    Deps: [],
+  };
+  const go = { builds: { baseline: build, current: build }, requests: {} };
+  for (const count of [1, 2]) {
+    const action = await publication(t, false, false, 1.2, { cases, plan, go }, count);
+    const inputs = { ...action.inputs, language: "go" as const };
+    const runs = await readPaired(inputs.artifacts, inputs, inputs.prepared);
+    assert.deepEqual(
+      runs.map((run) => run.shard?.index),
+      count === 1 ? [1] : [1, 2],
+    );
+    await publishReport({ ...action, inputs });
+    assert.match(action.summaries[0], /1.2000×/);
+    assert.ok(action.requests.some((request) => request.body.conclusion === "failure"));
+  }
 });

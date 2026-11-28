@@ -8,6 +8,7 @@ import {
   parseCaseId,
 } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
+import type { GoBuild } from "../tracking/result.ts";
 
 export { caseId } from "../catalog.ts";
 
@@ -50,6 +51,10 @@ export interface Manifest {
   source_sha256: string;
   binary_sha256: string;
   cargo_lock: string;
+  go_build?: {
+    binary_sha256: string;
+    build_info: GoBuild<{ Path: string; Version: string }>;
+  };
   features: string[];
   target: string;
   profile: string;

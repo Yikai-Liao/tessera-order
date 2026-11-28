@@ -49,6 +49,7 @@ await reportFailure(`Track (${columnId(column)})`, `${out}.log`, () =>
       { capture: true },
     );
     const branch = trackingBranch(column.implementation);
+    const adapter = build.go ? "json" : "rust_criterion";
     // Submit every job first so that they queue together, then wait for each in order.
     // The CLI's own wait is twice the job timeout and counts queueing, so attach instead.
     const submitted = [];
@@ -64,7 +65,7 @@ await reportFailure(`Track (${columnId(column)})`, `${out}.log`, () =>
           `--spec=${TRACKING_SPEC.slug}`,
           `--image=${image}`,
           `--job-timeout=${JOB_TIMEOUT_S}`,
-          "--adapter=rust_criterion",
+          `--adapter=${adapter}`,
           "--detach",
           "--format=json",
           "--quiet",
@@ -97,7 +98,7 @@ await reportFailure(`Track (${columnId(column)})`, `${out}.log`, () =>
         { capture: true },
       );
       await writeFile(join(out, `bencher-${index + 1}.json`), response);
-      jobs.push(summarizeReport(JSON.parse(response), build.hash, project, ids, branch));
+      jobs.push(summarizeReport(JSON.parse(response), build.hash, project, ids, branch, adapter));
     }
     const run = runSchema.parse({
       ...combineReports(jobs),
@@ -105,6 +106,7 @@ await reportFailure(`Track (${columnId(column)})`, `${out}.log`, () =>
       commit_time: build.commit_time,
       image,
       workflow: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
+      go: build.go,
       rustc: build.rustc,
       rustflags: build.rustflags,
       memory: build.memory,

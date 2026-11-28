@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import type { context, getOctokit } from "@actions/github";
-import { BENCHMARK_CHECK, MARKER, marker } from "./marker.ts";
+import { benchmarkCheck, MARKER, marker } from "./marker.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
 export type ActionContext = Pick<typeof context, "repo" | "serverUrl" | "runId" | "payload">;
@@ -17,14 +17,16 @@ export async function startReport({
   github,
   context,
   hash,
+  language = "rust",
 }: {
   github: GitHub;
   context: ActionContext;
   hash: string;
+  language?: "rust" | "go";
 }) {
   const { data } = await github.rest.checks.create({
     ...context.repo,
-    name: BENCHMARK_CHECK,
+    name: benchmarkCheck(language),
     head_sha: hash,
     external_id: String(context.runId),
     status: "in_progress",
@@ -45,17 +47,19 @@ export async function reuseReport({
   hash,
   from,
   run,
+  language = "rust",
 }: {
   github: GitHub;
   context: ActionContext;
   hash: string;
   from: string;
   run: string;
+  language?: "rust" | "go";
 }) {
   const { data } = await github.rest.checks.listForRef({
     ...context.repo,
     ref: from,
-    check_name: BENCHMARK_CHECK,
+    check_name: benchmarkCheck(language),
   });
   const check = data.check_runs.find(
     (candidate) => candidate.status === "completed" && candidate.external_id === run,
@@ -63,7 +67,7 @@ export async function reuseReport({
   if (!check?.conclusion) throw new Error(`Run ${run} published no benchmark check on ${from}`);
   await github.rest.checks.create({
     ...context.repo,
-    name: BENCHMARK_CHECK,
+    name: benchmarkCheck(language),
     head_sha: hash,
     external_id: String(context.runId),
     status: "completed",
@@ -96,7 +100,7 @@ function ownComment(comment: Comment, language: string) {
   return (
     comment.user?.login === "github-actions[bot]" &&
     (comment.body?.includes(`<!-- ${MARKER} language=${language} `) ||
-      comment.body?.includes("Bencher Report</a></h2>"))
+      (language === "rust" && comment.body?.includes("Bencher Report</a></h2>")))
   );
 }
 

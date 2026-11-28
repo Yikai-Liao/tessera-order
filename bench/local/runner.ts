@@ -8,6 +8,8 @@ import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Execution, parseCriterionId } from "../catalog.ts";
 import { type Plan, parsePlan, planExecutions, planFeatures, selectCaseIds } from "../plan.ts";
+import { buildGoWorker } from "../release.ts";
+import { fileHash } from "../session.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   benchmarkEnvironment,
@@ -20,7 +22,9 @@ import {
   sourceHash,
   type Workspace,
   withWorkspace,
+  workingTreeDirty,
 } from "../workspace.ts";
+import { type GoRequests, goBuildInfo, goDigests, goRequests, listGo } from "./go.ts";
 import {
   engineOrderingSymbols,
   type LayoutControl,
@@ -29,6 +33,7 @@ import {
   validateLayoutBuilds,
 } from "./layout.ts";
 import {
+  assertGoBuilds,
   type LocalRun,
   type PreparedPair,
   type RevisionPair,
@@ -51,6 +56,7 @@ interface LocalOptions {
   layoutControl?: LayoutControl;
   shard?: { index: number; count: number };
   prepareOnly?: boolean;
+  language?: "rust" | "go";
 }
 
 /** Reject ambient worker controls that could change a requested experiment. */
@@ -87,6 +93,26 @@ export function serialBaselineManifest(baseline: string, current: string, parall
   return stringify(manifest);
 }
 
+async function withBaselineLibrary<T>(
+  root: string,
+  workspace: Workspace,
+  baseline: string,
+  path: string,
+  build: (saved: string) => Promise<T>,
+  archivePath?: string,
+) {
+  const { tree, directory } = workspace;
+  const library = join(tree, path);
+  const saved = join(directory, "current-source");
+  await copySnapshot(library, saved, tree);
+  await rm(library, { recursive: true });
+  await copyLibraryRevision(root, baseline, library, archivePath);
+  const result = await build(saved);
+  await rm(library, { recursive: true });
+  await copySnapshot(saved, library, directory);
+  return result;
+}
+
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
 export async function buildRevisions(
   root: string,
@@ -98,31 +124,13 @@ export async function buildRevisions(
 ) {
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-order");
-  const saved = join(directory, "current-source");
-  await copySnapshot(crate, saved, tree);
   const source = {
     current: await sourceHash(crate),
     baseline: "",
     harness: await sourceHash(join(tree, "bench/rust")),
-    catalog: createHash("sha256")
-      .update(await readFile(join(tree, "bench/catalog.toml")))
-      .digest("hex"),
+    catalog: await fileHash(join(tree, "bench/catalog.toml")),
   };
-  await rm(crate, { recursive: true });
-  await copyLibraryRevision(root, baseline, crate);
-  await nameLibraryPackage(crate, tree);
-  // Cargo validates inactive forwarding and locks optional dependency edges.
-  // Only serial baselines may receive the inactive optional dependency shim.
   const manifest = join(crate, "Cargo.toml");
-  await writeFile(
-    manifest,
-    serialBaselineManifest(
-      await readFile(manifest, "utf8"),
-      await readFile(join(saved, "Cargo.toml"), "utf8"),
-      features.includes("rayon"),
-    ),
-  );
-  source.baseline = await sourceHash(crate);
   const map = join(directory, "layout.map");
   // Keep the map path out of -Wl's comma-separated argument list.
   const rustcArgs = (seed: number | undefined) =>
@@ -202,15 +210,34 @@ export async function buildRevisions(
     current: join(directory, `current-${layout?.currentSeed ?? "default"}`, "worker"),
   };
   for (const binary of Object.values(binaries)) await mkdir(dirname(binary), { recursive: true });
-  const first = await build("baseline", layout?.baselineSeed);
-  if (layout) {
-    if (first.provenance.target !== "x86_64-unknown-linux-gnu")
-      throw new Error("Layout experiments require the x86_64-unknown-linux-gnu target");
-    await cp(map, join(layout.out, `layout-${layout.baselineSeed}-baseline.map`));
-  }
-  await cp(first.executable, binaries.baseline);
-  await rm(crate, { recursive: true });
-  await copySnapshot(saved, crate, directory);
+  const first = await withBaselineLibrary(
+    root,
+    workspace,
+    baseline,
+    "rust/tessera-order",
+    async (saved) => {
+      await nameLibraryPackage(crate, tree);
+      // Cargo validates inactive forwarding and locks optional dependency edges.
+      // Only serial baselines may receive the inactive optional dependency shim.
+      await writeFile(
+        manifest,
+        serialBaselineManifest(
+          await readFile(manifest, "utf8"),
+          await readFile(join(saved, "Cargo.toml"), "utf8"),
+          features.includes("rayon"),
+        ),
+      );
+      source.baseline = await sourceHash(crate);
+      const built = await build("baseline", layout?.baselineSeed);
+      if (layout) {
+        if (built.provenance.target !== "x86_64-unknown-linux-gnu")
+          throw new Error("Layout experiments require the x86_64-unknown-linux-gnu target");
+        await cp(map, join(layout.out, `layout-${layout.baselineSeed}-baseline.map`));
+      }
+      await cp(built.executable, binaries.baseline);
+      return built;
+    },
+  );
   // A tooling-only change has identical library inputs; rebuilding cannot add evidence.
   // Layout experiments still retain their per-role link artifacts.
   const second =
@@ -229,15 +256,46 @@ export async function buildRevisions(
   ] as const)
     if (first.provenance[field] !== second.provenance[field])
       throw new Error(`Build settings differ between revisions: ${field}`);
-  const hash = async (binary: string) =>
-    createHash("sha256")
-      .update(await readFile(binary))
-      .digest("hex");
   return {
     source,
     binaries,
     builds: { baseline: first.provenance, current: second.provenance },
-    hashes: { baseline: await hash(binaries.baseline), current: await hash(binaries.current) },
+    hashes: {
+      baseline: await fileHash(binaries.baseline),
+      current: await fileHash(binaries.current),
+    },
+  };
+}
+
+async function buildGoRevisions(workspace: Workspace, root: string, baseline: string) {
+  const { tree, directory } = workspace;
+  const path = "go/tessera";
+  const library = join(tree, path);
+  const build = async (role: string) => {
+    const destination = join(directory, role);
+    await mkdir(destination);
+    return buildGoWorker(tree, { ...workspace, directory: destination });
+  };
+  const old = await withBaselineLibrary(
+    root,
+    workspace,
+    baseline,
+    path,
+    async () => ({
+      hash: await sourceHash(library),
+      binary: await build("baseline"),
+    }),
+    path,
+  );
+  const current = await build("current");
+  return {
+    binaries: { baseline: old.binary, current },
+    source: {
+      baseline: old.hash,
+      current: await sourceHash(library),
+      harness: await sourceHash(join(tree, "bench/go")),
+      catalog: await fileHash(join(tree, "bench/catalog.toml")),
+    },
   };
 }
 
@@ -248,25 +306,30 @@ export async function selectedCases(
   pattern: string | undefined,
   cwd: string,
   executions: Execution[] = [],
+  requests?: GoRequests,
 ) {
   const list = async (binary: string) =>
-    (
-      await command(binary, ["--bench"], {
-        cwd,
-        capture: true,
-        env: {
-          TESSERA_BENCH_LIST: "1",
-          TESSERA_BENCH_PLAN: planPath,
-        },
-      })
-    )
-      .split("\n")
-      .filter(Boolean)
-      .sort();
+    requests
+      ? listGo(binary, requests)
+      : (
+          await command(binary, ["--bench"], {
+            cwd,
+            capture: true,
+            env: {
+              TESSERA_BENCH_LIST: "1",
+              TESSERA_BENCH_PLAN: planPath,
+            },
+          })
+        )
+          .split("\n")
+          .filter(Boolean)
+          .sort();
   const current = await list(binaries.current);
-  for (const execution of executions)
+  for (const execution of requests ? [] : executions)
     if (!current.some((id) => parseCriterionId(id).execution === execution))
       throw new Error(`Plan did not list any ${execution} cases`);
+  if (requests && current.join("\n") !== Object.keys(requests).sort().join("\n"))
+    throw new Error("Go Tessera inventory does not cover the prepared plan");
   const cases = selectCaseIds(current, pattern);
   if (
     !cases.length ||
@@ -349,11 +412,11 @@ export async function comparePrepared(options: {
     .update(await readFile(join(root, "bench/catalog.toml")))
     .digest("hex");
   if (
-    pair.source.harness !== (await sourceHash(join(root, "bench/rust"))) ||
+    pair.source.harness !== (await sourceHash(join(root, pair.go ? "bench/go" : "bench/rust"))) ||
     pair.source.catalog !== catalogHash
   )
     throw new Error("Prepared pair requires its original harness and catalog");
-  const cpu = await comparisonCpus(revisionThreads(plan), options.cpu);
+  const cpu = await comparisonCpus(revisionThreads(plan, pair.go ? "go" : "rust"), options.cpu);
   const binaries = { baseline: "", current: "" };
   const preparedRoot = await realpath(prepared);
   await mkdir(out, { recursive: false });
@@ -381,6 +444,7 @@ export async function comparePrepared(options: {
     undefined,
     root,
     planExecutions(plan),
+    pair.go?.requests,
   );
   if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
@@ -392,18 +456,54 @@ export async function comparePrepared(options: {
   return renderLocalReport(out, run);
 }
 
+export async function inspectGoPair(
+  binaries: { baseline: string; current: string },
+  requests: GoRequests,
+  cases: string[],
+) {
+  const baseline = await goDigests(binaries.baseline, requests, cases);
+  const current = await goDigests(binaries.current, requests, cases);
+  if (baseline.join("\n") !== current.join("\n"))
+    throw new Error("Go revision input digests differ");
+  const builds = {
+    baseline: await goBuildInfo(binaries.baseline),
+    current: await goBuildInfo(binaries.current),
+  };
+  assertGoBuilds(builds);
+  return { builds, requests };
+}
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out } = options;
+  const { root, out, language = "rust" } = options;
+  const go = language === "go";
   if (
     options.prepareOnly &&
     (options.shard || options.layoutSeeds || options.layoutControl || options.filter)
   )
     throw new Error("Preparation requires a complete non-layout revision pair");
+  const baseline = await resolveCommit(root, options.baseline);
+  const head = await resolveCommit(root, "HEAD");
+  if (
+    go &&
+    !(await command("git", ["ls-tree", baseline, "--", "go/tessera/go.mod"], {
+      cwd: root,
+      capture: true,
+    }))
+  )
+    return { kind: "no-baseline", baseline, head };
+  const dirty = go
+    ? Boolean(
+        await command("git", ["status", "--porcelain", "--untracked-files=no"], {
+          cwd: root,
+          capture: true,
+        }),
+      )
+    : await workingTreeDirty(root);
+  if (go && dirty) throw new Error("Go preparation requires a clean committed checkout");
+  const threads = revisionThreads(options.plan, language);
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
-  if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const cpu = await comparisonCpus(revisionThreads(options.plan), options.cpu);
-  options = { ...options, cpu };
+  if (!go && platform() === "linux") await command("setarch", ["-R", "true"]);
+  const cpu = go ? undefined : await comparisonCpus(threads, options.cpu);
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -421,11 +521,6 @@ export async function compareLocal(options: LocalOptions) {
       ),
     };
   }
-  const baseline = await resolveCommit(root, options.baseline);
-  const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
-  const dirty = Boolean(
-    await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
-  );
   await mkdir(out, { recursive: false });
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);
@@ -434,14 +529,25 @@ export async function compareLocal(options: LocalOptions) {
     const executables: { baseline: string; current: string }[] = [];
     for (const seed of options.layoutSeeds ?? [undefined]) {
       diagnostic(`Building revision pair${seed === undefined ? "" : ` for layout seed ${seed}`}`);
-      const { binaries, source, hashes, builds } = await buildRevisions(
-        root,
-        workspace,
-        baseline,
-        planFeatures(options.plan),
-        seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
-        options.layoutControl,
-      );
+      const requests = go
+        ? await goRequests(workspace, planPath, options.plan.implementations[0])
+        : undefined;
+      const built: {
+        binaries: { baseline: string; current: string };
+        source: RevisionPair["source"];
+        builds?: RevisionPair["builds"];
+        hashes?: RevisionPair["binaries"];
+      } = go
+        ? await buildGoRevisions(workspace, root, baseline)
+        : await buildRevisions(
+            root,
+            workspace,
+            baseline,
+            planFeatures(options.plan),
+            seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
+            options.layoutControl,
+          );
+      const { binaries, source } = built;
       // Measure the retained copies, so downloads contain the exact executed files.
       const binaryPaths = { baseline: "", current: "" };
       for (const role of ["baseline", "current"] as const) {
@@ -457,7 +563,9 @@ export async function compareLocal(options: LocalOptions) {
         options.filter,
         workspace.tree,
         planExecutions(options.plan),
+        requests,
       );
+      const provenance = requests ? await inspectGoPair(binaries, requests, allCases) : undefined;
       const pair: RevisionPair = {
         schema: 1,
         protocol: "paired-samples-v2",
@@ -465,11 +573,18 @@ export async function compareLocal(options: LocalOptions) {
         head,
         dirty,
         source,
-        binaries: hashes,
+        binaries: built.hashes ?? {
+          baseline: await fileHash(binaries.baseline),
+          current: await fileHash(binaries.current),
+        },
         binaryPaths,
-        builds,
-        rustc: builds.current.rustc,
-        flags: builds.current.cargo_encoded_rustflags,
+        ...(built.builds
+          ? {
+              builds: built.builds,
+              rustc: built.builds.current.rustc,
+              flags: built.builds.current.cargo_encoded_rustflags,
+            }
+          : { go: provenance }),
         configuration: "portable-simd",
         cases: allCases,
       };

@@ -1,0 +1,80 @@
+name: Go release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/go-ci.yml
+
+  golden-vectors:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked -p tessera-order --test golden_vectors
+        env:
+          TESSERA_REQUIRE_VECTORS: '1'
+
+  publish:
+    needs: [validate, golden-vectors]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - id: validate-tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          bun run --silent tools release verify --tag "$RELEASE_TAG" --commit "$GITHUB_SHA" > "$RUNNER_TEMP/go-release.json"
+          bun run --silent tools release notes --tag "$RELEASE_TAG" --commit "$GITHUB_SHA" > "$RUNNER_TEMP/release-notes.md"
+      - name: Publish or verify the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          # A SemVer prerelease suffix makes the GitHub release a prerelease.
+          prerelease=$(jq -r '.version | contains("-")' "$RUNNER_TEMP/go-release.json")
+          if gh release view "$RELEASE_TAG" --json tagName,body,isDraft,isPrerelease > "$RUNNER_TEMP/github-release.json"; then
+            jq -e --arg tag "$RELEASE_TAG" --argjson prerelease "$prerelease" --rawfile notes "$RUNNER_TEMP/release-notes.md" \
+              '.tagName == $tag and (.isDraft | not) and .isPrerelease == $prerelease and ((.body | rtrimstr("\n")) == ($notes | rtrimstr("\n")))' \
+              "$RUNNER_TEMP/github-release.json"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --latest=false --prerelease="$prerelease"
+          fi
+      - name: Request indexing and verify the public module
+        env:
+          GOPROXY: https://proxy.golang.org
+          GOSUMDB: sum.golang.org
+          GONOSUMDB: ''
+          GOPRIVATE: ''
+          GOWORK: 'off'
+          GOTOOLCHAIN: go1.27.4
+        run: |
+          module=$(jq -er .module "$RUNNER_TEMP/go-release.json")
+          version=$(jq -er .version "$RUNNER_TEMP/go-release.json")
+          mkdir "$RUNNER_TEMP/go-release-consumer"
+          cd "$RUNNER_TEMP/go-release-consumer"
+          go mod init example.test/tessera-release-consumer
+          for delay in 1 5 15; do
+            if go mod download -json "$module@$version" > download.json; then break; fi
+            sleep "$delay"
+          done
+          jq -e --arg path "$module" --arg version "$version" \
+            '.Path == $path and .Version == $version and (.Error | not) and (.Sum | startswith("h1:"))' download.json
+          go mod edit -require "$module@$version"
+          printf 'package consumer\nimport tessera "%s"\nvar _ = tessera.Sort[uint64]\n' "$module" > consumer.go
+          go test -mod=mod ./...

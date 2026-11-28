@@ -8,13 +8,18 @@
 | Library tests or Rust validation workflow | Rust validation |
 | Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, implementation comparison checks and PR revision measurement |
 | Native adapters or implementation-session tooling | Implementation comparison checks |
+| Go benchmark worker (`bench/go/`) | Implementation comparison checks and Go PR revision measurement |
+| Shared benchmark input digests | Implementation comparison checks |
 | Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Implementation comparison checks and PR revision measurement |
 | Revision execution or shard validation | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
+| Go module (`go/tessera/`) | Go validation and [Go PR revision measurement](continuous-benchmarks.md#go-pull-requests) |
+| Go rules or the Go CI workflow | Go validation |
+| Shared golden vectors (`conformance/vectors/`) | Rust and Go validation |
 
-An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
+Rows that select PR revision measurement for shared tooling (plan, sampling, catalog, build configuration, package and Cargo manifests) select it for Go as well, since Go preparation runs the same plan and sampler; Rust engine sources and Rust-only harness code select only the Rust measurement. An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust, C++ and Go)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
@@ -22,11 +27,11 @@ Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics an
 
 A PR push skips a selected lane when an earlier run of the same PR passed that lane with identical inputs, so a documentation-only push after a verified engine change runs formatting, lints and Docs only. The router fingerprints each lane's inputs: the mode and blob ID of every tracked file whose `ROUTES` row selects the lane, including unrouted files, plus all of `bench/` and `tools/`. A row says when a change alone needs the lane. Tooling such as report classification can still change a lane's result or verdict without scheduling the lane. Checks fingerprint the tested merge commit. Measurement fingerprints the PR head together with its merge base, because a new base changes the comparison without changing the head.
 
-When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries to the new head the `Benchmarks (rust)` check that the marker's run published or carried (`reuse-report`). Measurement is reused only where reports publish checks, so Dependabot and fork PRs measure every time, and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
+When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries to the new head the `Benchmarks (rust)` or `Benchmarks (go)` check that the marker's run published or carried in the [PR benchmark workflow](../../.github/workflows/pr-benchmarks.yml)'s `report` job. Measurement is reused only where reports publish checks, so Dependabot and fork PRs measure every time, and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
 
 ## Lanes
 
-Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).
+Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)). Go measurement takes the smaller of its prepared case count and [`GO_CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts) as its width and runs beside the Rust shards without reducing them.
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -35,6 +40,8 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 | Miri: serial backend and Rayon ownership fixtures | two parallel jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
+| Go tests, each with formatting and vet | Linux amd64 scalar and `GOEXPERIMENT=simd`, macOS arm64 `GOEXPERIMENT=simd` | adds macOS arm64 scalar and Windows amd64 scalar |
+| Go race detector (both build modes), trace hooks and a 20-second run of each fuzz target | `go / Go race, trace and fuzz` on Linux | the same |
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Implementation harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
@@ -60,7 +67,7 @@ The Rust lint job tests the library's native `trace` hooks. It also runs Clippy 
 
 ### Implementation harness
 
-The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production implementation and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke plan and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
+The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production implementation and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke plan and generates a partial report. The same job checks the Go worker in scalar and SIMD builds and runs the Go smoke cases without the clock, checking inputs against the shared digests. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
 
 The job pins Ubuntu 24.04 LTS and the image's Clang. It installs TBB headers only when absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror, which [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296) where the Kernel.org mirror timed out. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata, and unrelated runner repositories cannot block it; retries and step and job timeouts bound the installation.
 
@@ -98,7 +105,7 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Reproduce change routing | `bun run --silent tools ci changes --base main --head HEAD` |
 | Validate a PR title | `bun run --silent tools ci title 'fix(bench): validate source snapshots'` |
 | Check every commit's DCO sign-off | `bun run --silent tools ci dco main HEAD` |
-| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix` |
+| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix`, or `--prepared DIR` to size it from a prepared pair |
 | Reproduce the comparison checks | `bun run --silent tools ci check --native` |
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |

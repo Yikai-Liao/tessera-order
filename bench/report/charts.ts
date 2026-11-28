@@ -284,7 +284,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     .filter((e) => e.speeds.every((v) => v !== null))
     .map((e) => ({ ...e, speeds: e.speeds as number[] }))
     .sort((a, b) => b.speeds[at] - a.speeds[at]);
-  const anchor = complete.find((e) => e.cell.input === "Tessera");
+  const anchor = complete.find((e) => e.name === "tessera");
   if (!anchor) return null;
   // Records rank Tessera among stable implementations only, because stability is observable
   // there; unstable ones stay in their own group for context.

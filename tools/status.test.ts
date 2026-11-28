@@ -30,11 +30,13 @@ if (args[0] === "repo") {
   console.log("owner/project");
 } else {
   const route = args.at(-1).replace("repos/owner/project/", "");
-  fs.appendFileSync(path.join(root, "requests"), route + "\\n");
+  const raw = args.includes("Accept: application/vnd.github.raw");
+  fs.appendFileSync(path.join(root, "requests"), (raw ? "raw " : "json ") + route + "\\n");
   const responses = JSON.parse(fs.readFileSync(path.join(root, "responses.json"), "utf8"));
   if (!(route in responses)) throw new Error("Unexpected API route: " + route);
   if (args.includes("--paginate") && !args.includes("--slurp")) throw new Error("Pages not slurped");
-  console.log(JSON.stringify(responses[route]));
+  if (raw) process.stdout.write(String(responses[route]));
+  else console.log(JSON.stringify(responses[route]));
 }
 `,
     { mode: 0o755 },
@@ -78,9 +80,13 @@ function check(id: number, overrides: object = {}) {
   };
 }
 
+function commit(sha: string, html_url = "commit-url") {
+  return { sha, html_url, commit: { committer: { date: "2026-11-15T00:00:00Z" } } };
+}
+
 test("status pins remote refs and reads all feedback pages", async (t) => {
   const f = await fixture(t, {
-    "commits/main": { sha: "current", html_url: "commit-url" },
+    "commits/main": commit("current"),
     "commits/current/check-runs?per_page=100": [
       { check_runs: [check(1)] },
       {
@@ -196,7 +202,7 @@ test("PR status joins merge workflows without accepting stale comments", async (
 
 test("missing workflows never become a clean verdict", async (t) => {
   const f = await fixture(t, {
-    "commits/feature%2Ftopic": { sha: "new", html_url: "new-url" },
+    "commits/feature%2Ftopic": commit("new", "new-url"),
     "commits/new/check-runs?per_page=100": [{ check_runs: [] }],
     "actions/runs?head_sha=new&per_page=100": [{ workflow_runs: [] }],
   });
@@ -208,7 +214,7 @@ test("missing workflows never become a clean verdict", async (t) => {
 
 test("main has no automatic benchmark, while an unmeasured PR is still missing", async (t) => {
   const responses = {
-    "commits/main": { sha: "current", html_url: "commit-url" },
+    "commits/main": commit("current"),
     "pulls/49": {
       number: 49,
       state: "open",
@@ -222,6 +228,7 @@ test("main has no automatic benchmark, while an unmeasured PR is still missing",
   };
   const f = await fixture(t, responses);
   assert.equal(JSON.parse(f.run("status", "main")).benchmark.state, "not_applicable");
+  assert.ok(!(await f.requests()).some((path) => path.includes("benchmark-data")));
   assert.equal(JSON.parse(f.run("status", "--pr", "49")).benchmark.state, "missing");
 });
 

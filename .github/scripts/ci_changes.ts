@@ -7,8 +7,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-const LANES = ["rust", "cpp", "comparison", "benchmark", "docs"] as const;
+const LANES = ["rust", "cpp", "go", "comparison", "benchmark", "benchmark_go", "docs"] as const;
 type Lane = (typeof LANES)[number];
+
+const PLAN_RESOLVER = /^bench\/rust\/src\/(plan(\.rs$|\/)|comparison\/mod\.rs$)/;
+const PLAN_THRESHOLDS = /^rust\/tessera-order\/src\/engine\/thresholds\.rs$/;
 
 /**
  * One row per owner of a path: the lanes whose result that path can change. The
@@ -19,11 +22,19 @@ type Lane = (typeof LANES)[number];
 const ROUTES: [RegExp, Lane[]][] = [
   // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
+  [PLAN_RESOLVER, ["comparison", "benchmark", "benchmark_go"]],
+  [PLAN_THRESHOLDS, ["rust", "benchmark", "benchmark_go", "docs"]],
+  [/^go\/tessera\//, ["go", "benchmark_go"]],
+  [/^\.github\/workflows\/pr-benchmarks\.yml$/, ["benchmark", "benchmark_go"]],
+  [/^(go\/|\.github\/actions\/go-test\/|\.github\/workflows\/go-ci\.yml$)/, ["go"]],
+  [/^bench\/go\//, ["comparison", "benchmark_go"]],
+  [/^conformance\/vectors\/benchmark-inputs\.json$/, ["comparison"]],
+  [/^conformance\/vectors\//, ["rust", "go"]],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|go-release|bench-diagnostics|main-benchmarks)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.
@@ -33,41 +44,47 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // The figures replay the library through this WebAssembly crate.
   [/^rust\/tessera-trace\//, ["docs"]],
-  [/^rust\/tessera-order\/(src\/|Cargo\.toml$)/, ["rust", "benchmark", "docs"]],
+  [/^rust\/tessera-order\/Cargo\.toml$/, ["rust", "benchmark", "benchmark_go", "docs"]],
+  [/^rust\/tessera-order\/src\//, ["rust", "benchmark", "docs"]],
   [/^rust\//, ["rust", "benchmark"]],
   [
     /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
-    ["rust", "comparison", "benchmark"],
+    ["rust", "comparison", "benchmark", "benchmark_go"],
   ],
   [
     /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
     ["cpp"],
   ],
   [/^\.github\/scripts\/install_native_tools\.sh$/, ["comparison"]],
-  // Tooling that renders or reads results and never builds or times a sorting implementation.
   [/^bench\/plot\//, ["docs"]],
-  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
+  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "benchmark_go", "docs"]],
   // The site serializes these colours into its implementation picker at build time.
   [/^bench\/report\/implementation-tone\.ts$/, ["docs"]],
   [
-    /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
+    /^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
+    ["benchmark", "benchmark_go"],
+  ],
+  // Tooling that renders or reads results and never builds or times a sorting implementation.
+  [
+    /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
+  [/^bench\/tracking\//, ["benchmark", "benchmark_go"]],
+  [/^bench\/session\.ts$|^bench\/rust\/src\/bin\/compare\.rs$/, ["comparison", "benchmark_go"]],
+  [/^bench\/revisions\.ts$/, ["comparison"]],
+  [/^bench\/rust\/(native\/|tests\/|src\/(allocation\.rs$|bin\/memory\.rs$))/, ["comparison"]],
   [
-    /^bench\/tracking\/|^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
-    ["benchmark"],
-  ],
-  [/^bench\/(session|revisions)\.ts$/, ["comparison"]],
-  [
-    /^bench\/rust\/(native\/|tests\/|src\/(allocation\.rs$|bin\/(compare|memory)\.rs$))/,
-    ["comparison"],
+    /^bench\/rust\/(build\.rs|Cargo\.toml|src\/lib\.rs)$/,
+    ["comparison", "benchmark", "benchmark_go"],
   ],
   [/^bench\/rust\//, ["comparison", "benchmark"]],
   [/^bench\/plans\/diagnostics\.toml$/, []],
+  [/^bench\/plans\/continuous\.toml$/, ["comparison", "benchmark", "benchmark_go"]],
   [/^bench\/plans\//, ["comparison", "benchmark"]],
+  [/^bench\/catalog\.(toml|ts)$/, ["comparison", "benchmark", "benchmark_go", "docs"]],
   [/^bench\/catalog\./, ["comparison", "benchmark", "docs"]],
-  [/^(bench|tools)\//, ["comparison", "benchmark"]],
-  [/^(package\.json|bun\.lock)$/, ["comparison", "benchmark", "docs"]],
+  [/^(bench|tools)\//, ["comparison", "benchmark", "benchmark_go"]],
+  [/^(package\.json|bun\.lock)$/, ["comparison", "benchmark", "benchmark_go", "docs"]],
   [/^\.github\/workflows\/docs\.yml$/, ["docs"]],
 ];
 
@@ -82,7 +99,15 @@ const lanesOf = (path: string) => ROUTES.find(([pattern]) => pattern.test(path))
 
 /** Select automatic checks once; paths no row names select every lane. */
 export function select(paths: string[]) {
-  const selected = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+  const selected = {
+    rust: false,
+    cpp: false,
+    go: false,
+    comparison: false,
+    benchmark: false,
+    benchmark_go: false,
+    docs: false,
+  };
   for (const path of paths) for (const lane of lanesOf(path)) selected[lane] = true;
   return selected;
 }
@@ -126,10 +151,9 @@ function inputs(revision: string, lane: Lane) {
  * the measurement compares the PR head with its merge base instead.
  */
 export function marker(lane: Lane, revisions: { tested: string; head: string; baseline: string }) {
-  const text =
-    lane === "benchmark"
-      ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}`
-      : inputs(revisions.tested, lane);
+  const text = lane.startsWith("benchmark")
+    ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}`
+    : inputs(revisions.tested, lane);
   return `ci-pass-${lane}-${createHash("sha256").update(text).digest("hex").slice(0, 40)}`;
 }
 
@@ -194,7 +218,7 @@ async function reuse(
 ) {
   const baseline = git("merge-base", revisions.base, revisions.head).trim();
   const lanes = LANES.filter(
-    (lane) => selected[lane] && (lane !== "benchmark" || github.published),
+    (lane) => selected[lane] && (!lane.startsWith("benchmark") || github.published),
   );
   const markers = lanes.map((lane) => ({
     lane,
@@ -212,11 +236,16 @@ async function reuse(
         `- ${lane}: reused [run ${run.id}](${github.server}/${github.repository}/actions/runs/${run.id}) for identical inputs\n`,
     )
     .join("");
+  const carriedCheck = (lane: "benchmark" | "benchmark_go") => {
+    const run = reused[lane];
+    return run ? `${run.head_sha}:${run.id}` : "";
+  };
   return {
     lanes: Object.fromEntries(LANES.map((lane) => [lane, selected[lane] && !reused[lane]])),
     record: JSON.stringify(markers.map(({ name }) => name)),
     // The check to carry is the one the marker's run published or carried.
-    benchmark_reused: reused.benchmark ? `${reused.benchmark.head_sha}:${reused.benchmark.id}` : "",
+    benchmark_go_reused: carriedCheck("benchmark_go"),
+    benchmark_reused: carriedCheck("benchmark"),
     summary,
   };
 }
@@ -258,6 +287,8 @@ export async function routeChanges(
     cpp_present: await present("cpp/CMakeLists.txt"),
     record: reused?.record ?? "[]",
     benchmark_reused: reused?.benchmark_reused ?? "",
+    benchmark_go_reused: reused?.benchmark_go_reused ?? "",
+    tracking_go: selected.benchmark_go,
   };
   if (out)
     await appendFile(

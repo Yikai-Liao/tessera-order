@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ import { loadPlan, planFeatures } from "../plan.ts";
 import { simdFeatures } from "../workspace.ts";
 import { revisionThreads, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
-import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
+import { comparisonCpus, inspectGoPair, selectedCases, serialBaselineManifest } from "./runner.ts";
 import { measureSamples, serialLanes } from "./samples.ts";
 
 test("retained budgets survive catalog changes without accepting incomplete samples", async (t) => {
@@ -222,6 +223,18 @@ test("revision scheduling reserves the largest selected worker count", async () 
     assert.throws(() => revisionThreads({ ...local, implementations }), /only tessera/);
 });
 
+test("revision scheduling admits only the Tessera implementation for its language", async () => {
+  const rust = await loadPlan("continuous");
+  const go = { ...rust, implementations: ["go-tessera"] };
+  assert.equal(revisionThreads(go, "go"), 4);
+  assert.throws(() => revisionThreads(rust, "go"), /only go-tessera/);
+  assert.throws(() => revisionThreads(go, "rust"), /only tessera/);
+  assert.throws(
+    () => revisionThreads({ ...go, implementations: ["go-tessera", "go-slices"] }, "go"),
+    /only go-tessera/,
+  );
+});
+
 test("revision comparison enables historical SIMD without changing current builds", () => {
   assert.deepEqual(simdFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
     "portable-simd",
@@ -250,4 +263,101 @@ test("serial lanes take one CPU per physical core", async () => {
     throw new Error("no topology");
   };
   assert.deepEqual(await serialLanes("4,5,6,7", unreadable), ["4"]);
+});
+
+test("Go preparation checks the full inventory, digests and provenance before sampling", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-go-pair-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const id = criterionId(
+    { ty: "u64", distribution: "random", len: 48, operation: SORT },
+    "serial",
+    "go",
+  );
+  const requests = {
+    [id]: {
+      id,
+      case: { len: 48 },
+      record_bytes: 8,
+      batch: 1,
+      implementation: "go-tessera",
+      threads: 1,
+      parallel: false,
+      samples: 1,
+      warm_ns: 1,
+      window_ns: 1,
+    },
+  };
+  const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };
+  const writeWorker = (path: string, override: object = {}) =>
+    writeFile(
+      path,
+      "#!" +
+        process.execPath +
+        "\n" +
+        "const override = " +
+        JSON.stringify(override) +
+        ";\n" +
+        'for await (const line of require("node:readline").createInterface({input:process.stdin})) {\n' +
+        "  const {action,id} = JSON.parse(line);\n" +
+        '  const replies = {list:{id,route:"sort"},digest:{id,digest:"0123456789abcdef"},info:{GoVersion:"go1.27.4",Settings:[{Key:"GOEXPERIMENT",Value:"simd"}],Deps:[]}};\n' +
+        "  const change = !override.only || id === override.only ? override[action] : {};\n" +
+        "  console.log(JSON.stringify({...replies[action],...change}));\n" +
+        "}\n",
+      { mode: 0o755 },
+    );
+  await writeWorker(binaries.baseline);
+  await writeWorker(binaries.current);
+  const select = () =>
+    selectedCases(binaries, "unused", undefined, directory, ["serial"], requests);
+  assert.deepEqual(await select(), [id]);
+  await inspectGoPair(binaries, requests, [id]);
+  for (const [name, override, message] of [
+    ["missing digest", { digest: { digest: null } }, /Missing Go input digest/],
+    ["differing digest", { digest: { digest: "1123456789abcdef" } }, /input digests differ/],
+    ["altered provenance", { info: { GoVersion: "go1.27.5" } }, /build settings differ/],
+  ] as const)
+    await t.test(name, async () => {
+      await writeWorker(binaries.current, override);
+      await assert.rejects(inspectGoPair(binaries, requests, [id]), message);
+    });
+  await t.test("missing planned ID", async () => {
+    const second = id.replace("/48/", "/49/");
+    const complete = { ...requests, [second]: { ...requests[id], id: second, case: { len: 49 } } };
+    const decline = { only: second, list: { route: null, decline: "unsupported" } };
+    await writeWorker(binaries.baseline, decline);
+    await writeWorker(binaries.current, decline);
+    await assert.rejects(
+      selectedCases(binaries, "unused", undefined, directory, ["serial"], complete),
+      /inventory does not cover the prepared plan/,
+    );
+  });
+});
+
+test("Go preparation returns absent-module baseline before building", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-no-go-baseline-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    join(directory, "git"),
+    '#!/bin/sh\ncase "$1" in rev-parse) echo "$4";; ls-tree) exit 0;; *) exit 2;; esac\n',
+    { mode: 0o755 },
+  );
+  const out = join(directory, "out");
+  const processResult = spawnSync(
+    process.execPath,
+    ["tools/index.ts", "continuous", "prepare", "base", "--language", "go", "--out", out],
+    {
+      env: { ...process.env, PATH: directory + ":" + process.env.PATH },
+    },
+  );
+  assert.equal(processResult.status, 0, processResult.stderr.toString());
+  assert.deepEqual(JSON.parse(processResult.stdout.toString()).result, {
+    kind: "no-baseline",
+    baseline: "base^{commit}",
+    head: "HEAD^{commit}",
+  });
+  await assert.rejects(readFile(join(out, "prepared.json")), { code: "ENOENT" });
 });

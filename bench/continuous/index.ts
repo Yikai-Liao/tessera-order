@@ -30,6 +30,8 @@ interface PublicationOptions {
     prepared: string;
     reports?: string;
     publish?: boolean;
+    language?: "rust" | "go";
+    noBaseline?: boolean;
     number?: string;
     baseRef?: string;
   };
@@ -50,40 +52,47 @@ export async function publishReport({
 }: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const publish = inputs.publish !== false;
+  const { language = "rust" } = inputs;
+  const noBaseline = language === "go" && inputs.noBaseline;
   const runUrl = workflowUrl(context);
-  const checkId = publish ? await startReport({ github, context, hash }) : undefined;
+  const checkId = publish ? await startReport({ github, context, hash, language }) : undefined;
   let summary: ReportSummary | undefined;
   let trend: TrendSummary | null = null;
   let reason = "";
-  try {
-    const runs = await readPaired(artifacts, { hash, baseHash }, inputs.prepared);
-    let cloud: BencherReport | undefined;
-    if (inputs.reports) {
-      try {
-        cloud = JSON.parse(await readFile(join(inputs.reports, "bencher.json"), "utf8"));
-        validateCloud(cloud!, runs, number);
-      } catch (error) {
-        cloud = undefined;
-        core.notice(`Cloud links unavailable: ${String(error)}`);
+  if (!noBaseline)
+    try {
+      const runs = await readPaired(artifacts, { hash, baseHash, language }, inputs.prepared);
+      let cloud: BencherReport | undefined;
+      if (inputs.reports) {
+        try {
+          cloud = JSON.parse(await readFile(join(inputs.reports, "bencher.json"), "utf8"));
+          validateCloud(cloud!, runs, number);
+        } catch (error) {
+          cloud = undefined;
+          core.notice(`Cloud links unavailable: ${String(error)}`);
+        }
       }
-    }
-    summary = pairedSummary(runs, cloud);
-    trend = summarizePairedTrend(summary, "rust");
-    if (cloud) {
-      try {
-        trend =
-          summarizePairedTrend(summary, "rust", cloud, await loadHistory(cloud, fetchHistory)) ??
-          trend;
-      } catch (error) {
-        core.notice(`PR history unavailable: ${String(error)}`);
+      summary = pairedSummary(runs, cloud);
+      trend = summarizePairedTrend(summary, language);
+      if (cloud) {
+        try {
+          trend =
+            summarizePairedTrend(
+              summary,
+              language,
+              cloud,
+              await loadHistory(cloud, fetchHistory),
+            ) ?? trend;
+        } catch (error) {
+          core.notice(`PR history unavailable: ${String(error)}`);
+        }
       }
+    } catch (error) {
+      reason = String(error);
     }
-  } catch (error) {
-    reason = String(error);
-  }
   let code: Awaited<ReturnType<typeof codeChange>> | undefined;
   try {
-    code = await readCodeChange(baseHash, hash);
+    if (language === "rust") code = await readCodeChange(baseHash, hash);
   } catch (error) {
     core.notice(`Core engine line analysis unavailable: ${String(error)}`);
   }
@@ -95,7 +104,7 @@ export async function publishReport({
     links = await publishImages({
       github,
       context,
-      language: "rust",
+      language,
       hash,
       number,
       images: publish
@@ -110,7 +119,7 @@ export async function publishReport({
     imagesUnavailable = true;
   }
   const options = {
-    language: "rust",
+    language,
     hash,
     runUrl,
     baseRef,
@@ -119,16 +128,24 @@ export async function publishReport({
     imagesUnavailable,
     codeChange: code,
   };
-  const body = summary ? render(summary, options) : renderFailure({ ...options, reason });
+  const body = noBaseline
+    ? `### Benchmarks · ${language}\n\n**No comparable baseline**. The Go module is absent at \`${baseHash}\`. [Workflow run](${runUrl}).`
+    : summary
+      ? render(summary, options)
+      : renderFailure({ ...options, reason });
   if (checkId !== undefined)
     await github.rest.checks.update({
       ...context.repo,
       check_run_id: checkId,
       status: "completed",
-      conclusion: !summary || summary.regressions ? "failure" : "success",
+      conclusion: noBaseline ? "neutral" : !summary || summary.regressions ? "failure" : "success",
       details_url: runUrl,
       output: {
-        title: summary ? headline(summary) : "Results could not be validated",
+        title: noBaseline
+          ? "No comparable baseline"
+          : summary
+            ? headline(summary)
+            : "Results could not be validated",
         summary: body.slice(0, 65000),
       },
     });
@@ -138,11 +155,12 @@ export async function publishReport({
       github,
       repo: context.repo,
       number: Number(number),
-      language: "rust",
+      language,
       hash,
       body,
       core,
     });
+  if (noBaseline) return;
   if (!summary) throw new Error("Benchmark results could not be validated");
   if (!publish && summary.regressions)
     throw new Error("Benchmark regression alerts; see the job summary");

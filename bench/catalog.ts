@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { decodeConfig } from "./config.ts";
 import type { Execution } from "./execution.ts";
-import { executionThreads, parseExecution } from "./execution.ts";
+import { executionThreads, parseExecution, timedExecution } from "./execution.ts";
 
 export {
   compareExecutions,
@@ -294,17 +294,23 @@ export function parseColumnId(id: string): Column {
 }
 
 /** Format the Criterion ID `rust/<case>/<execution>`. */
-export function criterionId(input: CaseIdentity, execution: Execution) {
-  return `rust/${caseId(input)}/${execution}`;
+export function criterionId(
+  input: CaseIdentity,
+  execution: Execution,
+  language: "rust" | "go" = "rust",
+) {
+  return `${language}/${caseId(input)}/${execution}`;
 }
 
 /** Decode a Criterion ID into its case and execution. */
 export function parseCriterionId(id: string): CaseIdentity & { execution: Execution } {
   const separator = id.lastIndexOf("/");
-  if (!id.startsWith("rust/") || separator < 0) throw new Error(`Invalid Criterion ID: ${id}`);
+  const prefix = /^(?:rust|go)\//.exec(id)?.[0];
+  const execution = timedExecution(id);
+  if (!prefix || !execution) throw new Error(`Invalid Criterion ID: ${id}`);
   return {
-    ...parseCaseId(id.slice("rust/".length, separator)),
-    execution: parseExecution(id.slice(separator + 1)),
+    ...parseCaseId(id.slice(prefix.length, separator)),
+    execution,
   };
 }
 

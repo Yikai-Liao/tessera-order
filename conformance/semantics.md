@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: the Rust crate has supported stable full sorting since 0.1, under the `stable_` names that 0.2 renames. Cached-key sorting, argsort and single-rank selection are additions for 0.2. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
+Status: the Rust crate has supported stable full sorting since 0.1, under the `stable_` names that 0.2 renames. Cached-key sorting, argsort and single-rank selection are additions for 0.2. Cross-language golden vectors in `conformance/vectors/` record key encodings and stable orderings that the Rust and Go tests check. A published crate or module lacks that directory and skips them; repository CI sets `TESSERA_REQUIRE_VECTORS=1` so a missing file fails.
 
 ## Sort contracts
 
@@ -75,5 +75,11 @@ The optional `rayon` feature exposes `par_sort`, `par_sort_by_key`, `par_argsort
 With pool width `P`, parallel calls use O(P√n) auxiliary space for fixed record size and key width. Root scratch uses O(√(nP)). Each of at most `R` root-bucket finishers may own serial scratch, including when suspended by a reentrant callback; `R` is the fixed root fan-out, not the worker count. A complete child may use the [bounded parallel tile allowance](../docs/explain/tiles.md#parallel-child-allowance); larger children keep ordinary tiles. Checked-out and cached scratch both count toward the call, and nested public invocations have separate bounds. Direct-key counting adds O(PR) histogram storage. No contiguous n-record output buffer or private bucket staging is allocated for in-place sorting; `par_argsort` and `par_argsort_by_key` allocate the O(n) index output plus the same O(P√n) auxiliary workspace. Rayon runtime storage and thread stacks are separate. In-place sorting records require `Send`, not `Sync`, `Copy` or `Clone`; parallel argsort borrows source records across workers and requires `Sync`, not `Send`, `Copy` or `Clone`. The by-key entry points require `Fn + Sync` rather than `FnMut`; the function need not be `Send` or `Clone`, and key values remain local to each task. Key evaluations may run concurrently and in any order. The serial APIs retain their existing bounds.
 
 ## Language adapters
+
+### Go
+
+The Go module in `go/tessera/` follows the ordering, stability, key-encoding and cached-key rules above, with one difference for panics. If a key function panics, the panic propagates and the contents of the slice are unspecified: records may be duplicated or missing, as with the Go standard library's sorting functions. Go's garbage collector makes this memory-safe, so the implementation does not restore records. A normal return, including one under inconsistent keys, leaves every record in the slice exactly once, and a returned argsort is a permutation.
+
+### Other languages
 
 The planned C++ implementation follows the same ordering rules. The [planned Python binding](../docs/design/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
+import { benchmarkCheck, marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -56,6 +56,7 @@ export interface RepositoryStatus {
   }[];
   benchmark: { state: string; title: string | null };
   report: string | null;
+  goBenchmark?: { state: string; title: string | null; report: string | null };
   details?: {
     url: string;
     checks: Check[];
@@ -71,18 +72,13 @@ async function repositoryGitHub(root: string) {
     ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
     { cwd: root, capture: true },
   );
-  const read = async (path: string, paginate = false) =>
-    JSON.parse(
-      await command(
-        "gh",
-        ["api", ...(paginate ? ["--paginate", "--slurp"] : []), `repos/${repo}/${path}`],
-        { cwd: root, capture: true },
-      ),
-    );
+  const read = (path: string, args: string[] = []) =>
+    command("gh", ["api", ...args, `repos/${repo}/${path}`], { cwd: root, capture: true });
   return {
     repo,
-    get: <T>(path: string): Promise<T> => read(path),
-    pages: <T>(path: string): Promise<T[]> => read(path, true),
+    get: async <T>(path: string): Promise<T> => JSON.parse(await read(path)),
+    pages: async <T>(path: string): Promise<T[]> =>
+      JSON.parse(await read(path, ["--paginate", "--slurp"])),
   };
 }
 
@@ -138,9 +134,10 @@ export async function readStatus(
     };
     url = pull.html_url;
   } else {
-    const commit = await api.get<{ sha: string; html_url: string }>(
-      `commits/${encodeURIComponent(target.ref)}`,
-    );
+    const commit = await api.get<{
+      sha: string;
+      html_url: string;
+    }>(`commits/${encodeURIComponent(target.ref)}`);
     resolved = { ref: target.ref, head: commit.sha, merge: null };
     url = commit.html_url;
   }
@@ -155,7 +152,6 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const check = candidates.find((candidate) => candidate.name === BENCHMARK_CHECK);
   const currentRuns = runPages
     .flat()
     .flatMap((page) => page.workflow_runs)
@@ -170,14 +166,17 @@ export async function readStatus(
       return { run, jobs: pages.flatMap((page) => page.jobs).filter(hasUnfinishedOrFailedResult) };
     }),
   );
-  const current = commentPages
-    .flat()
-    .filter(
-      (comment) =>
-        comment.user?.login === "github-actions[bot]" &&
-        comment.body.includes(marker("rust", resolved.head)),
-    )
-    .at(-1);
+  const comments = commentPages.flat();
+  const feedback = (language: "rust" | "go") => ({
+    check: candidates.find((candidate) => candidate.name === benchmarkCheck(language)),
+    comment: comments.findLast(
+      (entry) =>
+        entry.user?.login === "github-actions[bot]" &&
+        entry.body.includes(marker(language, resolved.head)),
+    ),
+  });
+  const { check, comment: current } = feedback("rust");
+  const { check: goCheck, comment: goComment } = feedback("go");
   const comment = current ? { url: current.html_url, body: current.body } : null;
   return {
     repository: api.repo,
@@ -211,12 +210,22 @@ export async function readStatus(
       title: check?.output.title ?? null,
     },
     report: comment?.url ?? null,
+    ...(pull
+      ? {
+          goBenchmark: {
+            state: goCheck?.conclusion ?? goCheck?.status ?? "missing",
+            title: goCheck?.output.title ?? null,
+            report: goComment?.html_url ?? goCheck?.details_url ?? null,
+          },
+        }
+      : {}),
     ...(details
       ? {
           details: {
             url,
-            checks: (check ? [check] : []).map(
-              ({ id, name, status, conclusion, external_id, details_url, output }) => ({
+            checks: [check, goCheck]
+              .filter((entry): entry is Check => entry !== undefined)
+              .map(({ id, name, status, conclusion, external_id, details_url, output }) => ({
                 id,
                 name,
                 status,
@@ -224,8 +233,7 @@ export async function readStatus(
                 external_id,
                 details_url,
                 output,
-              }),
-            ),
+              })),
             workflows: workflows.map(({ run, jobs }) => ({
               id: run.id,
               head: run.head_sha,
@@ -263,5 +271,9 @@ export function formatStatus(status: RepositoryStatus) {
   }
   const { state, title } = status.benchmark;
   lines.push(`Benchmark: ${state}${title ? ` · ${title}` : ""}`);
+  if (status.goBenchmark)
+    lines.push(
+      `Benchmarks (go): ${status.goBenchmark.state}${status.goBenchmark.title ? ` · ${status.goBenchmark.title}` : ""}`,
+    );
   return lines.join("\n");
 }

@@ -40,6 +40,12 @@ implementations = [
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
   { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
   { id = "rayon-stable", label = "Rayon stable", stable = true, family = "comparison", adapter = "rayon", parallel = "only", routes = { argsort = { call = "par_sort_by on indices" } } },
+  { id = "go-tessera", label = "Tessera (Go)", stable = true, family = "radix", adapter = "go", parallel = "also", routes = { partition-buckets = { call = "SortByCachedKey plus offsets" } } },
+  { id = "go-slices-sort", label = "slices.Sort (Go)", stable = false, family = "comparison", adapter = "go" },
+  { id = "go-slices-stable", label = "slices.SortStableFunc (Go)", stable = true, family = "comparison", adapter = "go", routes = { argsort = { call = "stable sort on indices" }, select_nth = { call = "full sort" }, partition-buckets = { call = "stable sort on categories plus offsets" } } },
+  { id = "go-sort-stable", label = "sort.Stable (Go)", stable = true, family = "comparison", adapter = "go", routes = { argsort = { call = "stable sort on indices" }, select_nth = { call = "full sort" }, partition-buckets = { call = "stable sort on categories plus offsets" } } },
+  { id = "go-radsort", label = "radsort (Go)", detail = "klauspost/radsort", stable = true, family = "radix", adapter = "go", parallel = "also", routes = { argsort = { call = "radix sort on indices" }, select_nth = { call = "full sort" }, partition-buckets = { call = "radix sort on categories plus offsets" } } },
+  { id = "go-pdqsort", label = "pdqsort (Go)", detail = "zhangyunhao116/pdqsort", stable = false, family = "comparison", adapter = "go" },
 ]
 
 types = [

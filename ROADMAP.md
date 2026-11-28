@@ -49,6 +49,17 @@ Do not reopen flat-state removal, fused order/variation, block-only tiles or rej
 
 An independent track binding the Rust crate; see the [design](docs/design/python-binding.md). It needs its own publication workflow, interpreter/ABI matrix and wheel install tests when it starts, not inactive CI.
 
+## Go
+
+A pure Go port in [`go/tessera/`](go/tessera/), following the [Go rules](go/AGENTS.md); it passes the shared golden vectors.
+
+1. **First hosted evidence.** The benchmark, PR feedback, main tracking and release workflows have not yet run on GitHub. Confirm them on the first Go PR and a dispatched main run before the first `go/tessera/v0.1.0` tag, then decide workspace pooling (`sync.Pool`) and Go memory measurement from those results.
+
+Divergences from the Rust engine, each kept until hosted benchmarks show a large loss on a complete operation:
+
+- **SIMD coverage.** Go 1.27's portable `simd` package has no lane shuffles, slides or mask-to-bitmask extraction, so the `u16` prefix network and SIMD MSD tile finishing stay scalar. Only order scans over direct fixed-width integer slices are vectorized; `int` and `uint` slices stay scalar because loading them as 64-bit lanes needs a copy or `unsafe` reinterpretation. Revisit when the package gains these operations.
+- **Parallel ledger movement** runs under one mutex instead of Rust's per-owner locks; shard scatter and bucket refinement still run in parallel. Split the lock if the benchmarks show movement limiting scaling.
+
 ## C++
 
 1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
@@ -80,4 +91,3 @@ Rerun the StarRocks and ClickHouse benchmarks against a released crate and link 
 - A dedicated unstable kernel without a saving-preserving general primitive ([evidence](docs/design/evidence.md#nodes-movement-and-unstable-contracts)).
 - vcpkg and Conan packages: on demand after C++ releases.
 - A `core`-only build taking scratch from the caller instead of `alloc`: only for a real use case without a global allocator.
-- Go: only if a real use case appears.

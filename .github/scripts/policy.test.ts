@@ -2,12 +2,19 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { checkDco } from "./check-dco.ts";
-import { changedPaths, changesTrustedFiles, findMarker, marker, select } from "./ci_changes.ts";
+import {
+  changedPaths,
+  changesTrustedFiles,
+  findMarker,
+  marker,
+  routeChanges,
+  select,
+} from "./ci_changes.ts";
 import {
   BOT_EMAIL,
   isDependabotUpdate,
@@ -44,12 +51,21 @@ function replace(value: object, path: string[], replacement: unknown) {
   return copy;
 }
 
-test("routing keeps library, comparison and revision checks with their owners", () => {
-  const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+test("routing keeps library, comparison and revision checks with their owners", async () => {
+  const none = {
+    rust: false,
+    cpp: false,
+    go: false,
+    comparison: false,
+    benchmark: false,
+    benchmark_go: false,
+    docs: false,
+  };
   const owners: [string[], Partial<typeof none>][] = [
+    [["rust/tessera-order/src/lib.rs"], { rust: true, benchmark: true, docs: true }],
     [
-      ["rust/tessera-order/src/lib.rs", "rust/tessera-order/Cargo.toml"],
-      { rust: true, benchmark: true, docs: true },
+      ["rust/tessera-order/Cargo.toml"],
+      { rust: true, benchmark: true, benchmark_go: true, docs: true },
     ],
     [["rust/tessera-trace/src/lib.rs", "rust/tessera-trace/Cargo.lock"], { docs: true }],
     [
@@ -62,14 +78,45 @@ test("routing keeps library, comparison and revision checks with their owners", 
     ],
     [
       ["Cargo.lock", "Cargo.toml", ".cargo/config.toml", "rust-toolchain.toml"],
-      { rust: true, comparison: true, benchmark: true },
+      { rust: true, comparison: true, benchmark: true, benchmark_go: true },
     ],
     [["cpp/include/sort.hpp", ".github/workflows/cpp-ci.yml"], { cpp: true }],
+    [
+      ["go/AGENTS.md", ".github/actions/go-test/action.yml", ".github/workflows/go-ci.yml"],
+      { go: true },
+    ],
+    [
+      ["go/tessera/go.mod", "go/tessera/internal/engine/order.go"],
+      { go: true, benchmark_go: true },
+    ],
+    [
+      [
+        "bench/rust/src/plan.rs",
+        "bench/rust/src/plan/operation.rs",
+        "bench/rust/src/comparison/mod.rs",
+      ],
+      { comparison: true, benchmark: true, benchmark_go: true },
+    ],
+    [[".github/workflows/pr-benchmarks.yml"], { benchmark: true, benchmark_go: true }],
+    [
+      ["rust/tessera-order/src/engine/thresholds.rs"],
+      { rust: true, benchmark: true, benchmark_go: true, docs: true },
+    ],
+    [["conformance/vectors/ordering.json"], { rust: true, go: true }],
+    [
+      [
+        "bench/go/check.go",
+        "bench/go/worker_test.go",
+        "bench/rust/src/bin/compare.rs",
+        "bench/session.ts",
+      ],
+      { comparison: true, benchmark_go: true },
+    ],
+    [["conformance/vectors/benchmark-inputs.json"], { comparison: true }],
     [
       [
         "bench/rust/native/ips.cpp",
         "bench/rust/src/allocation.rs",
-        "bench/rust/src/bin/compare.rs",
         "bench/rust/src/bin/memory.rs",
         "bench/rust/tests/comparison.rs",
       ],
@@ -78,14 +125,9 @@ test("routing keeps library, comparison and revision checks with their owners", 
     [
       [
         "bench/rust/src/case.rs",
-        "bench/rust/build.rs",
-        "bench/workspace.ts",
-        "tools/process.ts",
         "bench/rust/src/comparison/record.rs",
         "bench/rust/src/comparison/variant.rs",
         "bench/rust/src/comparison/run.rs",
-        "bench/release.ts",
-        "bench/plans/continuous.toml",
         "bench/plans/local.toml",
         "bench/plans/smoke.toml",
       ],
@@ -93,9 +135,26 @@ test("routing keeps library, comparison and revision checks with their owners", 
     ],
     [
       [
+        "bench/rust/build.rs",
+        "bench/workspace.ts",
+        "tools/process.ts",
+        "bench/release.ts",
+        "bench/local/go.ts",
+        "bench/plans/continuous.toml",
+      ],
+      { comparison: true, benchmark: true, benchmark_go: true },
+    ],
+    [
+      [
         "bench/continuous/paired.ts",
         "bench/local/runner.ts",
+        "bench/local/samples.ts",
         "tools/continuous.ts",
+      ],
+      { benchmark: true, benchmark_go: true },
+    ],
+    [
+      [
         "bench/tracking/run.ts",
         "bench/tracking/build.ts",
         "bench/tracking/jobs.ts",
@@ -103,12 +162,19 @@ test("routing keeps library, comparison and revision checks with their owners", 
         "bench/tracking/run.sh",
         "bench/tracking/Dockerfile",
       ],
-      { benchmark: true },
+      { benchmark: true, benchmark_go: true },
     ],
-    [["bench/tracking/result.ts", "bench/tracking/history.ts"], { benchmark: true, docs: true }],
+    [
+      ["bench/tracking/result.ts", "bench/tracking/history.ts"],
+      { benchmark: true, benchmark_go: true, docs: true },
+    ],
     [["bench/report/implementation-tone.ts"], { docs: true }],
     [["docs/explain/keys.md", "conformance/semantics.md"], { docs: true }],
-    [["package.json", "bun.lock"], { comparison: true, benchmark: true, docs: true }],
+    [
+      ["package.json", "bun.lock"],
+      { comparison: true, benchmark: true, benchmark_go: true, docs: true },
+    ],
+    [["bench/plot/changes.ts", "bench/plot/curves.ts"], { docs: true }],
     [
       [
         "tools/status.ts",
@@ -119,6 +185,8 @@ test("routing keeps library, comparison and revision checks with their owners", 
         "biome.json",
         "tsconfig.json",
         "bench/continuous/markdown.ts",
+        "bench/local/report.ts",
+        ".github/scripts/publish-report.ts",
         "bench/continuous/index.test.ts",
         "bench/rust/native/build.test.ts",
         "bench/plans/diagnostics.toml",
@@ -130,6 +198,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
         ".github/workflows/release.yml",
         ".github/workflows/rust-release.yml",
         ".github/workflows/cpp-release.yml",
+        ".github/workflows/go-release.yml",
         ".github/workflows/bench-diagnostics.yml",
         ".github/workflows/main-benchmarks.yml",
       ],
@@ -139,7 +208,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
   for (const [paths, expected] of owners)
     for (const path of paths) assert.deepEqual(select([path]), { ...none, ...expected }, path);
   // A path no row names, and an unavailable base, select every lane.
-  for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
+  for (const path of ["unknown-input", ".github/workflows/ci.yml", ".gitignore"])
     assert.ok(Object.values(select([path])).every(Boolean), path);
   assert.deepEqual(select(["rust/tessera-order/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
@@ -149,6 +218,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
     docs: true,
   });
   assert.equal(changedPaths(undefined, "HEAD"), null);
+  assert.equal((await routeChanges(undefined, "HEAD")).benchmark_go, true);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
 });
 
@@ -173,10 +243,69 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
     const base = await commit("docs/guide.md", "a");
     const docs = await commit("docs/guide.md", "b");
     const workflow = await commit(".github/workflows/ci.yml", "b");
+    const go = await commit("go/tessera/go.mod", "a");
+    const plan = await commit("bench/rust/src/plan.rs", "plan");
+    const rustThresholds = await commit(
+      "rust/tessera-order/src/engine/thresholds.rs",
+      "thresholds",
+    );
+    const goThresholds = await commit("go/tessera/internal/engine/thresholds.go", "thresholds");
+    const vectors = await commit("conformance/vectors/ordering.json", "a");
+    const goInputs = [vectors];
+    for (const path of [
+      "bench/plans/continuous.toml",
+      "bench/local/samples.ts",
+      "bench/go/check.go",
+      "bench/continuous/markdown.ts",
+      "Cargo.lock",
+    ])
+      goInputs.push(await commit(path, "input"));
+    const trackingInputs: [string, string, string][] = [];
+    for (const path of ["bench/release.ts", "bench/workspace.ts", "bench/tracking/build.ts"]) {
+      const baseline = git("rev-parse", "HEAD");
+      trackingInputs.push([path, baseline, await commit(path, "input")]);
+    }
     process.chdir(root);
     const at = (tested: string) => ({ tested, head: tested, baseline: base });
     assert.equal(marker("rust", at(base)), marker("rust", at(docs)));
     assert.notEqual(marker("docs", at(base)), marker("docs", at(docs)));
+    assert.equal(marker("go", at(base)), marker("go", at(docs)));
+    assert.notEqual(marker("go", at(workflow)), marker("go", at(go)));
+    for (const lane of ["rust", "go"] as const)
+      assert.notEqual(marker(lane, at(goThresholds)), marker(lane, at(vectors)));
+    const outputs = join(root, "outputs");
+    assert.equal((await routeChanges(workflow, go, outputs)).go, true);
+    assert.match(await readFile(outputs, "utf8"), /^go=true$/m);
+    assert.equal((await routeChanges(workflow, go)).benchmark_go, true);
+    assert.equal((await routeChanges(workflow, go)).tracking_go, true);
+    assert.equal((await routeChanges(go, plan)).benchmark_go, true);
+    assert.equal((await routeChanges(go, plan)).tracking_go, true);
+    assert.equal((await routeChanges(plan, rustThresholds)).benchmark_go, true);
+    assert.equal((await routeChanges(plan, rustThresholds)).tracking_go, true);
+    assert.equal((await routeChanges(rustThresholds, goThresholds)).benchmark_go, true);
+    assert.equal((await routeChanges(rustThresholds, goThresholds)).tracking_go, true);
+    assert.equal((await routeChanges(base, docs)).tracking_go, false);
+    assert.equal((await routeChanges(goThresholds, vectors)).benchmark_go, false);
+    for (const [path, baseline, head] of trackingInputs)
+      assert.equal((await routeChanges(baseline, head)).tracking_go, true, path);
+    for (const [i, head] of goInputs.slice(1).entries()) {
+      const baseline = goInputs[i];
+      assert.notEqual(marker("benchmark_go", at(baseline)), marker("benchmark_go", at(head)));
+      assert.notEqual(
+        marker("benchmark_go", { ...at(head), baseline }),
+        marker("benchmark_go", { ...at(head), baseline: head }),
+      );
+    }
+    assert.notEqual(
+      marker("benchmark_go", at(go)),
+      marker("benchmark_go", { ...at(go), baseline: go }),
+    );
+    assert.notEqual(marker("benchmark_go", at(go)), marker("benchmark_go", at(plan)));
+    assert.notEqual(marker("benchmark_go", at(plan)), marker("benchmark_go", at(rustThresholds)));
+    assert.notEqual(
+      marker("benchmark_go", at(rustThresholds)),
+      marker("benchmark_go", at(goThresholds)),
+    );
     // Measurement also depends on the baseline it compares against.
     assert.notEqual(
       marker("benchmark", at(base)),

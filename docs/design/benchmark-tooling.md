@@ -27,6 +27,7 @@
 | `bench/local/` | Commit comparison, adjacent sample scheduling, prepared/measured results (`model.ts`), layout and counter studies, report |
 | `bench/release.ts`, `bench/session.ts` | Preparation, retained builds and session recovery |
 | `bench/rust/` | Timing, allocation measurement and resumable journals: `case.rs` (seed-one generator shared with the continuous plan), `plan.rs`, `record.rs` (record semantics and immutable originals), `variant.rs` (capabilities and adapters), `check.rs`, `run.rs` (calibration and block order), `host.rs`, `comparison/mod.rs` (CLI, provenance, persistence) |
+| `bench/go/` | Go worker, its own module with pinned Go opponents: generators ported from `case.rs` and `record.rs`, typed adapters and declines, batch restoration, timing and verification. `comparison/go.rs` starts one worker process per Go slot inside the Rust block order |
 | `bench/rust/native/` | Foreign signatures, layouts, pinned archives, source verification and offline compilation. Compiler inputs stay relative to the adapter directory and vendor sources are reached through the workspace link, so isolated source snapshots reuse the compiled objects; source, layout, compiler-version and flag changes invalidate them |
 | `bench/report/` | Persisted-result validation, statistics, figures and BMF |
 | `bench/continuous/` | Paired-shard validation, JSON-only Cloud upload, PR history and GitHub publication |

@@ -41,7 +41,7 @@ import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } fr
 
 /** A column's value on a case, keyed as Criterion names it. */
 const timed = (run: TrackingRun | undefined, id: string, execution: Execution) =>
-  run?.values[criterionId(parseCaseId(id), execution)];
+  run?.values[criterionId(parseCaseId(id), execution, run.go ? "go" : "rust")];
 
 /**
  * Each column's latest run on the hardware of Tessera's latest serial run, by column ID.

@@ -336,6 +336,17 @@ pub struct Variant {
     /// The catalog's parallel entry-point mode, if any.
     pub parallel_sort: Option<crate::plan::ParallelSort>,
 }
+impl Variant {
+    fn from_catalog(implementation: &'static crate::plan::Implementation) -> Self {
+        Self {
+            name: &implementation.id,
+            implementation,
+            adapter: &implementation.adapter,
+            parallel_sort: implementation.parallel,
+        }
+    }
+}
+
 /// Lists the adapters measured in the selected executable configuration.
 pub fn list_variants() -> Vec<Variant> {
     crate::plan::catalog()
@@ -349,13 +360,15 @@ pub fn list_variants() -> Vec<Variant> {
                 || implementation.adapter == "rust"
                 || (implementation.adapter == "native" && cfg!(feature = "compare-native"))
         })
-        .map(|implementation| Variant {
-            name: &implementation.id,
-            implementation,
-            adapter: &implementation.adapter,
-            parallel_sort: implementation.parallel,
-        })
+        .map(Variant::from_catalog)
         .collect()
+}
+pub(super) fn go_variants() -> impl Iterator<Item = Variant> {
+    crate::plan::catalog()
+        .implementations
+        .iter()
+        .filter(|entry| entry.adapter == "go")
+        .map(Variant::from_catalog)
 }
 /// Prepares the standard or Tessera adapter for any benchmark record type.
 fn try_prepare_common<T: TesseraAdapter>(

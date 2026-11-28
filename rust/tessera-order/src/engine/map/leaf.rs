@@ -4,19 +4,15 @@
 //!
 //! Layout for `E = u64`, `V = u64` (1088 bytes total, 64B aligned):
 //! - Cache Line 0 (64B): `sub_max: [u64; 7]` (56B) + `valid_mask: u64` (8B).
-//! - 8 interleaved `SubBlock`s (128B each = 2 adjacent cache lines!):
+//! - 8 interleaved `SubBlock`s (128B each = 2 adjacent cache lines):
 //!   - CL A (64B): `keys: [u64; 8]`
 //!   - CL B (64B): `vals: [MaybeUninit<V>; 8]`
-//!
-//! Interleaving puts `keys[b]` and `vals[b]` on adjacent cache lines so hardware spatial
-//! prefetching + software `prefetch_read(&subs[b].vals)` overlaps the value load with the
-//! SIMD key search.
 //!
 //! Invariants (whenever `valid_mask != 0`, letting `last = 63 - valid_mask.leading_zeros()`):
 //! 1. Slot 0 is always live (`valid_mask & 1 == 1`).
 //! 2. Live keys are strictly ascending (`key(i) < key(j)` for live `i < j`).
 //! 3. Interior gaps `0 < g < last` duplicate their left neighbor (`key(g) == key(g - 1)`).
-//! 4. Trailing gaps `g > last` hold `E::MAX` (so sequential appends land at `last + 1` in 1 write!).
+//! 4. Trailing gaps `g > last` hold `E::MAX` (so sequential appends land at `last + 1` in 1 write).
 //! 5. `sub_max[b] == subs[b].keys[7]` for `b in 0..7`.
 
 use super::simd::{count_lt_7, count_lt_8};
@@ -62,16 +58,27 @@ pub(crate) struct Leaf<E: Unsigned, V> {
 
 impl<E: Unsigned, V> Drop for Leaf<E, V> {
     fn drop(&mut self) {
-        let mut live = self.valid_mask;
-        self.valid_mask = 0;
-        while live != 0 {
-            let idx = live.trailing_zeros() as usize;
-            live &= live - 1;
-            // SAFETY: bit `idx` was set in `valid_mask`, so that slot is initialized.
-            unsafe {
-                self.subs[idx >> 3].vals[idx & 7].assume_init_drop();
+        fn drop_remaining<E: Unsigned, V>(leaf: &mut Leaf<E, V>) {
+            while leaf.valid_mask != 0 {
+                let idx = leaf.valid_mask.trailing_zeros() as usize;
+                leaf.valid_mask &= !(1u64 << idx);
+                // SAFETY: bit `idx` was set in `valid_mask`, so that slot is initialized.
+                unsafe {
+                    leaf.subs[idx >> 3].vals[idx & 7].assume_init_drop();
+                }
             }
         }
+
+        struct Guard<'a, E: Unsigned, V>(&'a mut Leaf<E, V>);
+        impl<E: Unsigned, V> Drop for Guard<'_, E, V> {
+            fn drop(&mut self) {
+                drop_remaining(self.0);
+            }
+        }
+
+        let guard = Guard(self);
+        drop_remaining(guard.0);
+        mem::forget(guard);
     }
 }
 
@@ -115,10 +122,17 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
     }
 
+    /// Moves the value out of slot `idx`.
+    ///
+    /// # Safety
+    /// - `idx < LEAF_CAP`.
+    /// - Slot `idx` must currently hold an initialized `V`.
+    /// - Ownership of that `V` transfers to the caller; the caller must clear the slot's
+    ///   liveness bit or overwrite it before the leaf is read from or dropped again.
     #[inline(always)]
     unsafe fn read_val(&self, idx: usize) -> V {
         debug_assert!(idx < LEAF_CAP);
-        // SAFETY: caller guarantees slot `idx` is initialized and ownership transfers out.
+        // SAFETY: forwarded from caller contract.
         unsafe {
             self.subs
                 .get_unchecked(idx >> 3)
@@ -128,10 +142,15 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
     }
 
+    /// Returns a shared reference to the live value in slot `idx`.
+    ///
+    /// # Safety
+    /// - `idx < LEAF_CAP`.
+    /// - Slot `idx` must currently hold an initialized `V` (`(self.valid_mask >> idx) & 1 == 1`).
     #[inline(always)]
     unsafe fn val_ref(&self, idx: usize) -> &V {
         debug_assert!(idx < LEAF_CAP);
-        // SAFETY: caller guarantees slot `idx` is live in `valid_mask`.
+        // SAFETY: forwarded from caller contract.
         unsafe {
             self.subs
                 .get_unchecked(idx >> 3)
@@ -141,16 +160,31 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
     }
 
+    /// Returns an exclusive reference to the live value in slot `idx`.
+    ///
+    /// # Safety
+    /// - `idx < LEAF_CAP`.
+    /// - Slot `idx` must currently hold an initialized `V` (`(self.valid_mask >> idx) & 1 == 1`).
     #[inline(always)]
     unsafe fn val_mut(&mut self, idx: usize) -> &mut V {
         debug_assert!(idx < LEAF_CAP);
-        // SAFETY: caller guarantees slot `idx` is live in `valid_mask`.
+        // SAFETY: forwarded from caller contract.
         unsafe {
             self.subs
                 .get_unchecked_mut(idx >> 3)
                 .vals
                 .get_unchecked_mut(idx & 7)
                 .assume_init_mut()
+        }
+    }
+
+    /// Resets key metadata to the empty sentinel state (`valid_mask` must already be 0).
+    #[inline]
+    fn reset_empty_keys(&mut self) {
+        debug_assert_eq!(self.valid_mask, 0);
+        self.sub_max = [E::MAX; 7];
+        for sub in &mut self.subs {
+            sub.keys = [E::MAX; 8];
         }
     }
 
@@ -172,24 +206,18 @@ impl<E: Unsigned, V> Leaf<E, V> {
     /// and trailing `E::MAX` gaps at slots `1..64`.
     #[inline]
     pub(crate) fn init_single(slot: &mut MaybeUninit<Self>, key: E, val: V) {
+        Self::init_empty(slot);
         let ptr = slot.as_mut_ptr();
-        let mut keys0 = [E::MAX; 8];
-        keys0[0] = key;
-        // SAFETY: writing every non-`MaybeUninit` field and `subs[0].vals[0]` via raw pointers
-        // before any `&mut` reference to `Self` or `SubBlock` is formed.
+        // SAFETY: `init_empty` initialized all non-`MaybeUninit` fields; writing slot 0 directly.
         unsafe {
-            ptr::addr_of_mut!((*ptr).sub_max).write([E::MAX; 7]);
-            ptr::addr_of_mut!((*ptr).valid_mask).write(1);
-            ptr::addr_of_mut!((*ptr).subs[0].keys).write(keys0);
+            ptr::addr_of_mut!((*ptr).subs[0].keys[0]).write(key);
             ptr::addr_of_mut!((*ptr).subs[0].vals[0]).write(MaybeUninit::new(val));
-            for b in 1..8 {
-                ptr::addr_of_mut!((*ptr).subs[b].keys).write([E::MAX; 8]);
-            }
+            ptr::addr_of_mut!((*ptr).valid_mask).write(1);
         }
     }
 
     /// Bulk-initializes a leaf inside `slot` from `count` strictly ascending `(key, val)` pairs
-    /// (`1 <= count <= LEAF_CAP`), distributing 1 gap per 8-slot sub-block when `count <= 56`.
+    /// (`1 <= count <= LEAF_CAP`), distributing gaps evenly across the 8 sub-blocks.
     pub(crate) fn init_from_sorted<I>(slot: &mut MaybeUninit<Self>, count: usize, mut iter: I)
     where
         I: Iterator<Item = (E, V)>,
@@ -209,50 +237,27 @@ impl<E: Unsigned, V> Leaf<E, V> {
         // SAFETY: `init_empty` initialized every non-`MaybeUninit` field of `Self`.
         let leaf = unsafe { &mut *guard.0 };
 
-        if count <= BULK_LEAF_FILL {
-            let base_per = count / 8;
-            let extra = count % 8;
-            let mut last_key = E::from_usize(0);
-            let mut placed = 0usize;
-            for b in 0..8 {
-                let n = base_per + usize::from(b < extra);
-                let sub = &mut leaf.subs[b];
-                for i in 0..n {
-                    let (k, v) = iter.next().expect("bulk iterator shorter than count");
-                    sub.keys[i] = k;
-                    sub.vals[i].write(v);
-                    leaf.valid_mask |= 1u64 << (b * 8 + i);
-                    last_key = k;
-                    placed += 1;
-                }
-                let fill = if placed < count { last_key } else { E::MAX };
-                for i in n..8 {
-                    sub.keys[i] = fill;
-                }
-                if b < 7 {
-                    leaf.sub_max[b] = sub.keys[7];
-                }
+        let base_per = count / 8;
+        let extra = count % 8;
+        let mut last_key = E::from_usize(0);
+        let mut placed = 0usize;
+        for (b, sub) in leaf.subs.iter_mut().enumerate() {
+            let n = base_per + usize::from(b < extra);
+            for i in 0..n {
+                let (k, v) = iter.next().expect("bulk iterator shorter than count");
+                sub.keys[i] = k;
+                sub.vals[i].write(v);
+                leaf.valid_mask |= 1u64 << (b * 8 + i);
+                last_key = k;
+                placed += 1;
             }
-        } else {
-            // 57..=64 items: pack densely at `0..count`, trailing gaps are `E::MAX`.
-            for b in 0..8 {
-                let sub = &mut leaf.subs[b];
-                for i in 0..8 {
-                    let idx = b * 8 + i;
-                    if idx < count {
-                        let (k, v) = iter.next().expect("bulk iterator shorter than count");
-                        sub.keys[i] = k;
-                        sub.vals[i].write(v);
-                        leaf.valid_mask |= 1u64 << idx;
-                    } else {
-                        sub.keys[i] = E::MAX;
-                    }
-                }
-                if b < 7 {
-                    leaf.sub_max[b] = sub.keys[7];
-                }
+            let fill = if placed < count { last_key } else { E::MAX };
+            sub.keys[n..].fill(fill);
+            if b < 7 {
+                leaf.sub_max[b] = sub.keys[7];
             }
         }
+
         #[cfg(debug_assertions)]
         leaf.debug_verify();
         mem::forget(guard);
@@ -314,29 +319,24 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
     }
 
-    /// Shifts `count` elements in `[src .. src + count)` right by 1 to `[src + 1 .. src + 1 + count)`.
+    /// Shifts `count` live elements in `[src .. src + count)` right by 1 into
+    /// `[src + 1 .. src + 1 + count)`. Caller guarantees all slots in `src..src + count` are live
+    /// and slot `src + count` is a gap.
     #[inline]
     fn shift_right_by_1(&mut self, src: usize, count: usize) {
         if count == 0 {
             return;
         }
         let end = src + count;
-        // Fast path (~80% of shifts): entire move fits within one 8-slot SubBlock!
         if (src >> 3) == (end >> 3) {
             let sub = &mut self.subs[src >> 3];
             let s = src & 7;
-            // SAFETY: `s + count + 1 <= 8`; shifting `MaybeUninit<V>` bitwise is sound.
+            sub.keys.copy_within(s..s + count, s + 1);
+            let vp = sub.vals.as_mut_ptr();
+            // SAFETY: `s + count + 1 <= 8`; deriving both source and destination from one
+            // exclusive pointer satisfies Stacked Borrows for overlapping `ptr::copy`.
             unsafe {
-                ptr::copy(
-                    sub.keys.as_ptr().add(s),
-                    sub.keys.as_mut_ptr().add(s + 1),
-                    count,
-                );
-                ptr::copy(
-                    sub.vals.as_ptr().add(s),
-                    sub.vals.as_mut_ptr().add(s + 1),
-                    count,
-                );
+                ptr::copy(vp.add(s), vp.add(s + 1), count);
             }
             return;
         }
@@ -349,7 +349,9 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
     }
 
-    /// Shifts `count` elements in `[src .. src + count)` left by 1 to `[src - 1 .. src - 1 + count)`.
+    /// Shifts `count` live elements in `[src .. src + count)` left by 1 into
+    /// `[src - 1 .. src - 1 + count)`. Caller guarantees all slots in `src..src + count` are live
+    /// and slot `src - 1` is a gap.
     #[inline]
     fn shift_left_by_1(&mut self, src: usize, count: usize) {
         if count == 0 {
@@ -357,22 +359,15 @@ impl<E: Unsigned, V> Leaf<E, V> {
         }
         let dst = src - 1;
         let last = src + count - 1;
-        // Fast path (~80% of shifts): entire move fits within one 8-slot SubBlock!
         if (dst >> 3) == (last >> 3) {
             let sub = &mut self.subs[dst >> 3];
             let s = src & 7;
-            // SAFETY: `s >= 1` and `s + count <= 8`.
+            sub.keys.copy_within(s..s + count, s - 1);
+            let vp = sub.vals.as_mut_ptr();
+            // SAFETY: `s >= 1` and `s + count <= 8`; single exclusive pointer derivation for
+            // overlapping `ptr::copy`.
             unsafe {
-                ptr::copy(
-                    sub.keys.as_ptr().add(s),
-                    sub.keys.as_mut_ptr().add(s - 1),
-                    count,
-                );
-                ptr::copy(
-                    sub.vals.as_ptr().add(s),
-                    sub.vals.as_mut_ptr().add(s - 1),
-                    count,
-                );
+                ptr::copy(vp.add(s), vp.add(s - 1), count);
             }
             return;
         }
@@ -388,10 +383,7 @@ impl<E: Unsigned, V> Leaf<E, V> {
     /// Inserts `(key, val)` into this leaf if space permits or key already exists.
     pub(crate) fn insert<S: Simd>(&mut self, simd: S, key: E, val: V) -> LeafInsert<V> {
         if self.valid_mask == 0 {
-            self.sub_max = [E::MAX; 7];
-            for b in 0..8 {
-                self.subs[b].keys = [E::MAX; 8];
-            }
+            self.reset_empty_keys();
             self.subs[0].keys[0] = key;
             self.subs[0].vals[0].write(val);
             self.valid_mask = 1;
@@ -401,7 +393,7 @@ impl<E: Unsigned, V> Leaf<E, V> {
         let pos = self.lower_bound(simd, key);
         if pos < LEAF_CAP && ((self.valid_mask >> pos) & 1) != 0 && self.key_at(pos) == key {
             // SAFETY: slot `pos` is live.
-            let old = unsafe { core::mem::replace(self.val_mut(pos), val) };
+            let old = unsafe { mem::replace(self.val_mut(pos), val) };
             return LeafInsert::Replaced(old);
         }
 
@@ -410,23 +402,16 @@ impl<E: Unsigned, V> Leaf<E, V> {
             return LeafInsert::Full(val);
         }
 
-        // Fast Path A: `pos` itself is the first trailing `MAX_VAL` gap (`pos == last_live + 1`)!
-        // Zero shifting — sequential inserts hit this 100% of the time!
-        if pos < LEAF_CAP && ((gaps >> pos) & 1) != 0 {
-            self.set_key(pos, key);
-            self.write_val(pos, val);
-            self.valid_mask |= 1u64 << pos;
-            if (pos & 7) == 7 && pos < 56 {
-                self.sub_max[pos >> 3] = key;
-            }
-            #[cfg(debug_assertions)]
-            self.debug_verify();
-            return LeafInsert::Inserted;
-        }
-
-        // Fast Path B: `pos > 0` and slot `pos - 1` is an immediately adjacent interior gap!
-        if pos > 0 && ((gaps >> (pos - 1)) & 1) != 0 {
-            let slot = pos - 1;
+        // Fast paths: `pos` is a trailing gap (sequential append!) or `pos - 1` is an adjacent
+        // interior gap — write directly with zero shifting.
+        let direct_slot = if pos < LEAF_CAP && ((gaps >> pos) & 1) != 0 {
+            Some(pos)
+        } else if pos > 0 && ((gaps >> (pos - 1)) & 1) != 0 {
+            Some(pos - 1)
+        } else {
+            None
+        };
+        if let Some(slot) = direct_slot {
             self.set_key(slot, key);
             self.write_val(slot, val);
             self.valid_mask |= 1u64 << slot;
@@ -438,7 +423,7 @@ impl<E: Unsigned, V> Leaf<E, V> {
             return LeafInsert::Inserted;
         }
 
-        // General path: find nearest gap left (`< pos`) or right (`>= pos`) in 1 cycle.
+        // General path: shift toward the nearest gap left (`< pos`) or right (`>= pos`).
         let right_mask = if pos < 64 { gaps & (!0u64 << pos) } else { 0 };
         let left_mask = if pos >= 64 {
             gaps
@@ -447,17 +432,8 @@ impl<E: Unsigned, V> Leaf<E, V> {
         } else {
             0
         };
-
-        let right_gap = if right_mask != 0 {
-            Some(right_mask.trailing_zeros() as usize)
-        } else {
-            None
-        };
-        let left_gap = if left_mask != 0 {
-            Some(63 - left_mask.leading_zeros() as usize)
-        } else {
-            None
-        };
+        let right_gap = (right_mask != 0).then(|| right_mask.trailing_zeros() as usize);
+        let left_gap = (left_mask != 0).then(|| 63 - left_mask.leading_zeros() as usize);
 
         let shift_left = match (left_gap, right_gap) {
             (Some(lg), Some(rg)) => (pos - 1 - lg) < (rg - pos),
@@ -490,12 +466,41 @@ impl<E: Unsigned, V> Leaf<E, V> {
         LeafInsert::Inserted
     }
 
+    /// Packs `n` (`32` or `33`) sorted entries from `keys`/`vals` into this leaf with proactive
+    /// alternating `B^S-Tree` gaps (even slots `0, 2, ...`, plus slot 63 when `n == 33`).
+    ///
+    /// # Safety
+    /// Every element of `vals[..keys.len()]` must be initialized; ownership transfers into `self`.
+    unsafe fn pack_gapped_half(&mut self, keys: &[E], vals: &mut [MaybeUninit<V>]) {
+        let n = keys.len();
+        debug_assert!(n == 32 || n == 33);
+        let even_pairs = n.min(32);
+        let mut mask = 0u64;
+        for i in 0..even_pairs {
+            let k = keys[i];
+            let s = i * 2;
+            self.set_key(s, k);
+            let gap_key = if i + 1 < n { k } else { E::MAX };
+            self.set_key(s + 1, gap_key);
+            // SAFETY: caller guarantees `vals[i]` is initialized and transferred once.
+            self.write_val(s, unsafe { vals[i].assume_init_read() });
+            mask |= 1u64 << s;
+        }
+        if n == 33 {
+            self.set_key(63, keys[32]);
+            // SAFETY: caller guarantees `vals[32]` is initialized and transferred once.
+            self.write_val(63, unsafe { vals[32].assume_init_read() });
+            mask |= 1u64 << 63;
+        }
+        self.refresh_sub_max(0, 55);
+        self.valid_mask = mask;
+    }
+
     /// Splits a completely full leaf (`valid_mask == u64::MAX`) into `self` (left) and
-    /// `right_slot` (right), inserting `(key, val)`.
+    /// `right` (initially empty), inserting `(key, val)` and returning the left max separator.
     ///
     /// - **Right-edge append fast path (`ins_pos == 64`)**: keeps all 64 keys densely packed in
-    ///   `self` and initializes `right` with `(key, val)` at slot 0 + 63 trailing `MAX_VAL` gaps.
-    ///   Eliminates sequential-insert split overhead and achieves ~99% memory density!
+    ///   `self` and writes `(key, val)` at `right` slot 0 + 63 trailing `E::MAX` gaps.
     /// - **General split (`ins_pos < 64`)**: 32/33 proactive `B^S-Tree` gapping (`0x5555...`).
     pub(crate) fn split_and_insert<S: Simd>(
         &mut self,
@@ -509,15 +514,10 @@ impl<E: Unsigned, V> Leaf<E, V> {
         let ins_pos = self.lower_bound(simd, key);
         debug_assert!(ins_pos == LEAF_CAP || self.key_at(ins_pos) != key);
 
-        // Right-edge append fast path (sequential inserts!):
         if ins_pos == LEAF_CAP {
-            right.sub_max = [E::MAX; 7];
-            right.subs[0].keys = [E::MAX; 8];
+            right.reset_empty_keys();
             right.subs[0].keys[0] = key;
             right.subs[0].vals[0].write(val);
-            for b in 1..8 {
-                right.subs[b].keys = [E::MAX; 8];
-            }
             right.valid_mask = 1;
             #[cfg(debug_assertions)]
             right.debug_verify();
@@ -528,66 +528,26 @@ impl<E: Unsigned, V> Leaf<E, V> {
         let mut all_vals: [MaybeUninit<V>; LEAF_CAP + 1] =
             [const { MaybeUninit::uninit() }; LEAF_CAP + 1];
 
-        // Move all 64 entries out of `self` cleanly (`valid_mask = 0` prevents double drop).
         self.valid_mask = 0;
         for i in 0..ins_pos {
             all_keys[i] = self.key_at(i);
-            // SAFETY: all 64 slots were live.
+            // SAFETY: all 64 slots were live before `valid_mask` was cleared.
             all_vals[i].write(unsafe { self.read_val(i) });
         }
         all_keys[ins_pos] = key;
         all_vals[ins_pos].write(val);
         for i in ins_pos..LEAF_CAP {
             all_keys[i + 1] = self.key_at(i);
-            // SAFETY: all 64 slots were live before `self.valid_mask` was cleared.
+            // SAFETY: all 64 slots were live before `valid_mask` was cleared.
             all_vals[i + 1].write(unsafe { self.read_val(i) });
         }
 
         const LEFT_N: usize = 32;
-
-        // Pack left (`self`): 32 entries at even slots `0, 2, ..., 62`.
-        // Note: slot 63 is a trailing gap (> last_live = 62), so slot 63 holds `E::MAX`!
-        for i in 0..LEFT_N {
-            let k = all_keys[i];
-            let s = i * 2;
-            self.set_key(s, k);
-            self.set_key(s + 1, if i + 1 < LEFT_N { k } else { E::MAX });
-            // SAFETY: `all_vals[i]` is initialized.
-            self.write_val(s, unsafe { all_vals[i].assume_init_read() });
+        // SAFETY: `all_vals[0..65]` are all initialized and partitioned disjointly into left/right.
+        unsafe {
+            self.pack_gapped_half(&all_keys[..LEFT_N], &mut all_vals[..LEFT_N]);
+            right.pack_gapped_half(&all_keys[LEFT_N..], &mut all_vals[LEFT_N..]);
         }
-        for b in 0..7 {
-            self.sub_max[b] = self.subs[b].keys[7];
-        }
-        self.valid_mask = 0x5555_5555_5555_5555;
-
-        // Pack right (`right`): 33 entries -> 31 at `0, 2, ..., 60`, last 2 at `62, 63`.
-        let mut rmask = 0u64;
-        for i in 0..31 {
-            let k = all_keys[LEFT_N + i];
-            let s = i * 2;
-            right.set_key(s, k);
-            right.set_key(s + 1, k);
-            // SAFETY: `all_vals[LEFT_N + i]` is initialized.
-            let v = unsafe { all_vals[LEFT_N + i].assume_init_read() };
-            right.write_val(s, v);
-            rmask |= 1u64 << s;
-        }
-        right.set_key(62, all_keys[LEFT_N + 31]);
-        right.set_key(63, all_keys[LEFT_N + 32]);
-        // SAFETY: `all_vals[63]` and `all_vals[64]` are initialized.
-        let (v62, v63) = unsafe {
-            (
-                all_vals[LEFT_N + 31].assume_init_read(),
-                all_vals[LEFT_N + 32].assume_init_read(),
-            )
-        };
-        right.write_val(62, v62);
-        right.write_val(63, v63);
-        rmask |= (1u64 << 62) | (1u64 << 63);
-        for b in 0..7 {
-            right.sub_max[b] = right.subs[b].keys[7];
-        }
-        right.valid_mask = rmask;
 
         #[cfg(debug_assertions)]
         {
@@ -597,7 +557,7 @@ impl<E: Unsigned, V> Leaf<E, V> {
         all_keys[LEFT_N - 1]
     }
 
-    /// Removes `key` in O(1) without moving live values (except when removing slot 0).
+    /// Removes `key` in `O(1)` without moving live values (except when removing slot 0).
     pub(crate) fn remove<S: Simd>(&mut self, simd: S, key: E) -> Option<V> {
         if self.valid_mask == 0 {
             return None;
@@ -607,20 +567,16 @@ impl<E: Unsigned, V> Leaf<E, V> {
             return None;
         }
         let old_last = 63 - self.valid_mask.leading_zeros() as usize;
-        // SAFETY: slot `pos` is live; clear bit before returning ownership.
+        // SAFETY: slot `pos` is live; clear bit immediately to transfer ownership out.
         let removed = unsafe { self.read_val(pos) };
         self.valid_mask &= !(1u64 << pos);
 
         if self.valid_mask == 0 {
-            self.sub_max = [E::MAX; 7];
-            for b in 0..8 {
-                self.subs[b].keys = [E::MAX; 8];
-            }
+            self.reset_empty_keys();
             return Some(removed);
         }
 
         if pos == old_last {
-            // Removed the rightmost live entry: everything past `new_last` becomes trailing `E::MAX`.
             let new_last = 63 - self.valid_mask.leading_zeros() as usize;
             for i in (new_last + 1)..=old_last {
                 self.set_key(i, E::MAX);
@@ -634,7 +590,6 @@ impl<E: Unsigned, V> Leaf<E, V> {
             }
             self.refresh_sub_max(pos, next_live - 1);
         } else {
-            // Slot 0 removed; promote next live entry into slot 0.
             let next_live = self.valid_mask.trailing_zeros() as usize;
             let new_first_key = self.key_at(next_live);
             // SAFETY: `next_live` is live and `!= 0`.
@@ -642,7 +597,6 @@ impl<E: Unsigned, V> Leaf<E, V> {
             self.write_val(0, promoted_val);
             self.valid_mask = (self.valid_mask & !(1u64 << next_live)) | 1;
             if next_live == old_last {
-                // Sole remaining entry is now at slot 0; `1..=old_last` are trailing `E::MAX`.
                 self.set_key(0, new_first_key);
                 for i in 1..=old_last {
                     self.set_key(i, E::MAX);
@@ -761,11 +715,8 @@ impl<E: Unsigned, V> Leaf<E, V> {
                 );
             }
         }
-        for b in 0..7 {
-            assert!(
-                self.sub_max[b] == self.subs[b].keys[7],
-                "sub_max[{b}] mismatch"
-            );
+        for (b, sub) in self.subs[..7].iter().enumerate() {
+            assert!(self.sub_max[b] == sub.keys[7], "sub_max[{b}] mismatch");
         }
     }
 }

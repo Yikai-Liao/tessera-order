@@ -39,6 +39,7 @@ The [Rust architecture policies](../development/ci.md#rust-architecture-policies
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
 | `refine/spans.rs` | Discover a bounded sparse permutation and apply its contiguous spans | Every long span belongs to one monotone source sequence. Key evaluation ends before record movement starts. |
 | `refine/parallel.rs` | Shard count, task scheduling, scratch pooling and parallel argsort prefix packing/tie refinement for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
+| `map/`, `map/mod.rs` | Ordered `TesseraMap` and `TesseraSet` (`TesseraMap<K, ()>`): stable-address node pools, lazy slab refinement, gapped SIMD leaves, and batch merge | Public collection contracts ([semantics](../../conformance/semantics.md#ordered-collections)), not pool chunking, slab compaction, or publication protocol |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
 
@@ -175,6 +176,14 @@ Key functions are user code and may panic. On a panic:
 - ordinary unwinding propagates the panic after the guards restore ownership.
 
 The slice then holds every record once, in an unspecified order. Every build uses this recovery; there is no abort-only variant.
+
+## Ordered collections
+
+`src/engine/map/` derives `TesseraMap<K, V>` and `TesseraSet<K>` (`TesseraMap<K, ()>`) directly from the engine's `block::partition`, `tile::Scratch`, `order::scan_varying_bits`, and `refine::sort` primitives without adding a second ordering implementation or a parallel dependency.
+
+- **Published storage vs. unrefined slabs.** Published `Leaf`, `Internal`, and `RadixNode` nodes live in append-only two-level `SharedPool` arenas whose chunks stay at fixed addresses until container drop. Unrefined `RawSlab` buffers (retaining the caller's `Vec` allocation without shrinking), pool free-lists, and reusable `Workspace` scratch are owned by `RefineState` behind a mutex on `&self` reads and accessed directly without locking under `&mut self`.
+- **Publication and duplicate cleanup.** Child handles are `AtomicNodeId` slots published with `Release` and read lock-free with `Acquire`. Lazy refinement partitions duplicates without invoking `V::drop`, publishes the refined subtree, releases the refinement mutex, and drops overwritten duplicates afterward.
+- **Batch merge ownership.** `extend_vec` consumes a partitioned incoming `Vec` from its tail in reverse bucket order via `Vec::drain` and `Vec::split_off`, keeping the active batch locally owned outside `RefineState::slabs` while refined insertions may crack and reclaim existing slabs, and letting `Vec` handle unwind cleanup directly.
 
 ## Stack usage
 

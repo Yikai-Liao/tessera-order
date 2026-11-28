@@ -208,7 +208,9 @@ fn transparent_lazy_cracking_range_and_select_nth() {
 
 #[test]
 fn concurrent_shared_reads_and_lazy_cracking() {
-    let n = if cfg!(miri) { 300 } else { 40_000usize };
+    // Under Miri, exceed `TILE_REFINE_THRESHOLD` (1024) with a forced lazy root so concurrent
+    // threads genuinely exercise multi-bucket `RadixNode` cracking and `&V` stability.
+    let n = if cfg!(miri) { 1_152 } else { 40_000usize };
     let mut rng = Rng::new(0xabcd_ef01_2345_6789);
     let mut raw = Vec::with_capacity(n);
     let mut oracle = BTreeMap::new();
@@ -217,10 +219,18 @@ fn concurrent_shared_reads_and_lazy_cracking() {
         raw.push((k, i as u64));
         oracle.insert(k, i as u64);
     }
-    let map = TesseraMap::from_unique(raw.clone());
+    let map = if cfg!(miri) {
+        TesseraMap::from_vec_lazy_for_test(raw.clone(), false)
+    } else {
+        TesseraMap::from_unique(raw.clone())
+    };
+    assert!(
+        map.stats().unrefined > 0,
+        "concurrent fixture must start unrefined"
+    );
     let sorted: Vec<(u64, u64)> = oracle.iter().map(|(&k, &v)| (k, v)).collect();
 
-    // 4-8 threads simultaneously reading, ranging, and select_nth-ing on `&map` while it cracks!
+    // 2-8 threads simultaneously reading, ranging, and select_nth-ing on `&map` while it cracks!
     let threads = if cfg!(miri) { 2 } else { 8 };
     std::thread::scope(|s| {
         for tid in 0..threads {
@@ -257,6 +267,10 @@ fn concurrent_shared_reads_and_lazy_cracking() {
             });
         }
     });
+    assert!(
+        map.stats().leaves > 0,
+        "concurrent reads must have published leaves"
+    );
 }
 
 #[test]
@@ -692,7 +706,12 @@ fn all_identical_duplicates_from_unique_and_panic_safety() {
         c_raw.push((k, i));
         ref_m.insert(k, i);
     }
-    let cmap = TesseraMap::from(c_raw);
+    let cmap = if cfg!(miri) {
+        TesseraMap::from_vec_lazy_for_test(c_raw, true)
+    } else {
+        TesseraMap::from(c_raw)
+    };
+    assert!(cmap.stats().unrefined > 0);
     let expected_len = ref_m.len();
     let expected_first = ref_m.first_key_value().map(|(&k, &v)| (k, v));
     std::thread::scope(|s| {
@@ -714,4 +733,270 @@ fn all_identical_duplicates_from_unique_and_panic_safety() {
         h3.join().unwrap();
         h4.join().unwrap();
     });
+}
+
+struct PanicOnceValue {
+    id: u64,
+    armed: Option<Arc<AtomicBool>>,
+    live: Arc<AtomicUsize>,
+}
+
+impl PanicOnceValue {
+    fn new(id: u64, armed: Option<Arc<AtomicBool>>, live: &Arc<AtomicUsize>) -> Self {
+        live.fetch_add(1, Ordering::Relaxed);
+        Self {
+            id,
+            armed,
+            live: Arc::clone(live),
+        }
+    }
+}
+
+impl Drop for PanicOnceValue {
+    fn drop(&mut self) {
+        self.live.fetch_sub(1, Ordering::Relaxed);
+        if let Some(flag) = &self.armed
+            && flag.swap(false, Ordering::SeqCst)
+        {
+            panic!("intentional single drop panic for id {}", self.id);
+        }
+    }
+}
+
+#[test]
+fn duplicate_drop_panic_recovers_and_teardown_drops_all_siblings() {
+    // 1. Lazy `get` and `len` recover cleanly if an overwritten duplicate's `Drop` panics once.
+    for use_len_first in [false, true] {
+        let live = Arc::new(AtomicUsize::new(0));
+        let armed = Arc::new(AtomicBool::new(true));
+        let mut raw = Vec::new();
+        for i in 0..32u64 {
+            let trigger = (i == 5).then(|| Arc::clone(&armed));
+            raw.push((77u64, PanicOnceValue::new(i, trigger, &live)));
+        }
+        let map = TesseraMap::from_vec_lazy_for_test(raw, true);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if use_len_first {
+                let _ = map.len();
+            } else {
+                let _ = map.get(77);
+            }
+        }));
+        assert!(res.is_err(), "expected overwritten duplicate drop to panic");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(77).map(|v| v.id), Some(31));
+        assert_eq!(live.load(Ordering::Relaxed), 1);
+        drop(map);
+        assert_eq!(live.load(Ordering::Relaxed), 0);
+    }
+
+    // 2. Teardown across published leaves drops every sibling even when one destructor panics.
+    let live_pub = Arc::new(AtomicUsize::new(0));
+    let armed_pub = Arc::new(AtomicBool::new(true));
+    let mut pub_map = TesseraMap::new();
+    for i in 0..150u64 {
+        let trigger = (i == 3).then(|| Arc::clone(&armed_pub));
+        pub_map.insert(i, PanicOnceValue::new(i, trigger, &live_pub));
+    }
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(pub_map)));
+    assert!(res.is_err());
+    assert_eq!(
+        live_pub.load(Ordering::Relaxed),
+        0,
+        "every published leaf entry must be dropped despite one panicking destructor"
+    );
+
+    // 3. Teardown of unrefined slab drops every remaining record even when one destructor panics.
+    let live_slab = Arc::new(AtomicUsize::new(0));
+    let armed_slab = Arc::new(AtomicBool::new(true));
+    let raw_slab: Vec<_> = (0..80u64)
+        .map(|i| {
+            let trigger = (i == 4).then(|| Arc::clone(&armed_slab));
+            (i, PanicOnceValue::new(i, trigger, &live_slab))
+        })
+        .collect();
+    let lazy_map = TesseraMap::from_vec_lazy_for_test(raw_slab, true);
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(lazy_map)));
+    assert!(res.is_err());
+    assert_eq!(
+        live_slab.load(Ordering::Relaxed),
+        0,
+        "every unrefined slab entry must be dropped despite one panicking destructor"
+    );
+}
+
+#[test]
+fn reentrant_duplicate_drop_does_not_deadlock() {
+    use std::sync::{Mutex as StdMutex, Weak};
+
+    type ReentrantMap = TesseraMap<u64, ReentrantVal>;
+
+    struct ReentrantVal {
+        id: u64,
+        slot: Arc<StdMutex<Weak<ReentrantMap>>>,
+        observed_stats: Arc<AtomicUsize>,
+    }
+
+    impl Drop for ReentrantVal {
+        fn drop(&mut self) {
+            let weak = self.slot.lock().unwrap().clone();
+            if let Some(map) = weak.upgrade() {
+                let stats = map.stats();
+                assert!(stats.len >= 1);
+                let _ = map.get(42);
+                self.observed_stats.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    for via_len in [false, true] {
+        let slot: Arc<StdMutex<Weak<ReentrantMap>>> = Arc::new(StdMutex::new(Weak::new()));
+        let observed = Arc::new(AtomicUsize::new(0));
+        let raw: Vec<_> = (0..16u64)
+            .map(|id| {
+                (
+                    42u64,
+                    ReentrantVal {
+                        id,
+                        slot: Arc::clone(&slot),
+                        observed_stats: Arc::clone(&observed),
+                    },
+                )
+            })
+            .collect();
+        let map = Arc::new(TesseraMap::from_vec_lazy_for_test(raw, true));
+        *slot.lock().unwrap() = Arc::downgrade(&map);
+        if via_len {
+            assert_eq!(map.len(), 1);
+        } else {
+            assert_eq!(map.get(42).map(|v| v.id), Some(15));
+        }
+        assert_eq!(observed.load(Ordering::Relaxed), 15);
+        *slot.lock().unwrap() = Weak::new();
+    }
+}
+
+#[test]
+fn is_empty_and_spare_capacity_adoption_stay_lazy_o1() {
+    // 1. `is_empty()` must not refine an unrefined batch (even of identical keys).
+    let raw: Vec<(u64, u64)> = (0..64u64).map(|i| (99, i)).collect();
+    let mut map = TesseraMap::from_vec_lazy_for_test(raw, true);
+    assert!(!map.is_empty());
+    assert_eq!(
+        map.stats().unrefined,
+        1,
+        "is_empty() must not materialize unrefined buckets"
+    );
+    assert_eq!(map.remove(99), Some(63));
+    assert!(map.is_empty());
+    map.insert(1, 2);
+    assert!(!map.is_empty());
+    map.clear();
+    assert!(map.is_empty());
+
+    // 2. Adopting a `Vec` with spare capacity retains the original heap buffer without copying.
+    let mut spare = Vec::with_capacity(256);
+    for i in 0..64u64 {
+        spare.push((i, i * 10));
+    }
+    let orig_ptr = spare.as_ptr();
+    let slab = RawSlab::from_vec(spare);
+    assert_eq!(slab.data.as_ptr() as *const (u64, u64), orig_ptr);
+    assert_eq!(slab.data.capacity(), 256);
+    assert_eq!(slab.live_count, 64);
+    // SAFETY: all `slab.data.len()` slots are initialized.
+    let reclaimed = unsafe { slab.into_vec() };
+    assert_eq!(reclaimed.as_ptr(), orig_ptr);
+    assert_eq!(reclaimed.len(), 64);
+}
+
+#[test]
+fn extend_vec_refining_last_cold_descendant_with_later_empty_bucket() {
+    // Exercise both bucket orderings (`cold_bucket < empty_bucket` and `cold_bucket > empty_bucket`)
+    // so mid-loop convergence (`!state.has_unrefined()`) fires regardless of bucket traversal order.
+    for &(cold_hi, empty_hi, anchor_hi) in &[
+        (14u64 << 56, 2u64 << 56, 0u64),
+        (0u64, 2u64 << 56, 15u64 << 56),
+    ] {
+        let live = Arc::new(AtomicUsize::new(0));
+        {
+            // `cold_hi` bucket has > TILE_REFINE_THRESHOLD items so cracking it produces a nested
+            // RadixNode with unrefined descendants; `anchor_hi` spans the top prefix; `empty_hi` stays empty.
+            let cold_count = if cfg!(miri) { 1_100u64 } else { 3_000u64 };
+            let mut raw: Vec<(u64, DropTracker)> = Vec::new();
+            let mut oracle: BTreeMap<u64, u64> = BTreeMap::new();
+            for i in 0..cold_count {
+                let k = cold_hi | (i * 4);
+                raw.push((k, DropTracker::new(i, &live)));
+                oracle.insert(k, i);
+            }
+            for i in 0..64u64 {
+                let k = anchor_hi | i;
+                raw.push((k, DropTracker::new(10_000 + i, &live)));
+                oracle.insert(k, 10_000 + i);
+            }
+
+            let mut map = TesseraMap::from_vec_lazy_for_test(raw, true);
+            // Refine `anchor_hi` completely, and crack `cold_hi` once (leaving unrefined
+            // sub-buckets under a published nested TAG_RADIX).
+            assert!(map.get(anchor_hi).is_some());
+            assert!(map.get(cold_hi).is_some());
+            assert!(map.stats().radixes >= 2);
+
+            // Build an extend_vec batch (>= 256 items, all within root prefix) that refines every
+            // remaining cold sub-bucket inside `cold_hi` AND targets the empty `empty_hi` bucket.
+            let mut batch: Vec<(u64, DropTracker)> = Vec::new();
+            let mut id = 50_000u64;
+            for step in (0..cold_count).step_by(4) {
+                let k = cold_hi | (step * 4 + 1);
+                batch.push((k, DropTracker::new(id, &live)));
+                oracle.insert(k, id);
+                id += 1;
+            }
+            // Overwrite an existing key in `cold_hi` to verify last-value-wins.
+            batch.push((cold_hi, DropTracker::new(id, &live)));
+            oracle.insert(cold_hi, id);
+            id += 1;
+            // Target previously empty `empty_hi` bucket.
+            for i in 0..32u64 {
+                let k = empty_hi | (i * 3);
+                batch.push((k, DropTracker::new(id, &live)));
+                oracle.insert(k, id);
+                id += 1;
+            }
+            assert!(batch.len() >= 256);
+
+            map.extend_vec(batch);
+            assert_eq!(map.len(), oracle.len());
+            let mut got = Vec::new();
+            map.range(.., |k, v| got.push((k, v._id)));
+            let expected: Vec<(u64, u64)> = oracle.into_iter().collect();
+            assert_eq!(got, expected);
+        }
+        assert_eq!(live.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn large_batch_ranges_and_radix_counts_do_not_truncate_at_u32_max() {
+    let boundary = (u32::MAX as usize) + 1;
+    let u = UnrefinedNode {
+        slab_id: 0,
+        start: 0,
+        end: boundary,
+        candidate_mask: u128::MAX,
+    };
+    assert_eq!(u.len(), boundary);
+
+    let rx = RadixNode::<u8>::new(
+        0,
+        8,
+        0,
+        1,
+        alloc::vec![NodeId::EMPTY; 2],
+        alloc::vec![boundary, 7],
+    );
+    assert_eq!(rx.counts[0].load(Ordering::Relaxed), boundary);
+    assert_eq!(rx.counts[1].load(Ordering::Relaxed), 7);
 }

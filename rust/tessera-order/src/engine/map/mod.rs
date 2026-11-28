@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Grand-unified ordered map and set built directly on Tessera's radix refinement engine.
+//! Unified adaptive ordered map and set built directly on Tessera's radix refinement engine.
 //!
-//! [`TesseraMap`] presents ONE standard, `Send + Sync` ordered-map API (`new`, `from`,
-//! `get(&self)`, `range(&self)`, `select_nth(&self)`, `insert(&mut self)`, `remove(&mut self)`,
-//! `extend`) with zero user-facing mode switches (`lazy`/`eager`/`adaptive`/`finish`).
-//!
-//! Internally, it hides a single monotonic refinement lifecycle behind an append-only
-//! stable-address [`SharedPool`] and atomic [`AtomicNodeId`] slots:
+//! [`TesseraMap`] exposes one `Send + Sync` ordered-map API (`new`, `from`, `from_unique`,
+//! `get`, `range`, `select_nth`, `first`, `last`, `insert`, `remove`, `extend_vec`) with
+//! transparent on-demand refinement hidden behind an append-only stable-address [`SharedPool`]
+//! and atomic [`AtomicNodeId`] slots:
 //! - Small inputs (`< LAZY_THRESHOLD`) build bottom-up immediately.
-//! - Large unsorted inputs (`From<Vec<(K, V)>>` / `FromIterator`) adopt the buffer in `O(1)`
-//!   time and lazily refine ONLY touched buckets during `&self` reads using Tessera's
-//!   in-place `block::partition` and `tile::Scratch`.
-//! - Once published into [`SharedPool`], leaves never move or mutate during `&self`, so
-//!   returned `&V` references remain sound under concurrent reads and lazy refinement of
-//!   disjoint buckets. Already-refined nodes are read lock-free via `Acquire` loads.
-//! - Adaptive slab compaction frees sparse slabs (<25% live), ensuring memory converges cleanly.
+//! - Large unsorted inputs (`From<Vec<(K, V)>>` / `FromIterator` / `from_unique`) adopt the
+//!   caller's `Vec` allocation in `O(1)` time without shrinking or copying, refining only
+//!   touched buckets during `&self` reads using Tessera's `block::partition` and `tile::Scratch`.
+//! - Published leaves never move or mutate during `&self`, so returned `&V` references remain
+//!   valid across concurrent reads and lazy refinement of disjoint buckets.
+//! - Overwritten duplicate values discovered during lazy refinement are dropped only after the
+//!   refined subtree is published and internal locks are released.
 //!
-//! [`TesseraSet`] derives ordered sets from `TesseraMap<K, ()>` with zero duplicated code:
-//! zero-sized `()` values shrink each leaf from 1088B to 576B (~10.5 B/entry for `u64`).
+//! [`TesseraSet`] delegates directly to `TesseraMap<K, ()>`: zero-sized `()` values shrink each
+//! 64-slot leaf from 1088B to 576B while reusing every refinement and query path unchanged.
 
 mod internal;
 mod leaf;
@@ -30,7 +28,7 @@ mod tests;
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
+use core::mem::{self, MaybeUninit};
 use core::ops::{Bound, RangeBounds};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -52,8 +50,8 @@ use pool::{
 };
 use slab::{RadixNode, RawSlab, UnrefinedNode};
 
-/// Inputs below this length build eagerly in `From<Vec>` (takes <0.2 ms); larger unsorted
-/// inputs adopt their buffer in `O(1)` and refine transparently on demand during `&self` reads.
+/// Inputs below this length build eagerly in `From<Vec>`; larger unsorted inputs adopt their
+/// buffer in `O(1)` and refine transparently on demand during `&self` reads.
 const LAZY_THRESHOLD: usize = 16_384;
 /// Maximum records in an unrefined bucket before materializing directly into leaves.
 const TILE_REFINE_THRESHOLD: usize = 1024;
@@ -64,10 +62,14 @@ const COMPACT_MIN_SLAB_LEN: usize = 16_384;
 /// Inline stack capacity for descent paths before spilling to heap (handles arbitrary `u128` depth).
 const INLINE_PATH_CAP: usize = 16;
 
-/// Diagnostic snapshot of internal structure and memory convergence.
+/// Provisional structural diagnostics for [`TesseraMap`] and [`TesseraSet`].
+///
+/// Inspecting `stats()` does not refine unrefined buckets. When the container holds unresolved
+/// duplicates from `From<Vec<_>>` or `extend_vec`, `len` reflects the current provisional count
+/// until [`TesseraMap::len`] or lazy refinement deduplicates the remaining buckets.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MapStats {
-    /// Number of live entries reported by the map.
+    /// Provisional entry count (exact once `unrefined == 0` or after calling `len()`).
     pub len: usize,
     /// Number of live `Leaf` nodes.
     pub leaves: usize,
@@ -127,22 +129,17 @@ impl PathStack {
 
     #[inline(always)]
     fn pop(&mut self) {
-        if !self.overflow.is_empty() {
-            self.overflow.pop();
-        } else if self.inline_len > 0 {
+        if self.overflow.pop().is_none() && self.inline_len > 0 {
             self.inline_len -= 1;
         }
     }
 
     #[inline(always)]
     fn last(&self) -> Option<PathStep> {
-        if let Some(&step) = self.overflow.last() {
-            Some(step)
-        } else if self.inline_len > 0 {
-            Some(self.inline[self.inline_len - 1])
-        } else {
-            None
-        }
+        self.overflow
+            .last()
+            .copied()
+            .or_else(|| (self.inline_len > 0).then(|| self.inline[self.inline_len - 1]))
     }
 
     #[inline(always)]
@@ -156,10 +153,7 @@ impl PathStack {
 
     #[inline(always)]
     fn for_each(&self, mut f: impl FnMut(PathStep)) {
-        for &step in &self.inline[..self.inline_len] {
-            f(step);
-        }
-        for &step in &self.overflow {
+        for &step in self.inline[..self.inline_len].iter().chain(&self.overflow) {
             f(step);
         }
     }
@@ -167,19 +161,103 @@ impl PathStack {
     #[inline(always)]
     fn iter_rev(&self) -> impl Iterator<Item = (usize, PathStep)> + '_ {
         let base = self.inline_len;
-        let tail = self
-            .overflow
+        self.overflow
             .iter()
             .enumerate()
             .rev()
-            .map(move |(i, &s)| (base + i, s));
-        let head = self.inline[..self.inline_len]
-            .iter()
-            .enumerate()
-            .rev()
-            .map(|(i, &s)| (i, s));
-        tail.chain(head)
+            .map(move |(i, &s)| (base + i, s))
+            .chain(
+                self.inline[..self.inline_len]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .map(|(i, &s)| (i, s)),
+            )
     }
+}
+
+/// Runs Tessera's stable in-place `block::partition` on a single key digit window.
+fn partition_by_digit<K: RadixKey, V>(
+    slice: &mut [(K, V)],
+    shift: usize,
+    width: usize,
+    workspace: &mut Workspace<(K, V)>,
+) -> Vec<usize> {
+    let mut ext = ByKey(|r: &(K, V)| r.0);
+    let classifier = KeyDigit::new(&mut ext, shift);
+    let mut noop = |_: usize,
+                    _: core::ops::Range<usize>,
+                    _: &mut [(K, V)],
+                    _: &mut KeyDigit<&mut ByKey<_>, K::Encoded>| {};
+    block::partition(slice, width, classifier, &mut workspace.block, &mut noop)
+}
+
+/// Sorts `slice` using Tessera's reusable tile scratch when tile-sized, else full `engine_sort`.
+fn sort_slice<K: RadixKey, V>(
+    slice: &mut [(K, V)],
+    candidate_mask: u128,
+    workspace: &mut Workspace<(K, V)>,
+) {
+    if slice.len() <= 1 {
+        return;
+    }
+    if slice.len() <= tile_capacity::<(K, V)>(TILE_BYTES) {
+        let mut ext = ByKey(|r: &(K, V)| r.0);
+        let varying = scan_varying_bits(slice, candidate_mask, &mut ext);
+        workspace.tile.sort(slice, varying, &mut ext);
+    } else {
+        engine_sort(slice, ByKey(|r: &(K, V)| r.0));
+    }
+}
+
+/// Partitions a sorted slice in place so `0..kept` holds unique keys (last value wins) and
+/// `kept..` holds overwritten duplicate entries. Does not drop any values.
+fn dedup_sorted_last_wins_partition<K: RadixKey, V>(records: &mut [(K, V)]) -> usize {
+    let n = records.len();
+    if n < 2 {
+        return n;
+    }
+    let mut write = 0usize;
+    for read in 1..n {
+        if records[read].0.encode() == records[write].0.encode() {
+            records.swap(write, read);
+        } else {
+            write += 1;
+            if write != read {
+                records.swap(write, read);
+            }
+        }
+    }
+    write + 1
+}
+
+/// Converts a `RangeBounds<K>` into an inclusive encoded range `(lo, hi)`, or `None` if empty.
+fn encoded_inclusive_bounds<K: RadixKey>(
+    bounds: &impl RangeBounds<K>,
+) -> Option<(K::Encoded, K::Encoded)> {
+    let lo = match bounds.start_bound() {
+        Bound::Unbounded => K::Encoded::from_usize(0),
+        Bound::Included(&k) => k.encode(),
+        Bound::Excluded(&k) => {
+            let ek = k.encode();
+            if ek == K::Encoded::MAX {
+                return None;
+            }
+            K::Encoded::from_u128(ek.to_u128() + 1)
+        }
+    };
+    let hi = match bounds.end_bound() {
+        Bound::Unbounded => K::Encoded::MAX,
+        Bound::Included(&k) => k.encode(),
+        Bound::Excluded(&k) => {
+            let ek = k.encode();
+            if ek == K::Encoded::from_usize(0) {
+                return None;
+            }
+            K::Encoded::from_u128(ek.to_u128() - 1)
+        }
+    };
+    (lo <= hi).then_some((lo, hi))
 }
 
 /// Cold-path refinement and allocation bookkeeping protected by `Mutex` during `&self`
@@ -231,19 +309,60 @@ impl<K, V> RefineState<K, V> {
         u
     }
 
+    fn alloc_slab_unrefined(&mut self, records: Vec<(K, V)>, candidate_mask: u128) -> u32 {
+        let end = records.len();
+        let slab_id = self.alloc_slab(RawSlab::from_vec(records));
+        self.alloc_unrefined(UnrefinedNode {
+            slab_id,
+            start: 0,
+            end,
+            candidate_mask,
+        })
+    }
+
+    fn merge_unrefined(
+        &mut self,
+        old_uid: u32,
+        extra: impl ExactSizeIterator<Item = (K, V)>,
+        candidate_mask: u128,
+    ) -> (u32, usize) {
+        let old_len = self.unrefineds[old_uid as usize]
+            .as_ref()
+            .expect("live unrefined")
+            .len();
+        let mut combined = Vec::with_capacity(old_len + extra.len());
+        let old_u = self.take_unrefined(old_uid);
+        self.drain_slab_range(old_u.slab_id, old_u.start, old_u.end, &mut combined);
+        combined.extend(extra);
+        let combined_len = combined.len();
+        let uid = self.alloc_slab_unrefined(combined, candidate_mask);
+        (uid, combined_len)
+    }
+
     fn has_unrefined(&self) -> bool {
         self.unrefineds.iter().any(Option::is_some)
     }
 
-    fn drain_slab_range(&mut self, slab_id: u32, start: u32, end: u32, out: &mut Vec<(K, V)>) {
-        let (s, e) = (start as usize, end as usize);
+    fn clear_if_converged(&mut self, has_unverified_dups: &AtomicBool) {
+        if !self.has_unrefined() {
+            has_unverified_dups.store(false, Ordering::Release);
+            self.unrefineds.clear();
+            self.free_unrefineds.clear();
+            self.workspace = Workspace::new();
+            if self.slabs.iter().all(Option::is_none) {
+                self.slabs.clear();
+            }
+        }
+    }
+
+    fn drain_slab_range(&mut self, slab_id: u32, start: usize, end: usize, out: &mut Vec<(K, V)>) {
         let should_free = {
             let slab = self.slabs[slab_id as usize].as_mut().unwrap();
-            for slot in &mut slab.data[s..e] {
-                // SAFETY: caller exclusively owns initialized range `s..e`.
+            for slot in &mut slab.data[start..end] {
+                // SAFETY: caller exclusively owns initialized range `start..end`.
                 out.push(unsafe { slot.assume_init_read() });
             }
-            slab.live_count -= e - s;
+            slab.live_count -= end - start;
             slab.live_count == 0
         };
         if should_free {
@@ -253,20 +372,19 @@ impl<K, V> RefineState<K, V> {
 
     /// Adaptive slab compaction: frees sparse slabs once utilization drops below 25%.
     fn maybe_compact_slab(&mut self, slab_id: u32) {
-        let (total_len, live_count) = match self.slabs[slab_id as usize].as_ref() {
-            Some(s) => (s.data.len(), s.live_count),
+        let (total_cap, live_count) = match self.slabs[slab_id as usize].as_ref() {
+            Some(s) => (s.data.capacity(), s.live_count),
             None => return,
         };
         if live_count == 0 {
             self.slabs[slab_id as usize] = None;
             return;
         }
-        if total_len < COMPACT_MIN_SLAB_LEN || live_count * 4 >= total_len {
+        if total_cap < COMPACT_MIN_SLAB_LEN || live_count * 4 >= total_cap {
             return;
         }
 
-        // Pre-reserve both buffers before mutating any slab or `UnrefinedNode` descriptor so
-        // an allocation failure leaves `RefineState` completely intact.
+        // Pre-reserve before mutating any slab or descriptor so OOM leaves state intact.
         let mut packed: Vec<(K, V)> = Vec::with_capacity(live_count);
         self.slabs.reserve(1);
         let new_slab_id = u32::try_from(self.slabs.len()).expect("slab index overflow");
@@ -275,39 +393,52 @@ impl<K, V> RefineState<K, V> {
             let old_slab = self.slabs[slab_id as usize].as_mut().unwrap();
             for u in self.unrefineds.iter_mut().flatten() {
                 if u.slab_id == slab_id {
-                    let new_start = packed.len() as u32;
-                    for slot in &mut old_slab.data[u.start as usize..u.end as usize] {
+                    let new_start = packed.len();
+                    for slot in &mut old_slab.data[u.start..u.end] {
                         // SAFETY: live `UnrefinedNode` exclusively owns initialized `u.start..u.end`.
                         packed.push(unsafe { slot.assume_init_read() });
                     }
                     u.slab_id = new_slab_id;
                     u.start = new_start;
-                    u.end = packed.len() as u32;
+                    u.end = packed.len();
                 }
             }
         }
         debug_assert_eq!(packed.len(), live_count);
         self.slabs[slab_id as usize] = None;
-        // `packed.len() == packed.capacity() == live_count` and `self.slabs` has reserved space,
-        // so creating and pushing the new slab performs zero allocations.
         self.slabs.push(Some(RawSlab::from_vec(packed)));
     }
 }
 
 impl<K, V> Drop for RefineState<K, V> {
     fn drop(&mut self) {
-        for u in self.unrefineds.iter_mut().flatten() {
-            if let Some(slab) = self
-                .slabs
-                .get_mut(u.slab_id as usize)
-                .and_then(Option::as_mut)
-            {
-                for slot in &mut slab.data[u.start as usize..u.end as usize] {
-                    // SAFETY: live `UnrefinedNode` exclusively owns initialized `u.start..u.end`.
-                    unsafe { slot.assume_init_drop() };
+        fn drop_remaining<K, V>(state: &mut RefineState<K, V>) {
+            for u in state.unrefineds.iter_mut().flatten() {
+                if let Some(slab) = state
+                    .slabs
+                    .get_mut(u.slab_id as usize)
+                    .and_then(Option::as_mut)
+                {
+                    while u.start < u.end {
+                        let idx = u.start;
+                        u.start += 1;
+                        // SAFETY: live `UnrefinedNode` exclusively owns initialized slot `idx`.
+                        unsafe { slab.data[idx].assume_init_drop() };
+                    }
                 }
             }
         }
+
+        struct Guard<'a, K, V>(&'a mut RefineState<K, V>);
+        impl<K, V> Drop for Guard<'_, K, V> {
+            fn drop(&mut self) {
+                drop_remaining(self.0);
+            }
+        }
+
+        let guard = Guard(self);
+        drop_remaining(guard.0);
+        mem::forget(guard);
     }
 }
 
@@ -341,6 +472,38 @@ impl<E: Unsigned, V> NodePools<E, V> {
         }
     }
 
+    fn alloc_radix_node<K>(
+        &self,
+        state: &mut RefineState<K, V>,
+        sample_key_u128: u128,
+        shift: usize,
+        width: usize,
+        children: Vec<NodeId>,
+        counts: Vec<usize>,
+    ) -> NodeId {
+        let prefix_shift = (shift + width) as u8;
+        let prefix_base = if (prefix_shift as usize) >= E::BITS {
+            E::from_usize(0)
+        } else {
+            E::from_u128(sample_key_u128 & !Self::mask_below(prefix_shift as usize))
+        };
+        let rx = RadixNode::new(
+            prefix_base,
+            prefix_shift,
+            shift as u8,
+            width as u8,
+            children,
+            counts,
+        );
+        // SAFETY: `state` serializes all allocations into `self.radixes`.
+        let rx_id = unsafe {
+            self.radixes.alloc_with(&mut state.radix_alloc, |slot| {
+                slot.write(rx);
+            })
+        };
+        NodeId::radix(rx_id)
+    }
+
     #[inline(always)]
     fn load_slot_acquire(&self, root: &AtomicNodeId, parent: Option<PathStep>) -> NodeId {
         match parent {
@@ -348,13 +511,13 @@ impl<E: Unsigned, V> NodePools<E, V> {
             Some(step) => match step.node.tag() {
                 TAG_INTERNAL => {
                     // SAFETY: `step.node` is a published internal handle obtained via `Acquire`.
-                    let internal = unsafe { self.internals.get(step.node.index()) };
-                    internal.children[step.slot].load_acquire()
+                    unsafe { self.internals.get(step.node.index()) }.children[step.slot]
+                        .load_acquire()
                 }
                 TAG_RADIX => {
                     // SAFETY: `step.node` is a published radix handle obtained via `Acquire`.
-                    let rx = unsafe { self.radixes.get(step.node.index()) };
-                    rx.children[step.slot].load_acquire()
+                    unsafe { self.radixes.get(step.node.index()) }.children[step.slot]
+                        .load_acquire()
                 }
                 _ => unreachable!(),
             },
@@ -375,8 +538,7 @@ impl<E: Unsigned, V> NodePools<E, V> {
                     // SAFETY: `step.node` is a published radix handle on the active descent path.
                     let rx = unsafe { self.radixes.get(step.node.index()) };
                     let prev = rx.counts[step.slot].load(Ordering::Relaxed);
-                    rx.counts[step.slot]
-                        .store(prev.saturating_sub(dropped as u32), Ordering::Release);
+                    rx.counts[step.slot].store(prev.saturating_sub(dropped), Ordering::Release);
                 }
             });
         }
@@ -411,27 +573,29 @@ impl<E: Unsigned, V> NodePools<E, V> {
             TAG_RADIX => {
                 // SAFETY: `node` is a live published radix handle under `state`.
                 let rx = unsafe { self.radixes.get(node.index()) };
-                rx.counts
-                    .iter()
-                    .map(|c| c.load(Ordering::Relaxed) as usize)
-                    .sum()
+                rx.counts.iter().map(|c| c.load(Ordering::Relaxed)).sum()
             }
             TAG_INTERNAL => {
                 // SAFETY: `node` is a live published internal handle under `state`.
                 let internal = unsafe { self.internals.get(node.index()) };
-                (0..internal.len())
-                    .map(|i| self.subtree_count_locked(state, internal.children[i].load_relaxed()))
+                internal.children[..internal.len()]
+                    .iter()
+                    .map(|c| self.subtree_count_locked(state, c.load_relaxed()))
                     .sum()
             }
             _ => unreachable!(),
         }
     }
 
+    /// Resolves all unrefined buckets under `node`, publishing every refined child immediately
+    /// and appending overwritten duplicate entries to `discarded` so callers drop them after
+    /// releasing the refinement mutex.
     fn finish_subtree_locked<K: RadixKey<Encoded = E>>(
         &self,
         state: &mut RefineState<K, V>,
         len_atom: &AtomicUsize,
         node: NodeId,
+        discarded: &mut Vec<(K, V)>,
     ) -> NodeId {
         if node.is_empty() {
             return node;
@@ -440,7 +604,7 @@ impl<E: Unsigned, V> NodePools<E, V> {
             TAG_LEAF => node,
             TAG_UNREFINED => {
                 let u = state.take_unrefined(node.index());
-                let (nid, dropped) = self.materialize_unrefined_locked(state, u);
+                let (nid, dropped) = self.materialize_unrefined_locked(state, u, discarded);
                 if dropped > 0 {
                     len_atom.fetch_sub(dropped, Ordering::Release);
                 }
@@ -449,13 +613,13 @@ impl<E: Unsigned, V> NodePools<E, V> {
             TAG_RADIX => {
                 // SAFETY: `node` is a live published radix handle under `state`.
                 let rx = unsafe { self.radixes.get(node.index()) };
-                for b in 0..rx.children.len() {
-                    let c = rx.children[b].load_acquire();
+                for (child_slot, count_slot) in rx.children.iter().zip(rx.counts.iter()) {
+                    let c = child_slot.load_acquire();
                     if !c.is_empty() && c.tag() != TAG_LEAF {
-                        let nc = self.finish_subtree_locked(state, len_atom, c);
-                        let new_cnt = self.subtree_count_locked(state, nc) as u32;
-                        rx.counts[b].store(new_cnt, Ordering::Release);
-                        rx.children[b].store_release(nc);
+                        let nc = self.finish_subtree_locked(state, len_atom, c, discarded);
+                        let new_cnt = self.subtree_count_locked(state, nc);
+                        count_slot.store(new_cnt, Ordering::Release);
+                        child_slot.store_release(nc);
                     }
                 }
                 node
@@ -463,11 +627,11 @@ impl<E: Unsigned, V> NodePools<E, V> {
             TAG_INTERNAL => {
                 // SAFETY: `node` is a live published internal handle under `state`.
                 let internal = unsafe { self.internals.get(node.index()) };
-                for i in 0..internal.len() {
-                    let c = internal.children[i].load_acquire();
+                for child_slot in &internal.children[..internal.len()] {
+                    let c = child_slot.load_acquire();
                     if !c.is_empty() && c.tag() != TAG_LEAF {
-                        let nc = self.finish_subtree_locked(state, len_atom, c);
-                        internal.children[i].store_release(nc);
+                        let nc = self.finish_subtree_locked(state, len_atom, c, discarded);
+                        child_slot.store_release(nc);
                     }
                 }
                 node
@@ -476,11 +640,13 @@ impl<E: Unsigned, V> NodePools<E, V> {
         }
     }
 
-    /// Performs ONE step of Tessera refinement while holding `state`.
+    /// Performs one step of Tessera refinement while holding `state`.
+    /// Never runs user `V::drop`; any overwritten duplicate entries are appended to `discarded`.
     fn crack_unrefined_locked<K: RadixKey<Encoded = E>>(
         &self,
         state: &mut RefineState<K, V>,
         uid: u32,
+        discarded: &mut Vec<(K, V)>,
     ) -> (NodeId, usize) {
         let u = state.take_unrefined(uid);
         let len = u.len();
@@ -488,7 +654,7 @@ impl<E: Unsigned, V> NodePools<E, V> {
             return (NodeId::EMPTY, 0);
         }
         if len <= TILE_REFINE_THRESHOLD {
-            return self.materialize_unrefined_locked(state, u);
+            return self.materialize_unrefined_locked(state, u, discarded);
         }
 
         let (varying, sample_key) = {
@@ -502,7 +668,7 @@ impl<E: Unsigned, V> NodePools<E, V> {
             )
         };
         if varying == 0 {
-            return self.materialize_unrefined_locked(state, u);
+            return self.materialize_unrefined_locked(state, u, discarded);
         }
 
         let top = bit_len(varying);
@@ -517,34 +683,22 @@ impl<E: Unsigned, V> NodePools<E, V> {
             let slab = state.slabs[u.slab_id as usize].as_mut().unwrap();
             // SAFETY: `u` exclusively owns initialized `u.start..u.end`.
             let slice = unsafe { slab.slice_mut(u.start, u.end) };
-            let mut ext = ByKey(|r: &(K, V)| r.0);
-            let classifier = KeyDigit::new(&mut ext, digit.shift);
-            let mut noop = |_: usize,
-                            _: core::ops::Range<usize>,
-                            _: &mut [(K, V)],
-                            _: &mut KeyDigit<&mut ByKey<_>, E>| {};
-            block::partition(
-                slice,
-                digit.width,
-                classifier,
-                &mut state.workspace.block,
-                &mut noop,
-            )
+            partition_by_digit(slice, digit.shift, digit.width, &mut state.workspace)
         };
 
         let num_buckets = 1usize << digit.width;
         let mut children = alloc::vec![NodeId::EMPTY; num_buckets];
-        let mut counts = alloc::vec![0u32; num_buckets];
+        let mut counts = alloc::vec![0usize; num_buckets];
         let child_candidate = varying & !digit.mask::<E>().to_u128();
 
         let mut prev = 0usize;
         for (b, &end) in ends.iter().enumerate() {
             if end > prev {
-                counts[b] = (end - prev) as u32;
+                counts[b] = end - prev;
                 let cid = state.alloc_unrefined(UnrefinedNode {
                     slab_id: u.slab_id,
-                    start: u.start + prev as u32,
-                    end: u.start + end as u32,
+                    start: u.start + prev,
+                    end: u.start + end,
                     candidate_mask: child_candidate,
                 });
                 children[b] = NodeId::unrefined(cid);
@@ -552,82 +706,82 @@ impl<E: Unsigned, V> NodePools<E, V> {
             prev = end;
         }
 
-        let prefix_shift = (digit.shift + digit.width) as u8;
-        let prefix_base = if (prefix_shift as usize) >= E::BITS {
-            E::from_usize(0)
-        } else {
-            E::from_u128(sample_key.to_u128() & !Self::mask_below(prefix_shift as usize))
-        };
-
-        let rx = RadixNode::new(
-            prefix_base,
-            prefix_shift,
-            digit.shift as u8,
-            digit.width as u8,
+        let rx_id = self.alloc_radix_node(
+            state,
+            sample_key.to_u128(),
+            digit.shift,
+            digit.width,
             children,
             counts,
         );
-        // SAFETY: `state` serializes all allocations into `self.radixes`.
-        let rx_id = unsafe {
-            self.radixes.alloc_with(&mut state.radix_alloc, |slot| {
-                slot.write(rx);
-            })
-        };
-        (NodeId::radix(rx_id), 0)
+        (rx_id, 0)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn crack_and_publish<K: RadixKey<Encoded = E>>(
+        &self,
+        root: &AtomicNodeId,
+        len_atom: &AtomicUsize,
+        has_unverified_dups: &AtomicBool,
+        state: &mut RefineState<K, V>,
+        path: &PathStack,
+        uid: u32,
+        discarded: &mut Vec<(K, V)>,
+    ) -> NodeId {
+        let (refined, dropped) = self.crack_unrefined_locked(state, uid, discarded);
+        if dropped > 0 {
+            len_atom.fetch_sub(dropped, Ordering::Release);
+        }
+        self.publish_slot_release(root, path, refined, dropped);
+        state.clear_if_converged(has_unverified_dups);
+        refined
     }
 
     fn materialize_unrefined_locked<K: RadixKey<Encoded = E>>(
         &self,
         state: &mut RefineState<K, V>,
         u: UnrefinedNode,
+        discarded: &mut Vec<(K, V)>,
     ) -> (NodeId, usize) {
-        let (len, s, e, slab_id) = (u.len(), u.start as usize, u.end as usize, u.slab_id);
+        let (len, s, e, slab_id) = (u.len(), u.start, u.end, u.slab_id);
 
-        // Zero-copy fast path when `u` owns the entire backing slab (e.g. full convergence).
-        if s == 0 && len == state.slabs[slab_id as usize].as_ref().unwrap().data.len() {
-            let slab = state.slabs[slab_id as usize].take().unwrap();
-            // SAFETY: `u` exclusively owns every initialized slot `0..len` in `slab`.
-            let mut records = unsafe { slab.into_vec() };
-            if len > 1 {
-                engine_sort(&mut records, ByKey(|r: &(K, V)| r.0));
-                dedup_sorted_last_wins(&mut records);
-            }
-            let dropped = len - records.len();
-            let node = self.build_bottom_up_sorted(state, records);
-            return (node, dropped);
-        }
-
-        {
-            let slab = state.slabs[slab_id as usize].as_mut().unwrap();
-            // SAFETY: `u` exclusively owns initialized `u.start..u.end`.
-            let slice = unsafe { slab.slice_mut(u.start, u.end) };
-            let mut ext = ByKey(|r: &(K, V)| r.0);
-            if len > 1 {
-                if len <= tile_capacity::<(K, V)>(TILE_BYTES) {
-                    let varying = scan_varying_bits(slice, u.candidate_mask, &mut ext);
-                    state.workspace.tile.sort(slice, varying, &mut ext);
-                } else {
-                    engine_sort(slice, ByKey(|r: &(K, V)| r.0));
+        // Zero-copy fast path when `u` owns the entire backing slab.
+        let mut records =
+            if s == 0 && len == state.slabs[slab_id as usize].as_ref().unwrap().data.len() {
+                let slab = state.slabs[slab_id as usize].take().unwrap();
+                // SAFETY: `u` exclusively owns every initialized slot `0..len` in `slab`.
+                let mut records = unsafe { slab.into_vec() };
+                if len > 1 {
+                    engine_sort(&mut records, ByKey(|r: &(K, V)| r.0));
                 }
-            }
-        }
+                records
+            } else {
+                {
+                    let slab = state.slabs[slab_id as usize].as_mut().unwrap();
+                    // SAFETY: `u` exclusively owns initialized `u.start..u.end`.
+                    let slice = unsafe { slab.slice_mut(u.start, u.end) };
+                    sort_slice(slice, u.candidate_mask, &mut state.workspace);
+                }
+                let mut drained: Vec<(K, V)> = Vec::with_capacity(len);
+                {
+                    let slab = state.slabs[slab_id as usize].as_mut().unwrap();
+                    for slot in &mut slab.data[s..e] {
+                        // SAFETY: `u` exclusively owns initialized `s..e`, moving ownership out once.
+                        drained.push(unsafe { slot.assume_init_read() });
+                    }
+                    slab.live_count -= len;
+                }
+                state.maybe_compact_slab(slab_id);
+                drained
+            };
 
-        // Drain all `len` records before dropping any overwritten duplicate values so a
-        // panicking `Drop` on `V` never leaves unconsumed initialized slots in `slab`.
-        let mut drained: Vec<(K, V)> = Vec::with_capacity(len);
-        {
-            let slab = state.slabs[slab_id as usize].as_mut().unwrap();
-            for slot in &mut slab.data[s..e] {
-                // SAFETY: `u` exclusively owns initialized `s..e`, moving ownership out once.
-                drained.push(unsafe { slot.assume_init_read() });
-            }
-            slab.live_count -= len;
+        let kept = dedup_sorted_last_wins_partition(&mut records);
+        let dropped = len - kept;
+        if dropped > 0 {
+            discarded.reserve(dropped);
+            discarded.extend(records.drain(kept..));
         }
-        state.maybe_compact_slab(slab_id);
-
-        dedup_sorted_last_wins(&mut drained);
-        let dropped = len - drained.len();
-        let node = self.build_bottom_up_sorted(state, drained);
+        let node = self.build_bottom_up_sorted(state, records);
         (node, dropped)
     }
 
@@ -703,7 +857,9 @@ impl<E: Unsigned, V> NodePools<E, V> {
         if n == 0 {
             return NodeId::EMPTY;
         }
-        if n < 4096 {
+        let min_k = records[0].0.encode().to_u128();
+        let diff = min_k ^ records[n - 1].0.encode().to_u128();
+        if n < 4096 || diff == 0 {
             return self.build_btree_from_iter(
                 state,
                 n,
@@ -711,16 +867,6 @@ impl<E: Unsigned, V> NodePools<E, V> {
             );
         }
 
-        let min_k = records[0].0.encode().to_u128();
-        let max_k = records[n - 1].0.encode().to_u128();
-        let diff = min_k ^ max_k;
-        if diff == 0 {
-            return self.build_btree_from_iter(
-                state,
-                n,
-                records.into_iter().map(|(k, v)| (k.encode(), v)),
-            );
-        }
         let top = bit_len(diff);
         let desired_buckets = (n / 1000).clamp(16, 4096);
         let width = (((desired_buckets - 1).ilog2() + 1) as usize)
@@ -730,42 +876,20 @@ impl<E: Unsigned, V> NodePools<E, V> {
         let num_buckets = 1usize << width;
         let mask = (1u128 << width) - 1;
 
-        let mut counts = alloc::vec![0u32; num_buckets];
+        let mut counts = alloc::vec![0usize; num_buckets];
         for (k, _) in &records {
             counts[((k.encode().to_u128() >> shift) & mask) as usize] += 1;
         }
 
         let mut children = alloc::vec![NodeId::EMPTY; num_buckets];
         let mut iter = records.into_iter().map(|(k, v)| (k.encode(), v));
-        for b in 0..num_buckets {
-            let cnt = counts[b] as usize;
+        for (child_slot, &cnt) in children.iter_mut().zip(&counts) {
             if cnt > 0 {
-                children[b] = self.build_btree_from_iter(state, cnt, iter.by_ref().take(cnt));
+                *child_slot = self.build_btree_from_iter(state, cnt, iter.by_ref().take(cnt));
             }
         }
 
-        let prefix_shift = (shift + width) as u8;
-        let prefix_base = if (prefix_shift as usize) >= E::BITS {
-            E::from_usize(0)
-        } else {
-            E::from_u128(min_k & !Self::mask_below(prefix_shift as usize))
-        };
-
-        let rx = RadixNode::new(
-            prefix_base,
-            prefix_shift,
-            shift as u8,
-            width as u8,
-            children,
-            counts,
-        );
-        // SAFETY: `state` serializes allocations into `self.radixes`.
-        let rx_id = unsafe {
-            self.radixes.alloc_with(&mut state.radix_alloc, |slot| {
-                slot.write(rx);
-            })
-        };
-        NodeId::radix(rx_id)
+        self.alloc_radix_node(state, min_k, shift, width, children, counts)
     }
 }
 
@@ -773,7 +897,11 @@ impl<E: Unsigned, V> NodePools<E, V> {
 ///
 /// Combines `O(1)` lazy adoption of large unsorted batches, transparent on-demand radix
 /// refinement during `&self` reads, gapped `fearless_simd` leaves, and streaming batch
-/// ingestion behind one standard, thread-safe (`Send + Sync`) ordered-map interface.
+/// ingestion behind one `Send + Sync` ordered-map interface.
+///
+/// Ordering, duplicate resolution, lazy refinement, reference stability, and unwind guarantees
+/// are specified in `conformance/semantics.md`; internal pool and slab ownership boundaries are
+/// documented in `docs/design/engine.md`.
 ///
 /// # Examples
 ///
@@ -814,7 +942,7 @@ impl<K: RadixKey, V> Default for TesseraMap<K, V> {
 
 impl<K: RadixKey, V> From<Vec<(K, V)>> for TesseraMap<K, V> {
     fn from(records: Vec<(K, V)>) -> Self {
-        Self::from_vec_inner(records, true)
+        Self::from_vec_with_threshold(records, true, LAZY_THRESHOLD)
     }
 }
 
@@ -826,58 +954,8 @@ impl<K: RadixKey, V> FromIterator<(K, V)> for TesseraMap<K, V> {
 
 impl<K: RadixKey, V> Extend<(K, V)> for TesseraMap<K, V> {
     fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iter: I) {
-        let batch: Vec<(K, V)> = iter.into_iter().collect();
-        self.extend_vec(batch);
+        self.extend_vec(iter.into_iter().collect());
     }
-}
-
-/// Deduplicates a sorted `Vec<(K, V)>` in place, keeping the LAST value for equal keys.
-fn dedup_sorted_last_wins<K: RadixKey, V>(records: &mut Vec<(K, V)>) {
-    let n = records.len();
-    if n < 2 {
-        return;
-    }
-    let mut write = 0usize;
-    for read in 1..n {
-        if records[read].0.encode() == records[write].0.encode() {
-            records.swap(write, read);
-        } else {
-            write += 1;
-            if write != read {
-                records.swap(write, read);
-            }
-        }
-    }
-    records.truncate(write + 1);
-}
-
-/// Converts a `RangeBounds<K>` into an inclusive encoded range `(lo, hi)`, or `None` if empty.
-fn encoded_inclusive_bounds<K: RadixKey>(
-    bounds: &impl RangeBounds<K>,
-) -> Option<(K::Encoded, K::Encoded)> {
-    let lo = match bounds.start_bound() {
-        Bound::Unbounded => K::Encoded::from_usize(0),
-        Bound::Included(&k) => k.encode(),
-        Bound::Excluded(&k) => {
-            let ek = k.encode();
-            if ek == K::Encoded::MAX {
-                return None;
-            }
-            K::Encoded::from_u128(ek.to_u128() + 1)
-        }
-    };
-    let hi = match bounds.end_bound() {
-        Bound::Unbounded => K::Encoded::MAX,
-        Bound::Included(&k) => k.encode(),
-        Bound::Excluded(&k) => {
-            let ek = k.encode();
-            if ek == K::Encoded::from_usize(0) {
-                return None;
-            }
-            K::Encoded::from_u128(ek.to_u128() - 1)
-        }
-    };
-    (lo <= hi).then_some((lo, hi))
 }
 
 impl<K: RadixKey, V> TesseraMap<K, V> {
@@ -898,37 +976,42 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
     ///
     /// Unlike [`From<Vec<(K, V)>>`], assuming distinct keys allows [`Self::len`] and
     /// [`Self::select_nth`] to answer lazily without scanning untouched buckets. If duplicate
-    /// keys are accidentally present, refinement still deduplicates them safely (last-wins)
-    /// without violating invariants, though unrefined buckets reflect raw counts until touched.
+    /// keys are present anyway, refinement still deduplicates them safely (last value wins),
+    /// though untouched buckets report raw counts until refined.
     pub fn from_unique(records: Vec<(K, V)>) -> Self {
-        Self::from_vec_inner(records, false)
+        Self::from_vec_with_threshold(records, false, LAZY_THRESHOLD)
     }
 
-    fn from_vec_inner(mut records: Vec<(K, V)>, may_have_dups: bool) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_vec_lazy_for_test(records: Vec<(K, V)>, may_have_dups: bool) -> Self {
+        Self::from_vec_with_threshold(records, may_have_dups, 1)
+    }
+
+    fn from_vec_with_threshold(
+        mut records: Vec<(K, V)>,
+        may_have_dups: bool,
+        lazy_threshold: usize,
+    ) -> Self {
         let len = records.len();
         if len == 0 {
             return Self::new();
         }
         let mut map = Self::new();
-        if len < LAZY_THRESHOLD {
+        if len < lazy_threshold {
             engine_sort(&mut records, ByKey(|r: &(K, V)| r.0));
-            dedup_sorted_last_wins(&mut records);
+            let kept = dedup_sorted_last_wins_partition(&mut records);
+            records.truncate(kept);
             let n = records.len();
-            let state = map.refine.get_mut().unwrap_or_else(PoisonError::into_inner);
-            let root = map.pools.build_bottom_up_sorted(state, records);
+            let (pools, state) = map.parts_mut();
+            let root = pools.build_bottom_up_sorted(state, records);
             map.root.set_mut(root);
             *map.len.get_mut() = n;
             return map;
         }
 
-        let state = map.refine.get_mut().unwrap_or_else(PoisonError::into_inner);
-        let slab_id = state.alloc_slab(RawSlab::from_vec(records));
-        let uid = state.alloc_unrefined(UnrefinedNode {
-            slab_id,
-            start: 0,
-            end: len as u32,
-            candidate_mask: K::VARYING_MASK,
-        });
+        let uid = map
+            .refine_mut()
+            .alloc_slab_unrefined(records, K::VARYING_MASK);
         map.root.set_mut(NodeId::unrefined(uid));
         *map.len.get_mut() = len;
         *map.has_unverified_dups.get_mut() = may_have_dups;
@@ -947,10 +1030,10 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         self.len.load(Ordering::Acquire)
     }
 
-    /// Returns `true` if the map contains no entries.
+    /// Returns `true` if the map contains no entries, in `O(1)` without refining unrefined buckets.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.root.load_acquire().is_empty() || self.len() == 0
+        self.root.load_acquire().is_empty()
     }
 
     /// Removes all entries and releases all internal storage.
@@ -958,7 +1041,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         *self = Self::new();
     }
 
-    /// Returns internal structural diagnostics (leaf/internal/radix/unrefined counts).
+    /// Returns provisional internal structural diagnostics without refining unrefined buckets.
     pub fn stats(&self) -> MapStats {
         let state = self.lock_refine();
         let mut unrefined = 0usize;
@@ -981,6 +1064,23 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
     #[inline]
     fn lock_refine(&self) -> std::sync::MutexGuard<'_, RefineState<K, V>> {
         self.refine.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[inline]
+    fn refine_mut(&mut self) -> &mut RefineState<K, V> {
+        self.refine
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[inline]
+    fn parts_mut(&mut self) -> (&mut NodePools<K::Encoded, V>, &mut RefineState<K, V>) {
+        (
+            &mut self.pools,
+            self.refine
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -1021,8 +1121,8 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         }
     }
 
-    /// Cold path for `get`: tracks the full ancestor `PathStack` so any duplicates dropped
-    /// during cracking propagate cleanly up every ancestor `RadixNode`.
+    /// Cold path for `get`: tracks the full ancestor `PathStack` so duplicate drops during
+    /// cracking propagate cleanly up every ancestor `RadixNode`.
     #[cold]
     #[inline(never)]
     fn get_cold_crack<S: Simd>(&self, simd: S, ek: K::Encoded) -> Option<&V> {
@@ -1055,9 +1155,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     // SAFETY: `slot < (1 << rx.width) == rx.children.len()`.
                     cur = unsafe { rx.children.get_unchecked(slot).load_acquire() };
                 }
-                TAG_UNREFINED => {
-                    cur = self.crack_slot_shared(&path, cur);
-                }
+                TAG_UNREFINED => cur = self.crack_slot_shared(&path, cur),
                 _ => unreachable!(),
             }
         }
@@ -1096,8 +1194,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         });
     }
 
-    /// Returns the smallest `(K, &V)` pair in the map, if non-empty.
-    pub fn first(&self) -> Option<(K, &V)> {
+    fn endpoint(&self, last: bool) -> Option<(K, &V)> {
         let mut cur = self.root.load_acquire();
         let mut path = PathStack::new();
         loop {
@@ -1107,64 +1204,34 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
             match cur.tag() {
                 TAG_LEAF => {
                     // SAFETY: `cur` was loaded with `Acquire` from a published slot.
-                    return unsafe { self.pools.leaves.get(cur.index()) }
-                        .first()
-                        .map(|(k, v)| (K::decode(k), v));
+                    let leaf = unsafe { self.pools.leaves.get(cur.index()) };
+                    let pair = if last { leaf.last() } else { leaf.first() };
+                    return pair.map(|(k, v)| (K::decode(k), v));
                 }
                 TAG_INTERNAL => {
                     // SAFETY: `cur` was loaded with `Acquire` from a published slot.
                     let internal = unsafe { self.pools.internals.get(cur.index()) };
-                    path.push(PathStep { node: cur, slot: 0 });
-                    cur = internal.children[0].load_acquire();
-                }
-                TAG_RADIX => {
-                    // SAFETY: `cur` was loaded with `Acquire` from a published slot.
-                    let rx = unsafe { self.pools.radixes.get(cur.index()) };
-                    let (slot, next) = rx.children.iter().enumerate().find_map(|(i, c)| {
-                        let id = c.load_acquire();
-                        (!id.is_empty()).then_some((i, id))
-                    })?;
-                    path.push(PathStep { node: cur, slot });
-                    cur = next;
-                }
-                TAG_UNREFINED => cur = self.crack_slot_shared(&path, cur),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    /// Returns the largest `(K, &V)` pair in the map, if non-empty.
-    pub fn last(&self) -> Option<(K, &V)> {
-        let mut cur = self.root.load_acquire();
-        let mut path = PathStack::new();
-        loop {
-            if cur.is_empty() {
-                return None;
-            }
-            match cur.tag() {
-                TAG_LEAF => {
-                    // SAFETY: `cur` was loaded with `Acquire` from a published slot.
-                    return unsafe { self.pools.leaves.get(cur.index()) }
-                        .last()
-                        .map(|(k, v)| (K::decode(k), v));
-                }
-                TAG_INTERNAL => {
-                    // SAFETY: `cur` was loaded with `Acquire` from a published slot.
-                    let internal = unsafe { self.pools.internals.get(cur.index()) };
-                    let slot = internal.len() - 1;
+                    let slot = if last { internal.len() - 1 } else { 0 };
                     path.push(PathStep { node: cur, slot });
                     cur = internal.children[slot].load_acquire();
                 }
                 TAG_RADIX => {
                     // SAFETY: `cur` was loaded with `Acquire` from a published slot.
                     let rx = unsafe { self.pools.radixes.get(cur.index()) };
-                    let (slot, next) =
+                    let next = if last {
                         rx.children.iter().enumerate().rev().find_map(|(i, c)| {
                             let id = c.load_acquire();
                             (!id.is_empty()).then_some((i, id))
-                        })?;
+                        })
+                    } else {
+                        rx.children.iter().enumerate().find_map(|(i, c)| {
+                            let id = c.load_acquire();
+                            (!id.is_empty()).then_some((i, id))
+                        })
+                    };
+                    let (slot, id) = next?;
                     path.push(PathStep { node: cur, slot });
-                    cur = next;
+                    cur = id;
                 }
                 TAG_UNREFINED => cur = self.crack_slot_shared(&path, cur),
                 _ => unreachable!(),
@@ -1172,10 +1239,20 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         }
     }
 
+    /// Returns the smallest `(K, &V)` pair in the map, if non-empty.
+    pub fn first(&self) -> Option<(K, &V)> {
+        self.endpoint(false)
+    }
+
+    /// Returns the largest `(K, &V)` pair in the map, if non-empty.
+    pub fn last(&self) -> Option<(K, &V)> {
+        self.endpoint(true)
+    }
+
     /// Returns the `rank`-th smallest `(K, &V)` pair (`0 <= rank < self.len()`).
     ///
     /// On maps created via [`Self::from_unique`] (or already deduplicated), lazily refines
-    /// ONLY the buckets containing `rank` and persists all cracked structure for future queries.
+    /// only the buckets containing `rank` and retains cracked structure for future queries.
     pub fn select_nth(&self, rank: usize) -> Option<(K, &V)> {
         if self.has_unverified_dups.load(Ordering::Acquire) {
             self.resolve_unverified_dups();
@@ -1197,15 +1274,13 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     let (ek, v) = unsafe { self.pools.leaves.get(cur.index()) }.nth(rem)?;
                     return Some((K::decode(ek), v));
                 }
-                TAG_UNREFINED => {
-                    cur = self.crack_slot_shared(&path, cur);
-                }
+                TAG_UNREFINED => cur = self.crack_slot_shared(&path, cur),
                 TAG_RADIX => {
                     // SAFETY: `cur` was loaded with `Acquire` from a published slot.
                     let rx = unsafe { self.pools.radixes.get(cur.index()) };
                     let mut chosen = None;
                     for (slot, cnt) in rx.counts.iter().enumerate() {
-                        let c = cnt.load(Ordering::Acquire) as usize;
+                        let c = cnt.load(Ordering::Acquire);
                         if rem < c {
                             chosen = Some((slot, rx.children[slot].load_acquire()));
                             break;
@@ -1220,8 +1295,9 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     // SAFETY: `cur` was loaded with `Acquire` from a published slot.
                     let internal = unsafe { self.pools.internals.get(cur.index()) };
                     let mut chosen = None;
-                    for slot in 0..internal.len() {
-                        let child = internal.children[slot].load_acquire();
+                    for (slot, child_slot) in internal.children[..internal.len()].iter().enumerate()
+                    {
+                        let child = child_slot.load_acquire();
                         let c =
                             self.subtree_count_shared(Some(PathStep { node: cur, slot }), child);
                         if rem < c {
@@ -1287,59 +1363,79 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                 });
 
             if all_in_prefix && batch.len() >= 256 && (width as usize) <= MAX_RADIX_BITS {
-                let ends = {
-                    let state = self
-                        .refine
-                        .get_mut()
-                        .unwrap_or_else(PoisonError::into_inner);
-                    let mut ext = ByKey(|r: &(K, V)| r.0);
-                    let classifier = KeyDigit::new(&mut ext, shift as usize);
-                    let mut noop =
-                        |_: usize,
-                         _: core::ops::Range<usize>,
-                         _: &mut [(K, V)],
-                         _: &mut KeyDigit<&mut ByKey<_>, K::Encoded>| {};
-                    block::partition(
-                        &mut batch,
-                        width as usize,
-                        classifier,
-                        &mut state.workspace.block,
-                        &mut noop,
-                    )
-                };
+                let ends = partition_by_digit(
+                    &mut batch,
+                    shift as usize,
+                    width as usize,
+                    &mut self.refine_mut().workspace,
+                );
+                let full_bucket_cand =
+                    NodePools::<K::Encoded, V>::mask_below(shift as usize) & K::VARYING_MASK;
+                let rx_node = NodeId::radix(rx_idx);
 
-                let tile_len = tile_capacity::<(K, V)>(TILE_BYTES);
-                let mut needs_slab = false;
-                let mut start = 0usize;
-                for (b, &end) in ends.iter().enumerate() {
-                    if end > start {
+                // Consume buckets from the tail of `batch` via `Vec::drain` / `split_off` so the
+                // active batch stays locally owned (never inside `state.slabs` while `insert_into`
+                // may refine and reclaim existing slabs) and `Vec` handles unwind cleanup safely.
+                dispatch!(self.level, simd => {
+                    for b in (0..ends.len()).rev() {
+                        let start = if b == 0 { 0 } else { ends[b - 1] };
+                        let end = ends[b];
+                        let count = end - start;
+                        debug_assert_eq!(batch.len(), end);
+                        if count == 0 {
+                            continue;
+                        }
                         // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
                         let child =
                             unsafe { self.pools.radixes.get(rx_idx) }.children[b].load_relaxed();
-                        if child.is_empty() || child.tag() == TAG_UNREFINED {
-                            needs_slab = true;
-                        } else if end - start > 16 {
-                            let slice = &mut batch[start..end];
-                            if slice.len() <= tile_len {
-                                let state = self
-                                    .refine
-                                    .get_mut()
-                                    .unwrap_or_else(PoisonError::into_inner);
-                                let mut ext = ByKey(|r: &(K, V)| r.0);
-                                let cand = NodePools::<K::Encoded, V>::mask_below(shift as usize)
-                                    & K::VARYING_MASK;
-                                let varying = scan_varying_bits(slice, cand, &mut ext);
-                                state.workspace.tile.sort(slice, varying, &mut ext);
+                        if child.is_empty() {
+                            let bucket_vec = if start == 0 {
+                                mem::take(&mut batch)
                             } else {
-                                engine_sort(slice, ByKey(|r: &(K, V)| r.0));
+                                batch.split_off(start)
+                            };
+                            let uid = self
+                                .refine_mut()
+                                .alloc_slab_unrefined(bucket_vec, full_bucket_cand);
+                            // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
+                            let rx = unsafe { self.pools.radixes.get_mut(rx_idx) };
+                            rx.children[b].set_mut(NodeId::unrefined(uid));
+                            *rx.counts[b].get_mut() += count;
+                            *self.len.get_mut() += count;
+                            *self.has_unverified_dups.get_mut() = true;
+                        } else if child.tag() == TAG_UNREFINED {
+                            let (uid, combined_len) = self.refine_mut().merge_unrefined(
+                                child.index(),
+                                batch.drain(start..),
+                                full_bucket_cand,
+                            );
+                            // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
+                            let rx = unsafe { self.pools.radixes.get_mut(rx_idx) };
+                            rx.children[b].set_mut(NodeId::unrefined(uid));
+                            *rx.counts[b].get_mut() = combined_len;
+                            *self.len.get_mut() += count;
+                            *self.has_unverified_dups.get_mut() = true;
+                        } else {
+                            if count > 16 {
+                                sort_slice(
+                                    &mut batch[start..end],
+                                    full_bucket_cand,
+                                    &mut self.refine_mut().workspace,
+                                );
+                            }
+                            let step = Some(PathStep {
+                                node: rx_node,
+                                slot: b,
+                            });
+                            for (k, v) in batch.drain(start..) {
+                                // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
+                                let cur_child = unsafe { self.pools.radixes.get(rx_idx) }
+                                    .children[b]
+                                    .load_relaxed();
+                                self.insert_into(simd, cur_child, step, k.encode(), v);
                             }
                         }
                     }
-                    start = end;
-                }
-
-                dispatch!(self.level, simd => {
-                    self.merge_partitioned_batch(simd, rx_idx, shift, batch, &ends, needs_slab);
                 });
                 return;
             }
@@ -1361,6 +1457,15 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
     // Unified iterative `&mut self` insert / remove / batch-merge internals
     // -----------------------------------------------------------------------
 
+    #[inline]
+    fn insert_new_leaf_at(&mut self, path: &PathStack, ek: K::Encoded, val: V) -> NodeId {
+        let leaf = NodeId::leaf(self.alloc_leaf_mut(|slot| Leaf::init_single(slot, ek, val)));
+        self.set_child_mut(path.last(), leaf);
+        self.bump_radix_counts_mut(path, 1);
+        *self.len.get_mut() += 1;
+        leaf
+    }
+
     #[inline(always)]
     fn insert_into<S: Simd>(
         &mut self,
@@ -1370,24 +1475,15 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         ek: K::Encoded,
         val: V,
     ) -> (NodeId, Option<V>) {
-        if start_node.is_empty() {
-            let leaf = NodeId::leaf(self.alloc_leaf_mut(|slot| Leaf::init_single(slot, ek, val)));
-            self.set_child_mut(start_parent, leaf);
-            if let Some(p) = start_parent
-                && p.node.tag() == TAG_RADIX
-            {
-                // SAFETY: `p.node` is a live radix handle under `&mut self`.
-                *unsafe { self.pools.radixes.get_mut(p.node.index()) }.counts[p.slot].get_mut() +=
-                    1;
-            }
-            *self.len.get_mut() += 1;
-            return (leaf, None);
-        }
-
         let mut path = PathStack::new();
         if let Some(p) = start_parent {
             path.push(p);
         }
+        if start_node.is_empty() {
+            let leaf = self.insert_new_leaf_at(&path, ek, val);
+            return (leaf, None);
+        }
+
         let mut top_node = start_node;
         let mut cur = start_node;
 
@@ -1450,8 +1546,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                                 Internal::init_pair(slot, cur, max_cov, new_leaf)
                             })
                         });
-                        let parent = path.last();
-                        self.set_child_mut(parent, wrapped);
+                        self.set_child_mut(path.last(), wrapped);
                         if path.is_empty() {
                             top_node = wrapped;
                         }
@@ -1461,13 +1556,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     }
                     path.push(PathStep { node: cur, slot: b });
                     if next.is_empty() {
-                        let leaf = NodeId::leaf(
-                            self.alloc_leaf_mut(|slot| Leaf::init_single(slot, ek, val)),
-                        );
-                        // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-                        unsafe { self.pools.radixes.get_mut(rx_idx) }.children[b].set_mut(leaf);
-                        self.bump_radix_counts_mut(&path, 1);
-                        *self.len.get_mut() += 1;
+                        self.insert_new_leaf_at(&path, ek, val);
                         return (top_node, None);
                     }
                     cur = next;
@@ -1478,15 +1567,10 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                         top_node = refined;
                     }
                     if refined.is_empty() {
-                        let leaf = NodeId::leaf(
-                            self.alloc_leaf_mut(|slot| Leaf::init_single(slot, ek, val)),
-                        );
-                        self.set_child_mut(path.last(), leaf);
+                        let leaf = self.insert_new_leaf_at(&path, ek, val);
                         if path.is_empty() {
                             top_node = leaf;
                         }
-                        self.bump_radix_counts_mut(&path, 1);
-                        *self.len.get_mut() += 1;
                         return (top_node, None);
                     }
                     cur = refined;
@@ -1505,7 +1589,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         path: &PathStack,
         ek: K::Encoded,
         val: V,
-        mut top_node: NodeId,
+        top_node: NodeId,
     ) -> NodeId {
         let right_idx = self.alloc_leaf_mut(Leaf::init_empty);
         // SAFETY: `leaf_idx` and `right_idx` are distinct live leaves under `&mut self`.
@@ -1558,8 +1642,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                 Internal::init_pair(slot, left_child, sep, right_child)
             }));
         self.root.set_mut(new_root);
-        top_node = new_root;
-        top_node
+        new_root
     }
 
     #[inline(always)]
@@ -1581,11 +1664,8 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     self.dec_radix_counts_mut(&path);
                     // SAFETY: `leaf_idx` is a live leaf handle under `&mut self`.
                     if unsafe { self.pools.leaves.get(leaf_idx) }.is_empty() {
-                        let state = self
-                            .refine
-                            .get_mut()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        self.pools.leaves.free(&mut state.leaf_alloc, leaf_idx);
+                        let (pools, state) = self.parts_mut();
+                        pools.leaves.free(&mut state.leaf_alloc, leaf_idx);
                         self.unlink_empty(&path);
                     }
                     return Some(removed);
@@ -1607,9 +1687,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     path.push(PathStep { node: cur, slot });
                     cur = rx.children[slot].load_relaxed();
                 }
-                TAG_UNREFINED => {
-                    cur = self.crack_slot_mut(&path, cur);
-                }
+                TAG_UNREFINED => cur = self.crack_slot_mut(&path, cur),
                 _ => unreachable!(),
             }
         }
@@ -1623,15 +1701,9 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                 TAG_INTERNAL => {
                     let int_idx = step.node.index();
                     // SAFETY: `int_idx` is a live internal handle under `&mut self`.
-                    let len = unsafe { self.pools.internals.get(int_idx) }.len();
-                    if len == 1 {
-                        let state = self
-                            .refine
-                            .get_mut()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        self.pools
-                            .internals
-                            .free(&mut state.internal_alloc, int_idx);
+                    if unsafe { self.pools.internals.get(int_idx) }.len() == 1 {
+                        let (pools, state) = self.parts_mut();
+                        pools.internals.free(&mut state.internal_alloc, int_idx);
                         continue;
                     }
                     // SAFETY: `int_idx` is a live internal handle under `&mut self`.
@@ -1641,13 +1713,8 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                         // SAFETY: `int_idx` is a live internal handle under `&mut self`.
                         let sole =
                             unsafe { self.pools.internals.get(int_idx) }.children[0].load_relaxed();
-                        let state = self
-                            .refine
-                            .get_mut()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        self.pools
-                            .internals
-                            .free(&mut state.internal_alloc, int_idx);
+                        let (pools, state) = self.parts_mut();
+                        pools.internals.free(&mut state.internal_alloc, int_idx);
                         let parent = level.checked_sub(1).and_then(|i| path.get(i));
                         self.set_child_mut(parent, sole);
                     }
@@ -1663,11 +1730,8 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                         rx.children.iter_mut().all(|c| c.get_mut().is_empty())
                     };
                     if all_empty {
-                        let state = self
-                            .refine
-                            .get_mut()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        self.pools.radixes.free(&mut state.radix_alloc, rx_idx);
+                        let (pools, state) = self.parts_mut();
+                        pools.radixes.free(&mut state.radix_alloc, rx_idx);
                         continue;
                     }
                     return;
@@ -1678,153 +1742,15 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         self.root.set_mut(NodeId::EMPTY);
     }
 
-    #[inline(always)]
-    fn merge_partitioned_batch<S: Simd>(
-        &mut self,
-        simd: S,
-        rx_idx: u32,
-        shift: u8,
-        batch: Vec<(K, V)>,
-        ends: &[usize],
-        needs_slab: bool,
-    ) {
-        let rx_node = NodeId::radix(rx_idx);
-        if !needs_slab {
-            let mut iter = batch.into_iter();
-            let mut start = 0usize;
-            for (b, &end) in ends.iter().enumerate() {
-                let count = end - start;
-                if count == 0 {
-                    continue;
-                }
-                let step = Some(PathStep {
-                    node: rx_node,
-                    slot: b,
-                });
-                for (k, v) in iter.by_ref().take(count) {
-                    // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-                    let child =
-                        unsafe { self.pools.radixes.get(rx_idx) }.children[b].load_relaxed();
-                    self.insert_into(simd, child, step, k.encode(), v);
-                }
-                start = end;
-            }
-            return;
-        }
-
-        let slab_id = self
-            .refine
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner)
-            .alloc_slab(RawSlab::from_vec(batch));
-        let full_bucket_cand =
-            NodePools::<K::Encoded, V>::mask_below(shift as usize) & K::VARYING_MASK;
-        let mut start = 0usize;
-        for (b, &end) in ends.iter().enumerate() {
-            let count = end - start;
-            if count == 0 {
-                continue;
-            }
-            // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-            let child = unsafe { self.pools.radixes.get(rx_idx) }.children[b].load_relaxed();
-            if child.is_empty() {
-                let state = self
-                    .refine
-                    .get_mut()
-                    .unwrap_or_else(PoisonError::into_inner);
-                let uid = state.alloc_unrefined(UnrefinedNode {
-                    slab_id,
-                    start: start as u32,
-                    end: end as u32,
-                    candidate_mask: full_bucket_cand,
-                });
-                // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-                let rx = unsafe { self.pools.radixes.get_mut(rx_idx) };
-                rx.children[b].set_mut(NodeId::unrefined(uid));
-                *rx.counts[b].get_mut() += count as u32;
-                *self.len.get_mut() += count;
-                *self.has_unverified_dups.get_mut() = true;
-            } else if child.tag() == TAG_UNREFINED {
-                let (uid, combined_len) = {
-                    let state = self
-                        .refine
-                        .get_mut()
-                        .unwrap_or_else(PoisonError::into_inner);
-                    let old_len = state.unrefineds[child.index() as usize]
-                        .as_ref()
-                        .expect("live unrefined")
-                        .len();
-                    // Allocate before `take_unrefined` so OOM never leaks `old_u`.
-                    let mut combined = Vec::with_capacity(old_len + count);
-                    let old_u = state.take_unrefined(child.index());
-                    state.drain_slab_range(old_u.slab_id, old_u.start, old_u.end, &mut combined);
-                    state.drain_slab_range(slab_id, start as u32, end as u32, &mut combined);
-                    let combined_len = combined.len();
-                    let new_slab = state.alloc_slab(RawSlab::from_vec(combined));
-                    let uid = state.alloc_unrefined(UnrefinedNode {
-                        slab_id: new_slab,
-                        start: 0,
-                        end: combined_len as u32,
-                        // Newly merged keys can vary in bits that were constant in the old batch.
-                        candidate_mask: full_bucket_cand,
-                    });
-                    (uid, combined_len)
-                };
-                // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-                let rx = unsafe { self.pools.radixes.get_mut(rx_idx) };
-                rx.children[b].set_mut(NodeId::unrefined(uid));
-                *rx.counts[b].get_mut() = combined_len as u32;
-                *self.len.get_mut() += count;
-                *self.has_unverified_dups.get_mut() = true;
-            } else {
-                let step = Some(PathStep {
-                    node: rx_node,
-                    slot: b,
-                });
-                for idx in start..end {
-                    let (k, v) = {
-                        let state = self
-                            .refine
-                            .get_mut()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        let slab = state.slabs[slab_id as usize].as_mut().unwrap();
-                        // SAFETY: exclusively consuming initialized `start..end` once.
-                        unsafe { slab.data[idx].assume_init_read() }
-                    };
-                    // SAFETY: `rx_idx` is a live radix handle under `&mut self`.
-                    let cur_child =
-                        unsafe { self.pools.radixes.get(rx_idx) }.children[b].load_relaxed();
-                    self.insert_into(simd, cur_child, step, k.encode(), v);
-                }
-                let state = self
-                    .refine
-                    .get_mut()
-                    .unwrap_or_else(PoisonError::into_inner);
-                let should_free = {
-                    let slab = state.slabs[slab_id as usize].as_mut().unwrap();
-                    slab.live_count -= count;
-                    slab.live_count == 0
-                };
-                if should_free {
-                    state.slabs[slab_id as usize] = None;
-                }
-            }
-            start = end;
-        }
-    }
-
     // -----------------------------------------------------------------------
     // Shared `&self` transparent cracking, range, and exclusive pool helpers
     // -----------------------------------------------------------------------
 
     #[inline]
     fn alloc_leaf_mut(&mut self, init: impl FnOnce(&mut MaybeUninit<Leaf<K::Encoded, V>>)) -> u32 {
-        let state = self
-            .refine
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let (pools, state) = self.parts_mut();
         // SAFETY: `&mut self` guarantees exclusive access to `leaves` and `leaf_alloc`.
-        unsafe { self.pools.leaves.alloc_with(&mut state.leaf_alloc, init) }
+        unsafe { pools.leaves.alloc_with(&mut state.leaf_alloc, init) }
     }
 
     #[inline]
@@ -1832,16 +1758,9 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         &mut self,
         init: impl FnOnce(&mut MaybeUninit<Internal<K::Encoded>>),
     ) -> u32 {
-        let state = self
-            .refine
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let (pools, state) = self.parts_mut();
         // SAFETY: `&mut self` guarantees exclusive access to `internals` and `internal_alloc`.
-        unsafe {
-            self.pools
-                .internals
-                .alloc_with(&mut state.internal_alloc, init)
-        }
+        unsafe { pools.internals.alloc_with(&mut state.internal_alloc, init) }
     }
 
     #[inline]
@@ -1865,7 +1784,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
     }
 
     #[inline(always)]
-    fn bump_radix_counts_mut(&mut self, path: &PathStack, delta: u32) {
+    fn bump_radix_counts_mut(&mut self, path: &PathStack, delta: usize) {
         path.for_each(|step| {
             if step.node.tag() == TAG_RADIX {
                 // SAFETY: `step.node` is a live radix handle under `&mut self`.
@@ -1887,31 +1806,29 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
         });
     }
 
-    /// Cold path during `&self`: locks `self.refine`, re-checks `path`'s tail slot (in case
-    /// another thread already cracked `expected`), cracks once, and publishes via `Release`.
+    /// Cold path during `&self`: locks `self.refine`, re-checks `path`'s tail slot, cracks once,
+    /// publishes via `Release`, releases the mutex, and only then drops overwritten duplicates.
     #[cold]
     #[inline(never)]
     fn crack_slot_shared(&self, path: &PathStack, expected: NodeId) -> NodeId {
-        let mut state = self.lock_refine();
-        let current = self.pools.load_slot_acquire(&self.root, path.last());
-        if current != expected {
-            return current;
-        }
-        let (refined, dropped) = self
-            .pools
-            .crack_unrefined_locked(&mut state, expected.index());
-        if dropped > 0 {
-            self.len.fetch_sub(dropped, Ordering::Release);
-        }
-        self.pools
-            .publish_slot_release(&self.root, path, refined, dropped);
-        if !state.has_unrefined() {
-            self.has_unverified_dups.store(false, Ordering::Release);
-            state.slabs.clear();
-            state.unrefineds.clear();
-            state.free_unrefineds.clear();
-            state.workspace = Workspace::new();
-        }
+        let mut discarded = Vec::new();
+        let refined = {
+            let mut state = self.lock_refine();
+            let current = self.pools.load_slot_acquire(&self.root, path.last());
+            if current != expected {
+                return current;
+            }
+            self.pools.crack_and_publish(
+                &self.root,
+                &self.len,
+                &self.has_unverified_dups,
+                &mut state,
+                path,
+                expected.index(),
+                &mut discarded,
+            )
+        };
+        drop(discarded);
         refined
     }
 
@@ -1919,48 +1836,49 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
     #[cold]
     #[inline(never)]
     fn crack_slot_mut(&mut self, path: &PathStack, expected: NodeId) -> NodeId {
-        let state = self
-            .refine
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
-        let (refined, dropped) = self.pools.crack_unrefined_locked(state, expected.index());
-        if dropped > 0 {
-            *self.len.get_mut() -= dropped;
-        }
-        self.pools
-            .publish_slot_release(&self.root, path, refined, dropped);
-        if !state.has_unrefined() {
-            *self.has_unverified_dups.get_mut() = false;
-            state.slabs.clear();
-            state.unrefineds.clear();
-            state.free_unrefineds.clear();
-            state.workspace = Workspace::new();
-        }
+        let mut discarded = Vec::new();
+        let refined = {
+            let state = self
+                .refine
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.pools.crack_and_publish(
+                &self.root,
+                &self.len,
+                &self.has_unverified_dups,
+                state,
+                path,
+                expected.index(),
+                &mut discarded,
+            )
+        };
+        drop(discarded);
         refined
     }
 
     /// Resolves all remaining unrefined buckets under `self.refine` when exact deduplicated
     /// `len()` or `select_nth()` is requested on a map that may contain duplicates.
+    /// Drops overwritten duplicate values only after publishing and releasing `self.refine`.
     #[cold]
     #[inline(never)]
     fn resolve_unverified_dups(&self) {
-        let mut state = self.lock_refine();
-        if !self.has_unverified_dups.load(Ordering::Acquire) {
-            return;
+        let mut discarded = Vec::new();
+        {
+            let mut state = self.lock_refine();
+            if !self.has_unverified_dups.load(Ordering::Acquire) {
+                return;
+            }
+            let root = self.root.load_acquire();
+            if !root.is_empty() {
+                let new_root =
+                    self.pools
+                        .finish_subtree_locked(&mut state, &self.len, root, &mut discarded);
+                self.root.store_release(new_root);
+            }
+            debug_assert!(!state.has_unrefined());
+            state.clear_if_converged(&self.has_unverified_dups);
         }
-        let root = self.root.load_acquire();
-        if !root.is_empty() {
-            let new_root = self
-                .pools
-                .finish_subtree_locked(&mut state, &self.len, root);
-            self.root.store_release(new_root);
-        }
-        debug_assert!(!state.has_unrefined());
-        self.has_unverified_dups.store(false, Ordering::Release);
-        state.slabs.clear();
-        state.unrefineds.clear();
-        state.free_unrefineds.clear();
-        state.workspace = Workspace::new();
+        drop(discarded);
     }
 
     #[inline(always)]
@@ -1992,9 +1910,12 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     let internal = unsafe { self.pools.internals.get(node.index()) };
                     let lo = internal.find_child_idx(simd, start);
                     let hi = internal.find_child_idx(simd, end_inclusive);
-                    for i in lo..=hi {
-                        let c = internal.children[i].load_acquire();
-                        path.push(PathStep { node, slot: i });
+                    for (offset, child_slot) in internal.children[lo..=hi].iter().enumerate() {
+                        let c = child_slot.load_acquire();
+                        path.push(PathStep {
+                            node,
+                            slot: lo + offset,
+                        });
                         let keep_going = self.range_shared(simd, path, c, start, end_inclusive, f);
                         path.pop();
                         if !keep_going {
@@ -2009,10 +1930,13 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     let Some((lo, hi)) = rx.bucket_range(start, end_inclusive) else {
                         return true;
                     };
-                    for b in lo..=hi {
-                        let c = rx.children[b].load_acquire();
+                    for (offset, child_slot) in rx.children[lo..=hi].iter().enumerate() {
+                        let c = child_slot.load_acquire();
                         if !c.is_empty() {
-                            path.push(PathStep { node, slot: b });
+                            path.push(PathStep {
+                                node,
+                                slot: lo + offset,
+                            });
                             let keep_going =
                                 self.range_shared(simd, path, c, start, end_inclusive, f);
                             path.pop();
@@ -2023,9 +1947,7 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                     }
                     return true;
                 }
-                TAG_UNREFINED => {
-                    node = self.crack_slot_shared(path, node);
-                }
+                TAG_UNREFINED => node = self.crack_slot_shared(path, node),
                 _ => unreachable!(),
             }
         }
@@ -2048,18 +1970,19 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
             TAG_RADIX => {
                 // SAFETY: `node` was loaded with `Acquire` from a published slot.
                 let rx = unsafe { self.pools.radixes.get(node.index()) };
-                rx.counts
-                    .iter()
-                    .map(|c| c.load(Ordering::Acquire) as usize)
-                    .sum()
+                rx.counts.iter().map(|c| c.load(Ordering::Acquire)).sum()
             }
             TAG_INTERNAL => {
                 // SAFETY: `node` was loaded with `Acquire` from a published slot.
                 let internal = unsafe { self.pools.internals.get(node.index()) };
-                (0..internal.len())
-                    .map(|slot| {
-                        let child = internal.children[slot].load_acquire();
-                        self.subtree_count_shared(Some(PathStep { node, slot }), child)
+                internal.children[..internal.len()]
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, child_slot)| {
+                        self.subtree_count_shared(
+                            Some(PathStep { node, slot }),
+                            child_slot.load_acquire(),
+                        )
                     })
                     .sum()
             }
@@ -2070,9 +1993,9 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
 
 /// Ordered set derived directly from `TesseraMap<K, ()>`.
 ///
-/// Because `()` is zero-sized, each leaf automatically omits value storage (576B per 64-slot
-/// leaf, ~10.5 bytes per `u64` key) while inheriting lazy batch cracking, range queries,
-/// `select_nth`, and streaming batch ingestion.
+/// Because `()` is zero-sized, each leaf omits value storage (576B per 64-slot leaf, ~10.5 bytes
+/// per `u64` key) while inheriting lazy batch cracking, range queries, `select_nth`, and
+/// streaming batch ingestion. See `conformance/semantics.md` for contract details.
 ///
 /// # Examples
 ///
@@ -2135,7 +2058,7 @@ impl<K: RadixKey> TesseraSet<K> {
         self.0.len()
     }
 
-    /// Returns `true` if the set is empty.
+    /// Returns `true` if the set is empty, in `O(1)` without refining unrefined buckets.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -2190,7 +2113,7 @@ impl<K: RadixKey> TesseraSet<K> {
         self.0.last().map(|(k, _)| k)
     }
 
-    /// Returns internal structural diagnostics.
+    /// Returns provisional internal structural diagnostics without refining unrefined buckets.
     pub fn stats(&self) -> MapStats {
         self.0.stats()
     }

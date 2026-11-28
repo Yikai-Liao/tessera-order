@@ -137,55 +137,66 @@ impl<T> Chunk<T> {
         ptr
     }
 
-    /// Drops every initialized slot and frees this chunk allocation.
+    /// Drops every initialized slot and frees this chunk allocation, continuing past a
+    /// panicking element destructor so no sibling entries or heap allocations are skipped.
     ///
     /// # Safety
     /// Caller must have exclusive ownership of `ptr` (no concurrent readers).
     unsafe fn drop_and_free(ptr: *mut Self) {
-        // SAFETY: caller guarantees exclusive ownership of `ptr`.
-        unsafe {
-            let mut live = (*ptr).live.load(Ordering::Relaxed);
-            (*ptr).live.store(0, Ordering::Relaxed);
-            while live != 0 {
-                let s = live.trailing_zeros() as usize;
-                live &= live - 1;
-                (*(*ptr).slots[s].get()).assume_init_drop();
+        /// # Safety
+        /// `ptr` must be an exclusively owned, live `Chunk<T>` allocation.
+        unsafe fn finish<T>(ptr: *mut Chunk<T>) {
+            // SAFETY: caller guarantees exclusive ownership of `ptr`.
+            unsafe {
+                loop {
+                    let s = {
+                        let live = (*ptr).live.get_mut();
+                        if *live == 0 {
+                            break;
+                        }
+                        let s = live.trailing_zeros() as usize;
+                        *live &= !(1u64 << s);
+                        s
+                    };
+                    (*(*ptr).slots[s].get()).assume_init_drop();
+                }
+                dealloc(ptr.cast::<u8>(), Layout::new::<Chunk<T>>());
             }
-            dealloc(ptr.cast::<u8>(), Layout::new::<Self>());
         }
+
+        struct Guard<T>(*mut Chunk<T>);
+        impl<T> Drop for Guard<T> {
+            fn drop(&mut self) {
+                // SAFETY: `Chunk::drop_and_free` owns `self.0` exclusively; each cleared bit in
+                // `live` guarantees unwinding resumes at the next live slot.
+                unsafe { finish(self.0) };
+            }
+        }
+
+        let guard = Guard(ptr);
+        // SAFETY: caller guarantees exclusive ownership of `ptr`.
+        unsafe { finish(guard.0) };
+        core::mem::forget(guard);
     }
+}
+
+fn alloc_zeroed_raw<T>() -> *mut T {
+    let layout = Layout::new::<T>();
+    // SAFETY: callers only instantiate non-ZST directory types whose all-zero bit pattern
+    // represents null `AtomicPtr` entries.
+    let ptr = unsafe { alloc::alloc::alloc_zeroed(layout).cast::<T>() };
+    if ptr.is_null() {
+        handle_alloc_error(layout);
+    }
+    ptr
 }
 
 struct DirBlock<T> {
     chunks: [AtomicPtr<Chunk<T>>; CHUNKS_PER_BLOCK],
 }
 
-impl<T> DirBlock<T> {
-    fn alloc_raw() -> *mut Self {
-        let layout = Layout::new::<Self>();
-        // SAFETY: `DirBlock<T>` is non-ZST; zero-initializing `AtomicPtr` produces null pointers.
-        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout).cast::<Self>() };
-        if ptr.is_null() {
-            handle_alloc_error(layout);
-        }
-        ptr
-    }
-}
-
 struct DirTable<T> {
     blocks: [AtomicPtr<DirBlock<T>>; DIR_LEN],
-}
-
-impl<T> DirTable<T> {
-    fn alloc_raw() -> *mut Self {
-        let layout = Layout::new::<Self>();
-        // SAFETY: `DirTable<T>` is non-ZST; zero-initializing produces null `AtomicPtr`s.
-        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout).cast::<Self>() };
-        if ptr.is_null() {
-            handle_alloc_error(layout);
-        }
-        ptr
-    }
 }
 
 /// Allocation cursor and free-list for one [`SharedPool`], owned either inside the
@@ -220,29 +231,48 @@ unsafe impl<T: Send + Sync> Sync for SharedPool<T> {}
 
 impl<T> Drop for SharedPool<T> {
     fn drop(&mut self) {
-        let dir_ptr = *self.dir.get_mut();
+        /// # Safety
+        /// `dir_ptr` must be an exclusively owned, live `DirTable<T>` allocation.
+        unsafe fn drop_dir<T>(dir_ptr: *mut DirTable<T>) {
+            // SAFETY: caller guarantees exclusive ownership of `dir_ptr` and its subtree.
+            unsafe {
+                let dir = &mut *dir_ptr;
+                for block_atom in &mut dir.blocks {
+                    let block_ptr = *block_atom.get_mut();
+                    if block_ptr.is_null() {
+                        continue;
+                    }
+                    let block = &mut *block_ptr;
+                    for chunk_atom in &mut block.chunks {
+                        let chunk_ptr = core::mem::replace(chunk_atom.get_mut(), ptr::null_mut());
+                        if !chunk_ptr.is_null() {
+                            Chunk::drop_and_free(chunk_ptr);
+                        }
+                    }
+                    *block_atom.get_mut() = ptr::null_mut();
+                    dealloc(block_ptr.cast::<u8>(), Layout::new::<DirBlock<T>>());
+                }
+                dealloc(dir_ptr.cast::<u8>(), Layout::new::<DirTable<T>>());
+            }
+        }
+
+        struct Guard<T>(*mut DirTable<T>);
+        impl<T> Drop for Guard<T> {
+            fn drop(&mut self) {
+                // SAFETY: `SharedPool::drop` owns `self.0` exclusively; nulling consumed slots
+                // ensures unwinding resumes from the first remaining chunk/block.
+                unsafe { drop_dir(self.0) };
+            }
+        }
+
+        let dir_ptr = core::mem::replace(self.dir.get_mut(), ptr::null_mut());
         if dir_ptr.is_null() {
             return;
         }
+        let guard = Guard(dir_ptr);
         // SAFETY: `&mut self` in `Drop` guarantees exclusive ownership of all directory levels.
-        unsafe {
-            let dir = &mut *dir_ptr;
-            for block_atom in &mut dir.blocks {
-                let block_ptr = *block_atom.get_mut();
-                if block_ptr.is_null() {
-                    continue;
-                }
-                let block = &mut *block_ptr;
-                for chunk_atom in &mut block.chunks {
-                    let chunk_ptr = *chunk_atom.get_mut();
-                    if !chunk_ptr.is_null() {
-                        Chunk::drop_and_free(chunk_ptr);
-                    }
-                }
-                dealloc(block_ptr.cast::<u8>(), Layout::new::<DirBlock<T>>());
-            }
-            dealloc(dir_ptr.cast::<u8>(), Layout::new::<DirTable<T>>());
-        }
+        unsafe { drop_dir(guard.0) };
+        core::mem::forget(guard);
     }
 }
 
@@ -270,14 +300,14 @@ impl<T> SharedPool<T> {
         assert!(block_i < DIR_LEN, "TesseraMap pool capacity exceeded");
         let mut dir_ptr = self.dir.load(Ordering::Relaxed);
         if dir_ptr.is_null() {
-            dir_ptr = DirTable::<T>::alloc_raw();
+            dir_ptr = alloc_zeroed_raw::<DirTable<T>>();
             self.dir.store(dir_ptr, Ordering::Release);
         }
         // SAFETY: `dir_ptr` is initialized and never freed until `Drop`.
         let block_atom = unsafe { &(*dir_ptr).blocks[block_i] };
         let mut block_ptr = block_atom.load(Ordering::Relaxed);
         if block_ptr.is_null() {
-            block_ptr = DirBlock::<T>::alloc_raw();
+            block_ptr = alloc_zeroed_raw::<DirBlock<T>>();
             block_atom.store(block_ptr, Ordering::Release);
         }
         // SAFETY: `block_ptr` is initialized and never freed until `Drop`.
@@ -331,6 +361,8 @@ impl<T> SharedPool<T> {
         let (block_i, chunk_i, slot_i) = Self::split_idx(idx);
         let dir_ptr = *self.dir.get_mut();
         debug_assert!(!dir_ptr.is_null());
+        alloc.live_count -= 1;
+        alloc.free.push(idx);
         // SAFETY: `&mut self` guarantees exclusive access and `idx` is live.
         unsafe {
             let block_ptr = *(*dir_ptr).blocks[block_i].get_mut();
@@ -340,8 +372,6 @@ impl<T> SharedPool<T> {
             *live &= !(1u64 << slot_i);
             (*(*chunk_ptr).slots[slot_i].get()).assume_init_drop();
         }
-        alloc.live_count -= 1;
-        alloc.free.push(idx);
     }
 
     /// Lock-free `&self` read of a published slot `idx`.

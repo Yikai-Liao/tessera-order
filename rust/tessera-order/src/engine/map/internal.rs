@@ -158,22 +158,28 @@ impl<E: Unsigned> Internal<E> {
         const RIGHT_N: usize = 16;
         let promoted_sep = all_keys[LEFT_N - 1];
 
-        for (i, &c) in all_children[..LEFT_N].iter().enumerate() {
-            self.children[i].set_mut(c);
+        for (dst, &c) in self.children[..LEFT_N]
+            .iter_mut()
+            .zip(&all_children[..LEFT_N])
+        {
+            dst.set_mut(c);
         }
-        for i in LEFT_N..INTERNAL_CAP {
-            self.children[i].set_mut(NodeId::EMPTY);
+        for dst in &mut self.children[LEFT_N..] {
+            dst.set_mut(NodeId::EMPTY);
         }
         self.keys[..LEFT_N - 1].copy_from_slice(&all_keys[..LEFT_N - 1]);
         self.keys[LEFT_N - 1..].fill(E::MAX);
         self.len = LEFT_N as u32;
 
         right.keys.fill(E::MAX);
-        for (i, &c) in all_children[LEFT_N..].iter().enumerate() {
-            right.children[i].set_mut(c);
+        for (dst, &c) in right.children[..RIGHT_N]
+            .iter_mut()
+            .zip(&all_children[LEFT_N..])
+        {
+            dst.set_mut(c);
         }
-        for i in RIGHT_N..INTERNAL_CAP {
-            right.children[i].set_mut(NodeId::EMPTY);
+        for dst in &mut right.children[RIGHT_N..] {
+            dst.set_mut(NodeId::EMPTY);
         }
         right.keys[..RIGHT_N - 1].copy_from_slice(&all_keys[LEFT_N..]);
         right.len = RIGHT_N as u32;

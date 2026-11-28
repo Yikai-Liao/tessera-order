@@ -48,6 +48,43 @@ def assert_numpy_partition(part, expected, kth, axis, descending):
         )
 
 
+def assert_numpy_argpartition(
+    argpart, lane, expected_indices, kth, axis, descending, key=None
+):
+    length = expected_indices.shape[axis]
+    identity = np.moveaxis(
+        np.broadcast_to(np.arange(length), np.moveaxis(lane, axis, -1).shape), -1, axis
+    )
+    np.testing.assert_array_equal(np.sort(argpart, axis=axis), identity)
+    positions = np.take_along_axis(
+        np.argsort(expected_indices, axis=axis), argpart, axis=axis
+    )
+    for rank in kth:
+        rank %= length
+        np.testing.assert_array_equal(
+            np.take(argpart, rank, axis=axis),
+            np.take(expected_indices, rank, axis=axis),
+        )
+        assert np.all(np.take(positions, range(rank), axis=axis) < rank)
+        assert np.all(np.take(positions, range(rank + 1, length), axis=axis) > rank)
+    if key is None:
+        gathered = np.take_along_axis(lane, argpart, axis=axis)
+        tie_order = reference_argsort(gathered, axis=axis, descending=descending)
+        np.testing.assert_array_equal(
+            np.take_along_axis(argpart, tie_order, axis=axis), expected_indices
+        )
+    else:
+        src_lanes = np.moveaxis(lane, axis, -1)
+        res_lanes = np.moveaxis(argpart, axis, -1)
+        exp_lanes = np.moveaxis(expected_indices, axis, -1)
+        for pos in np.ndindex(src_lanes.shape[:-1]):
+            lane_keys = [key(x) for x in src_lanes[pos]]
+            reordered = sorted(
+                res_lanes[pos].tolist(), key=lane_keys.__getitem__, reverse=descending
+            )
+            assert reordered == exp_lanes[pos].tolist()
+
+
 def test_numpy_partition_assertion():
     expected = np.array([0, 1, 2, 3, 4], dtype="i4")
     bad = np.array([0, 3, 2, 1, 4], dtype="i4")
@@ -55,6 +92,21 @@ def test_numpy_partition_assertion():
         assert_numpy_partition(bad, expected, [0, 2, 4], -1, False)
     valid = np.array([0, 2, 1, 3, 4], dtype="i4")
     assert_numpy_partition(valid, expected, [0, 3, 4], -1, False)
+    # Keyed and numeric argpartition must reject equal-key indices reversed inside one region.
+    scores = np.array([3, 1, 3, 0, 2, 1], dtype="i4")
+    order = np.array([3, 1, 5, 4, 0, 2], dtype=np.intp)
+    swapped_ties = np.array([3, 5, 1, 4, 0, 2], dtype=np.intp)
+    with pytest.raises(AssertionError):
+        assert_numpy_argpartition(swapped_ties, scores, order, [0, 3, 5], -1, False)
+    with pytest.raises(AssertionError):
+        assert_numpy_argpartition(
+            swapped_ties, scores, order, [0, 3, 5], -1, False, key=int
+        )
+    swapped_distinct = np.array([3, 4, 1, 5, 0, 2], dtype=np.intp)
+    assert_numpy_argpartition(swapped_distinct, scores, order, [0, 5], -1, False)
+    assert_numpy_argpartition(
+        swapped_distinct, scores, order, [0, 5], -1, False, key=int
+    )
 
 
 def check_operations(a, axis, descending, threads):
@@ -78,24 +130,9 @@ def check_operations(a, axis, descending, threads):
         argpart = ts.argpartition(a, kth, **opts)
         assert part.dtype == a.dtype
         assert argpart.dtype == np.dtype(np.intp)
-        identity = np.moveaxis(
-            np.broadcast_to(np.arange(length), np.moveaxis(lane, ax, -1).shape), -1, ax
-        )
-        np.testing.assert_array_equal(np.sort(argpart, axis=ax), identity)
-        positions = np.take_along_axis(
-            np.argsort(expected_indices, axis=ax), argpart, axis=ax
-        )
-        for rank in kth:
-            rank %= length
-            assert np.all(np.take(positions, range(rank), axis=ax) < rank)
-            assert np.all(np.take(positions, range(rank + 1, length), axis=ax) > rank)
+        assert_numpy_argpartition(argpart, lane, expected_indices, kth, ax, descending)
         # Check stable ties, partition regions, and original bits without fixing region order.
         assert_numpy_partition(part, expected, kth, ax, descending)
-        for rank in kth:
-            np.testing.assert_array_equal(
-                np.take(argpart, rank, axis=ax),
-                np.take(expected_indices, rank, axis=ax),
-            )
         if kth and not descending:
             # NumPy 2.5 has descending sort/argsort, but no descending partition.
             reference = np.partition(a, kth, axis=axis)
@@ -324,22 +361,28 @@ def check_key_operations(a, key, axis, descending=False, threads=1):
         )
         if "partition" in name:
             if name.startswith("arg"):
-                sorted_indices = np.sort(result, axis=ax)
-                identity = np.empty_like(result)
-                np.moveaxis(identity, ax, -1)[...] = np.arange(length)
-                np.testing.assert_array_equal(sorted_indices, identity)
-                inverse = np.argsort(expected_indices, axis=ax)
-                positions = np.take_along_axis(inverse, result, axis=ax)
-                for rank in ranks:
-                    assert np.all(np.take(positions, range(rank), axis=ax) < rank)
-                    assert np.all(
-                        np.take(positions, range(rank + 1, length), axis=ax) > rank
-                    )
-            for rank in ranks:
-                reference = expected_indices if name.startswith("arg") else expected
-                np.testing.assert_array_equal(
-                    np.take(result, rank, axis=ax), np.take(reference, rank, axis=ax)
+                assert_numpy_argpartition(
+                    result, source, expected_indices, ranks, ax, descending, key=key
                 )
+            else:
+                res_lanes = np.moveaxis(result, ax, -1)
+                exp_lanes = np.moveaxis(expected, ax, -1)
+                for pos in np.ndindex(res_lanes.shape[:-1]):
+                    res_lane = res_lanes[pos]
+                    exp_lane = exp_lanes[pos]
+                    lane_order = sorted(
+                        range(length),
+                        key=lambda i: key(res_lane[i]),
+                        reverse=descending,
+                    )
+                    np.testing.assert_array_equal(res_lane[lane_order], exp_lane)
+                    inv = [0] * length
+                    for final_pos, src_pos in enumerate(lane_order):
+                        inv[src_pos] = final_pos
+                    for rank in ranks:
+                        np.testing.assert_array_equal(res_lane[rank], exp_lane[rank])
+                        assert all(inv[i] < rank for i in range(rank))
+                        assert all(inv[i] > rank for i in range(rank + 1, length))
             if not ranks:
                 if name.startswith("arg"):
                     assert result.size == a.size

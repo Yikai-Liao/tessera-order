@@ -33,7 +33,10 @@ export function continuousCommands(program: Command) {
       const pair = prepared ? await readPrepared(prepared) : undefined;
       console.log(
         JSON.stringify(
-          hostedMatrix(pair?.cases.length ?? CONTINUOUS_SHARDS, pair?.go ? GO_CONTINUOUS_SHARDS : CONTINUOUS_SHARDS),
+          hostedMatrix(
+            pair?.cases.length ?? CONTINUOUS_SHARDS,
+            pair?.go ? GO_CONTINUOUS_SHARDS : CONTINUOUS_SHARDS,
+          ),
         ),
       );
     });

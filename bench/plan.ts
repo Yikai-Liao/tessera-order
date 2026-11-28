@@ -7,12 +7,15 @@ import {
   catalog,
   compareExecutions,
   type Execution,
+  inputDistributions,
+  inputTypes,
+  isCollection,
   type Operation,
   operationKey,
   operationSchema,
   parseExecution,
   SORT,
-  validateOperation,
+  validateInput,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
 
@@ -62,6 +65,10 @@ export type SelectionOptions = Pick<Rule, "types" | "distributions" | "lengths">
   operation?: Operation["kind"];
   index?: number;
   bucketCount?: number;
+  hotPct?: number;
+  visitLen?: number;
+  writePct?: number;
+  queryPct?: number;
   /** Replaces every include rule's executions. */
   executions?: Execution[];
 };
@@ -97,18 +104,20 @@ function validateOperations(plan: Plan) {
   const nonSort = plan.include.filter((rule) => rule.operation && rule.operation.kind !== "sort");
   if (nonSort.some((rule) => rule.lengths?.some((n) => typeof n !== "number")))
     throw new Error("Non-sort rules require literal record counts");
-  for (const rule of nonSort) {
-    const operation = rule.operation!;
-    const executions = rule.executions ?? ["serial"];
-    for (const len of (rule.lengths ?? catalog.inputs.lengths) as number[]) {
-      const survives = (rule.types ?? catalog.types.map((t) => t.id)).some((ty) =>
-        (rule.distributions ?? catalog.distributions.map((d) => d.id)).some((distribution) =>
-          executions.some(
-            (execution) => !isExcluded(plan.exclude, ty, distribution, len, operation, execution),
-          ),
-        ),
-      );
-      if (survives) validateOperation(operation, len);
+  for (const rule of plan.include) {
+    const operation = rule.operation ?? SORT;
+    for (const ty of rule.types ?? inputTypes(operation).map((t) => t.id)) {
+      for (const distribution of rule.distributions ??
+        inputDistributions(operation).map((d) => d.id)) {
+        for (const len of rule.lengths ?? catalog.inputs.lengths) {
+          for (const execution of rule.executions ?? ["serial" as const]) {
+            if (isExcluded(plan.exclude, ty, distribution, len, operation, execution)) continue;
+            validateInput(operation, ty, distribution, typeof len === "number" ? len : 1);
+            if (isCollection(operation) && execution !== "serial")
+              throw new Error("Ordered collections require serial execution");
+          }
+        }
+      }
     }
   }
 }
@@ -119,13 +128,18 @@ function validateOperations(plan: Plan) {
 export function planFeatures(plan: Plan): string[] {
   let rayon = false;
   let operations = false;
+  let collections = false;
   let parallelOperations = false;
   for (const rule of plan.include) {
     const operation = rule.operation ?? SORT;
+    if (isCollection(operation)) {
+      collections = true;
+      continue;
+    }
     const isOp = operation.kind !== "sort";
     const executions = rule.executions ?? ["serial"];
-    const types = rule.types ?? catalog.types.map((t) => t.id);
-    const distributions = rule.distributions ?? catalog.distributions.map((d) => d.id);
+    const types = rule.types ?? inputTypes(operation).map((t) => t.id);
+    const distributions = rule.distributions ?? inputDistributions(operation).map((d) => d.id);
     const lengths = rule.lengths ?? catalog.inputs.lengths;
     for (const execution of executions) {
       const isPar = execution !== "serial";
@@ -147,11 +161,23 @@ export function planFeatures(plan: Plan): string[] {
   return [
     ...(rayon ? ["rayon"] : []),
     ...(operations ? ["operations"] : []),
+    ...(collections ? ["collections"] : []),
     ...(parallelOperations ? ["parallel-operations"] : []),
   ];
 }
 
-const PRESETS = ["local", "continuous", "smoke", "release", "parallel", "growth"];
+const PRESETS = [
+  "local",
+  "continuous",
+  "smoke",
+  "release",
+  "parallel",
+  "growth",
+  "collections-smoke",
+  "collections-pilot",
+  "collections-decision",
+  "collections-large",
+];
 
 /** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
 export async function loadPlan(name: string, options: SelectionOptions = {}): Promise<Plan> {
@@ -159,8 +185,22 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
-  const { implementations, operation, index, bucketCount, executions, ...axes } = options;
-  if (operation === undefined && (index !== undefined || bucketCount !== undefined))
+  const {
+    implementations,
+    operation,
+    index,
+    bucketCount,
+    hotPct,
+    visitLen,
+    writePct,
+    queryPct,
+    executions,
+    ...axes
+  } = options;
+  if (
+    operation === undefined &&
+    [index, bucketCount, hotPct, visitLen, writePct, queryPct].some((value) => value !== undefined)
+  )
     throw new Error("Operation parameters require --operation");
   const requested =
     operation === undefined
@@ -169,10 +209,18 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
           kind: operation,
           ...(index === undefined ? {} : { index }),
           ...(bucketCount === undefined ? {} : { bucket_count: bucketCount }),
+          ...(hotPct === undefined ? {} : { hot_pct: hotPct }),
+          ...(visitLen === undefined ? {} : { visit_len: visitLen }),
+          ...(writePct === undefined ? {} : { write_pct: writePct }),
+          ...(queryPct === undefined ? {} : { query_pct: queryPct }),
         });
   // A requested operation replaces the plan's operation rules: it applies to the sorting rules,
   // whose inputs every operation shares.
-  const include = requested ? plan.include.filter((rule) => !rule.operation) : plan.include;
+  const include = requested
+    ? plan.include.filter((rule) =>
+        isCollection(requested) ? rule.operation?.kind === requested.kind : !rule.operation,
+      )
+    : plan.include;
   if (!include.length) throw new Error("The plan has no inputs outside its operation rules");
   return parsePlan({
     ...plan,

@@ -87,6 +87,10 @@ function addSelectionOptions(command: Command, presets: string) {
       parsePositiveInteger,
     )
     .option("--index <rank>", "zero-based rank for select_nth", parseCount)
+    .option("--hot-pct <percent>", "share of queries directed at the hot window", parseCount)
+    .option("--visit-len <count>", "entries per bounded collection scan", parseCount)
+    .option("--write-pct <percent>", "share of writes in a mixed collection trace", parseCount)
+    .option("--query-pct <percent>", "cold lookups as a share of collection size", parseCount)
     .option(
       "--executions <ids>",
       "comma-separated executions: serial or tN for an N-worker pool",
@@ -112,6 +116,10 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
       "operation",
       "index",
       "bucketCount",
+      "hotPct",
+      "visitLen",
+      "writePct",
+      "queryPct",
       "executions",
     ]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
@@ -257,7 +265,7 @@ export function experimentCommands(program: Command) {
   measurement(
     "implementations",
     "Build, measure and report a resumable comparison",
-    "smoke/release/parallel",
+    "smoke/release/parallel/collections-smoke/collections-decision/collections-large",
   )
     .option(
       "--implementations <ids>",

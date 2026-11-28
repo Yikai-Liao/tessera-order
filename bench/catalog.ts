@@ -56,6 +56,7 @@ export const catalog = z
       identity.extend({
         detail: z.string(),
         task: z.string(),
+        collection: z.literal(true).optional(),
         bytes: z.number().int().positive(),
         compact: z.string().optional(),
       }),
@@ -64,6 +65,7 @@ export const catalog = z
       identity.extend({
         compact: z.string().optional(),
         group: z.string().optional(),
+        collection: z.literal(true).optional(),
       }),
     ),
     continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
@@ -76,6 +78,7 @@ export const catalog = z
         /** The implementation whose column at the same pool size is the parallel denominator. */
         parallel_reference: z.string().optional(),
         description: z.string(),
+        collection: z.literal(true).optional(),
         /** One call in figure text: "sort", "selection". */
         noun: z.string(),
         parameters: z.array(z.object({ id: z.string(), label: z.string().optional() })).default([]),
@@ -163,6 +166,34 @@ export const operationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("argsort") }),
   z.strictObject({ kind: z.literal("select_nth"), index: count }),
   z.strictObject({ kind: z.literal("partition-buckets"), bucket_count: count.min(1) }),
+  z.strictObject({ kind: z.literal("map-build") }),
+  z.strictObject({ kind: z.literal("map-build-insert-random") }),
+  z.strictObject({ kind: z.literal("map-build-insert-ascending") }),
+  z.strictObject({ kind: z.literal("map-get-hit"), hot_pct: z.literal([0, 90]) }),
+  z.strictObject({ kind: z.literal("map-get-miss"), hot_pct: z.literal([0, 90]) }),
+  z.strictObject({ kind: z.literal("map-insert-new") }),
+  z.strictObject({ kind: z.literal("map-insert-overwrite") }),
+  z.strictObject({ kind: z.literal("map-remove") }),
+  z.strictObject({
+    kind: z.literal("map-range"),
+    visit_len: z.literal([16, 256]),
+    hot_pct: z.literal([0, 90]),
+  }),
+  z.strictObject({ kind: z.literal("map-iterate") }),
+  z.strictObject({ kind: z.literal("map-first") }),
+  z.strictObject({ kind: z.literal("map-last") }),
+  z.strictObject({
+    kind: z.literal("map-mixed"),
+    write_pct: z.literal([10, 50]),
+    hot_pct: z.literal([0, 90]),
+  }),
+  z.strictObject({ kind: z.literal("map-rank"), hot_pct: z.literal([0, 90]) }),
+  z.strictObject({ kind: z.literal("map-select"), hot_pct: z.literal([0, 90]) }),
+  z.strictObject({
+    kind: z.literal("map-build-get"),
+    query_pct: z.literal([1, 10, 100]),
+    hot_pct: z.literal([0, 90]),
+  }),
 ]);
 export type Operation = z.infer<typeof operationSchema>;
 /** Operation kinds in catalog (report section) order. */
@@ -179,8 +210,36 @@ export const SORT: Operation = { kind: "sort" };
 
 /** Validate parameters against a resolved count before building or allocating inputs. */
 export function validateOperation(operation: Operation, len: number) {
-  if (operation.kind === "select_nth" && operation.index >= len)
+  if (
+    (operation.kind === "select_nth" && operation.index >= len) ||
+    (operation.kind === "map-range" && operation.visit_len > len)
+  )
     throw new Error(`Operation parameters exceed input length ${len}`);
+}
+
+export function isCollection(operation: Operation) {
+  return operations.get(operation.kind)?.collection === true;
+}
+
+export function inputTypes(operation: Operation) {
+  return catalog.types.filter((entry) => !!entry.collection === isCollection(operation));
+}
+
+export function inputDistributions(operation: Operation) {
+  return catalog.distributions.filter(
+    (entry) => entry.id === "random" || !!entry.collection === isCollection(operation),
+  );
+}
+
+export function validateInput(operation: Operation, ty: string, distribution: string, len: number) {
+  if (
+    !inputTypes(operation).some((entry) => entry.id === ty) ||
+    !inputDistributions(operation).some((entry) => entry.id === distribution)
+  )
+    throw new Error("Input axes do not match the operation");
+  if (isCollection(operation) && len > 2 ** 29)
+    throw new Error("Collection input exceeds the supported key domain");
+  validateOperation(operation, len);
 }
 
 /** An operation's catalog entry and its parameter values in identity order. */
@@ -275,7 +334,7 @@ export function parseCaseId(id: string): CaseIdentity {
   }
   const parsed = operationSchema.safeParse(candidate);
   if (!parsed.success) throw invalid();
-  validateOperation(parsed.data, len);
+  validateInput(parsed.data, ty, distributionId, len);
   return { ty, distribution: distributionId, len, operation: parsed.data };
 }
 
@@ -430,4 +489,8 @@ export function caseLabel(id: string) {
     [parts.type, parts.input, parts.operation, parts.n].filter(Boolean).join(" · ") +
     (parts.extra ? `, ${parts.extra}` : "")
   );
+}
+
+export function comparisonControl(operation: Operation) {
+  return isCollection(operation) ? referenceColumn(operation, "serial")!.implementation : "tessera";
 }

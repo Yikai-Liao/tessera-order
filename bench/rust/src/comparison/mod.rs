@@ -122,8 +122,9 @@ impl Options {
         }
         let reference =
             crate::plan::operation_reference(operations.first().expect("one operation"));
+        let control = crate::plan::comparison_control(operations.first().expect("one operation"));
         if options.command == "run"
-            && ["tessera", reference].iter().any(|id| {
+            && [control, reference].iter().any(|id| {
                 !options
                     .plan
                     .implementations
@@ -132,11 +133,19 @@ impl Options {
             })
         {
             return Err(format!(
-                "paired implementation runs require tessera and {reference} controls"
+                "paired implementation runs require {control} and {reference} controls"
             )
             .into());
         }
-        if !options.operation().is_sort() && !cfg!(feature = "operations") {
+        if options.operation().is_collection() && !cfg!(feature = "collections") {
+            return Err(
+                "ordered collection cases require the collections benchmark feature".into(),
+            );
+        }
+        if !options.operation().is_sort()
+            && !options.operation().is_collection()
+            && !cfg!(feature = "operations")
+        {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
         let available = variant::list_variants();
@@ -256,7 +265,7 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
     ));
     provenance["plan_name"] = json!(options.plan_name);
     let operation = options.operation();
-    if !operation.is_sort() {
+    if !operation.is_sort() && !operation.is_collection() {
         provenance["index_bytes"] = json!(size_of::<usize>());
     }
     provenance["plan"] = json!(options.plan);
@@ -269,11 +278,15 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 let mut columns = Vec::new();
                 let mut omitted = Vec::new();
                 let mut routes = std::collections::BTreeMap::new();
+                let mut churn_routes = std::collections::BTreeMap::new();
                 for (v, e) in options.planned_columns(executions) {
                     let id = run::column_id(v, e);
-                    if let Some(route) = v.route(&input, e) {
+                    if let Some((route, churn_route)) = v.routes(&input, e) {
                         measured.insert((v.name, e));
                         columns.push(id.clone());
+                        if let Some(churn_route) = churn_route {
+                            churn_routes.insert(id.clone(), churn_route);
+                        }
                         routes.insert(id, route);
                     } else {
                         omitted.push(json!({"column":id,"reason":"unsupported operation/input/execution combination"}));
@@ -283,6 +296,15 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 entry["columns"] = json!(columns);
                 entry["omitted"] = json!(omitted);
                 entry["routes"] = json!(routes);
+                if case.operation.is_collection() {
+                    entry["work_items"] = json!(case.operation.work_items(case.len));
+                    entry["input_entries"] = json!(case.operation.collection_input_entries(case.len));
+                    entry["cold_queries"] = json!(case.operation.cold_queries(case.len));
+                    entry["churn_pairs"] = json!(case.operation.churn_pairs(case.len));
+                    if !churn_routes.is_empty() {
+                        entry["churn_routes"] = json!(churn_routes);
+                    }
+                }
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
                     let mut entry = entry;
@@ -494,6 +516,7 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
     }
     // Keep direct memory invocations out while timing and journals are active.
     let _memory_lock = lock_worker(&options.output_dir, "memory")?;
+    let collection = options.operation().is_collection();
     let scratch = read_scratch(&options.output_dir)?;
     let path = options.output_dir.join("blocks.jsonl");
     let existing = read_block_records(&path)?;
@@ -521,9 +544,13 @@ fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Re
         start["build"] = json!(BUILD);
         append_record(&mut f, &start)?;
         for (case, executions) in cases.iter().filter(|(case, _)| case.group() == group) {
-            let bytes = *scratch
-                .get(&case.id())
-                .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
+            let bytes = if collection {
+                0
+            } else {
+                *scratch
+                    .get(&case.id())
+                    .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?
+            };
             run::measure_case(
                 case,
                 &options.supported_columns(case, executions),
@@ -637,6 +664,9 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
     rewrite_journal(&path, &rows)?;
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     for (index, (case, executions)) in cases.iter().enumerate() {
+        if case.operation.is_collection() && !case.operation.retained_heap() {
+            continue;
+        }
         eprintln!(
             "Measuring memory {}/{}: {} ({BUILD})",
             index + 1,
@@ -660,6 +690,16 @@ fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             }
             if let Some(mut k) = v.prepare(&input, e, find_scratch_bytes(case, &rows).unwrap_or(0))
             {
+                if case.operation.is_collection() {
+                    let (retained, peak) =
+                        k.retained_heap().ok_or("missing retained heap route")?;
+                    host::check_threads(k.worker_threads())?;
+                    let row = json!({"case_id":case.id(),"column":column,"build":BUILD,
+                        "peak_extra_bytes":peak, "retained_bytes":retained, "live_entries":case.len, "verified":true});
+                    append_record(&mut file, &row)?;
+                    rows.push(row);
+                    continue;
+                }
                 k.restore(1);
                 super::allocation::begin();
                 k.run_batch();

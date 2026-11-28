@@ -40,6 +40,11 @@ implementations = [
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
   { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
   { id = "rayon-stable", label = "Rayon stable", stable = true, family = "comparison", adapter = "rayon", parallel = "only", routes = { argsort = { call = "par_sort_by on indices" } } },
+  { id = "std-btree", label = "std B-tree", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "sorted-vec", label = "Sorted Vec", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "blart", label = "blart", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "indexset", label = "indexset", stable = true, family = "Ordered collections", adapter = "collections" },
+  { id = "index-db", label = "index-db", stable = true, family = "Ordered collections", adapter = "collections" },
 ]
 
 types = [
@@ -54,6 +59,10 @@ types = [
   { id = "row_u32", label = "{u32, u32}", detail = "8-byte row", task = "records", compact = "{u32,u32}", bytes = 8 },
   { id = "u128", label = "u128", detail = "16-byte key", task = "keys", bytes = 16 },
   { id = "rec128_u64", label = "rec128_u64", detail = "128-byte record", task = "records", bytes = 128 },
+  { id = "map_u64_u64", label = "u64 → u64", detail = "u64 → u64", task = "ordered collection", bytes = 16, collection = true },
+  { id = "map_u32_u32", label = "u32 → u32", detail = "u32 → u32", task = "ordered collection", bytes = 8, collection = true },
+  { id = "map_u64_payload32", label = "u64 → 32-byte payload", detail = "u64 → 32-byte payload", task = "ordered collection", bytes = 40, collection = true },
+  { id = "set_u64", label = "u64 set", detail = "u64 set", task = "ordered collection", bytes = 8, collection = true },
 ]
 
 distributions = [
@@ -77,6 +86,8 @@ distributions = [
   { id = "far_swaps", label = "1% far swaps", group = "Presorted" },
   { id = "finite_signed", label = "finite floats", group = "Finite floats" },
   { id = "sorted_tail", label = "sorted + tail", group = "Presorted" },
+  { id = "dense", label = "dense sequential", group = "Ordered collections", collection = true },
+  { id = "clustered", label = "clustered runs", group = "Ordered collections", collection = true },
 ]
 
 [continuous]
@@ -131,3 +142,138 @@ noun = "partition"
 reference = "std-stable"
 description = "Stable partition into categories"
 parameters = [{ id = "bucket_count" }]
+
+[[operations]]
+id = "map-build"
+label = "Build from unsorted duplicate-bearing input"
+noun = "call"
+reference = "std-btree"
+description = "Build from unsorted duplicate-bearing input"
+collection = true
+
+[[operations]]
+id = "map-build-insert-random"
+label = "Build with randomly ordered single inserts"
+noun = "call"
+reference = "std-btree"
+description = "Build with randomly ordered single inserts"
+collection = true
+
+[[operations]]
+id = "map-build-insert-ascending"
+label = "Build with ascending single inserts"
+noun = "call"
+reference = "std-btree"
+description = "Build with ascending single inserts"
+collection = true
+
+[[operations]]
+id = "map-get-hit"
+label = "Lookup present entries"
+noun = "call"
+reference = "std-btree"
+description = "Lookup present entries"
+collection = true
+parameters = [{ id = "hot_pct" }]
+
+[[operations]]
+id = "map-get-miss"
+label = "Lookup absent entries"
+noun = "call"
+reference = "std-btree"
+description = "Lookup absent entries"
+collection = true
+parameters = [{ id = "hot_pct" }]
+
+[[operations]]
+id = "map-insert-new"
+label = "Insert new entries"
+noun = "call"
+reference = "std-btree"
+description = "Insert new entries"
+collection = true
+
+[[operations]]
+id = "map-insert-overwrite"
+label = "Insert existing entries"
+noun = "call"
+reference = "std-btree"
+description = "Insert existing entries"
+collection = true
+
+[[operations]]
+id = "map-remove"
+label = "Remove present entries"
+noun = "call"
+reference = "std-btree"
+description = "Remove present entries"
+collection = true
+
+[[operations]]
+id = "map-range"
+label = "Visit a bounded range"
+noun = "call"
+reference = "std-btree"
+description = "Visit a bounded range"
+collection = true
+parameters = [{ id = "visit_len" }, { id = "hot_pct" }]
+
+[[operations]]
+id = "map-iterate"
+label = "Visit all entries in order"
+noun = "call"
+reference = "std-btree"
+description = "Visit all entries in order"
+collection = true
+
+[[operations]]
+id = "map-first"
+label = "Read the first entry"
+noun = "call"
+reference = "std-btree"
+description = "Read the first entry"
+collection = true
+
+[[operations]]
+id = "map-last"
+label = "Read the last entry"
+noun = "call"
+reference = "std-btree"
+description = "Read the last entry"
+collection = true
+
+[[operations]]
+id = "map-mixed"
+label = "Read and update a collection"
+noun = "call"
+reference = "std-btree"
+description = "Read and update a collection"
+collection = true
+parameters = [{ id = "write_pct" }, { id = "hot_pct" }]
+
+[[operations]]
+id = "map-rank"
+label = "Find the insertion rank"
+noun = "call"
+reference = "sorted-vec"
+description = "Find the insertion rank"
+collection = true
+parameters = [{ id = "hot_pct" }]
+
+[[operations]]
+id = "map-select"
+label = "Read by zero-based rank"
+noun = "call"
+reference = "sorted-vec"
+description = "Read by zero-based rank"
+collection = true
+parameters = [{ id = "hot_pct" }]
+
+[[operations]]
+id = "map-build-get"
+label = "Build and run the first lookups"
+noun = "call"
+reference = "std-btree"
+description = "Build and run the first lookups"
+collection = true
+parameters = [{ id = "query_pct" }, { id = "hot_pct" }]

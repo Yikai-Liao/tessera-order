@@ -208,6 +208,8 @@ impl<T: BenchmarkRecord> PreparedRecords<T> {
 /// A prepared case with its concrete record representation preserved.
 #[allow(missing_docs)]
 pub enum CaseInput {
+    #[cfg(feature = "collections")]
+    Collection(Rc<super::variant::collections::CollectionInput>),
     U32(Rc<PreparedRecords<u32>>),
     U64(Rc<PreparedRecords<u64>>),
     U128(Rc<PreparedRecords<u128>>),
@@ -222,6 +224,12 @@ pub enum CaseInput {
 impl CaseInput {
     /// Generates and prepares the concrete record representation of a plan case.
     pub fn new(c: &InputCase) -> Self {
+        #[cfg(feature = "collections")]
+        if c.operation.is_collection() {
+            return Self::Collection(Rc::new(super::variant::collections::CollectionInput::new(
+                c,
+            )));
+        }
         match c.ty.as_str() {
             "u32" => Self::U32(PreparedRecords::for_case(
                 c,
@@ -314,6 +322,8 @@ impl CaseInput {
     /// Result contract shared by every typed representation.
     pub(super) fn operation(&self) -> &Operation {
         match self {
+            #[cfg(feature = "collections")]
+            Self::Collection(v) => &v.case.operation,
             Self::U32(v) => v.operation(),
             Self::U64(v) => v.operation(),
             Self::U128(v) => v.operation(),

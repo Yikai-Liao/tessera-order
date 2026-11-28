@@ -73,6 +73,8 @@ impl CaseInput {
     /// Names a parallel column's call without starting its pool.
     pub(in crate::comparison) fn parallel_route(&self, implementation: &str) -> &'static str {
         match self {
+            #[cfg(feature = "collections")]
+            Self::Collection(_) => unreachable!(),
             Self::U32(v) => route::<u32>(implementation, v.operation()),
             Self::U64(v) => route::<u64>(implementation, v.operation()),
             Self::U128(v) => route::<u128>(implementation, v.operation()),
@@ -89,6 +91,8 @@ impl CaseInput {
     /// Prepares an implementation's parallel operation in a `threads`-worker pool.
     pub(super) fn prepare_parallel(&self, variant: Variant, threads: usize) -> Box<dyn Kernel> {
         match self {
+            #[cfg(feature = "collections")]
+            Self::Collection(_) => unreachable!(),
             Self::U32(v) => prepare(Rc::clone(v), variant, threads),
             Self::U64(v) => prepare(Rc::clone(v), variant, threads),
             Self::U128(v) => prepare(Rc::clone(v), variant, threads),

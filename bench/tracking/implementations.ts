@@ -6,7 +6,7 @@ import { TRACKING_SPEC } from "./result.ts";
 
 /** Track implementations and composition controls with independent absolute times. */
 export const trackingImplementations = catalog.implementations.filter(
-  (entry) => entry.adapter !== "revision",
+  (entry) => entry.adapter !== "revision" && entry.adapter !== "collections",
 );
 
 /**

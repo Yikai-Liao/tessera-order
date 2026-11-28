@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 3
+implementations = ["std-btree", "sorted-vec", "blart", "indexset", "index-db"]
+
+[[include]]
+operation = { kind = "map-build" }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 16, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-range", visit_len = 256, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-iterate" }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-mixed", write_pct = 10, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 1, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 10, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 0 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]
+
+[[include]]
+operation = { kind = "map-build-get", query_pct = 100, hot_pct = 90 }
+types = ["map_u64_u64"]
+distributions = ["random"]
+lengths = [16777216]

@@ -6,6 +6,8 @@ import { isDeepStrictEqual } from "node:util";
 import {
   caseGroup,
   columnId,
+  isCollection,
+  operationKey,
   operationSchema,
   parseColumnId,
   referenceColumn,
@@ -20,9 +22,8 @@ import {
   type Memory,
   measurementId,
   type Observation,
+  pairedColumns,
   type Sample,
-  TESSERA,
-  TESSERA_AA,
 } from "./model.ts";
 
 async function readJson(path: string): Promise<unknown> {
@@ -89,7 +90,9 @@ function parseManifest(value: unknown): Manifest {
   const operations = planOperations(plan);
   if (operations.length !== 1) throw new Error("a measurement session has exactly one operation");
   const [operation] = operations;
-  if (operation.kind !== "sort") assertInteger(value.index_bytes, 1);
+  const collection = isCollection(operation);
+  const { control } = pairedColumns(operation);
+  if (operation.kind !== "sort" && !collection) assertInteger(value.index_bytes, 1);
   const reference = columnId(referenceColumn(operation, "serial")!);
   const columns = new Set<string>();
   for (const column of value.columns) {
@@ -114,10 +117,20 @@ function parseManifest(value: unknown): Manifest {
     assertInteger(c.len, 1);
     const actual = operationSchema.parse(c.operation);
     validateOperation(actual, c.len);
-    if (actual.kind !== operation.kind) throw new Error("case operation differs from its plan");
+    if (
+      actual.kind !== operation.kind ||
+      (collection && operationKey(actual) !== operationKey(operation))
+    )
+      throw new Error("case operation differs from its plan");
+    if (collection) {
+      assertInteger(c.work_items, 1);
+      assertInteger(c.input_entries, c.len);
+      assertInteger(c.cold_queries);
+      assertInteger(c.churn_pairs);
+    }
     if (
       !Array.isArray(c.columns) ||
-      !c.columns.includes(TESSERA) ||
+      !c.columns.includes(control) ||
       !c.columns.includes(reference) ||
       new Set(c.columns).size !== c.columns.length ||
       c.columns.some((id) => !columns.has(id))
@@ -155,12 +168,15 @@ function parseManifest(value: unknown): Manifest {
 }
 /** Sort memory beyond a million wide records is measured only for Tessera's columns. */
 function requiresMemory(c: Manifest["cases"][number], column: string) {
+  if (isCollection(c.operation))
+    return c.operation.kind === "map-build" || c.operation.kind === "map-mixed";
   if (c.operation.kind !== "sort" || c.len <= 1000000 || c.ty === "u64") return true;
   return parseColumnId(column).implementation === "tessera";
 }
 export function validateRun(dataset: Dataset): void {
   const m = parseManifest(dataset.manifest);
   pairedBudget(m.blocks);
+  const { control, repeat } = pairedColumns(m.cases[0].operation);
   const build = "default";
   const samples = new Map<string, Sample[]>(),
     identities = new Set<string>(),
@@ -182,7 +198,7 @@ export function validateRun(dataset: Dataset): void {
       s.block >= m.blocks ||
       s.slot >= c.columns.length + 1 ||
       s.verified !== true ||
-      ![...c.columns, TESSERA_AA].includes(s.column) ||
+      ![...c.columns, repeat].includes(s.column) ||
       s.group !== caseGroup(c)
     )
       throw new Error(`invalid or unverified sample ${s.case_id}/${s.column}`);
@@ -208,7 +224,7 @@ export function validateRun(dataset: Dataset): void {
     observations.set(id, o);
   }
   for (const c of m.cases) {
-    const has = [...c.columns, TESSERA_AA].map((column) =>
+    const has = [...c.columns, repeat].map((column) =>
       samples.get(measurementId(build, caseId(c), column)),
     );
     const group = `${build}:${caseGroup(c)}`;
@@ -244,7 +260,15 @@ export function validateRun(dataset: Dataset): void {
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);
-    if (c.operation.kind !== "sort") {
+    if (isCollection(c.operation)) {
+      assertInteger(r.retained_bytes);
+      if (
+        !requiresMemory(c, r.column) ||
+        r.live_entries !== c.len ||
+        r.retained_bytes! > r.peak_extra_bytes
+      )
+        throw new Error("invalid retained collection heap");
+    } else if (c.operation.kind !== "sort") {
       assertInteger(r.output_bytes);
       const expected =
         c.operation.kind === "argsort"
@@ -260,7 +284,7 @@ export function validateRun(dataset: Dataset): void {
     memories.add(id);
   }
   for (const c of m.cases) {
-    if (dataset.partial && !samples.has(measurementId(build, caseId(c), TESSERA))) continue;
+    if (dataset.partial && !samples.has(measurementId(build, caseId(c), control))) continue;
     for (const column of c.columns)
       if (requiresMemory(c, column) && !memories.has(measurementId(build, caseId(c), column)))
         throw new Error(`missing memory sample ${build}/${caseId(c)}/${column}`);

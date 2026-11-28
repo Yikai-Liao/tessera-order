@@ -3,8 +3,24 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
-import { catalog, parseColumnId, referenceColumn } from "./catalog.ts";
-import { loadPlan, type Plan, parsePlan, planFeatures, planOperations } from "./plan.ts";
+import {
+  catalog,
+  comparisonControl,
+  inputTypes,
+  isCollection,
+  operationKey,
+  parseColumnId,
+  referenceColumn,
+  SORT,
+} from "./catalog.ts";
+import {
+  loadPlan,
+  type Plan,
+  parsePlan,
+  planFeatures,
+  planOperations,
+  plansByOperation,
+} from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
@@ -97,7 +113,7 @@ export async function checkImplementations(root: string, out: string, native: bo
     const planPath = join(check, "plan.json");
     const plan = await loadPlan("continuous", {
       operation: "sort",
-      types: catalog.types.map((entry) => entry.id),
+      types: inputTypes(SORT).map((entry) => entry.id),
       distributions: ["random", "equal"],
       lengths: [32],
     });
@@ -154,51 +170,82 @@ export interface ReleaseOptions {
 /** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareImplementations(options: ReleaseOptions) {
   pairedBudget(options.blocks);
-  // A session's report sections and denominator belong to one operation.
-  if (planOperations(options.plan).length !== 1)
-    throw new Error(
-      "An implementation comparison measures one operation; select it with --operation",
-    );
-  if (options.revisions && planOperations(options.plan).some((op) => op.kind !== "sort"))
+  const operations = planOperations(options.plan);
+  if (options.revisions && operations.some((op) => op.kind !== "sort"))
     throw new Error(
       "Linked revisions support full sorting only; use compare implementations for other operations",
     );
+  const multiple = operations.length > 1;
+  if (multiple && (options.group || operations.some((op) => !isCollection(op))))
+    throw new Error(
+      "An implementation comparison measures one operation; select it with --operation",
+    );
   await mkdir(options.out, { recursive: false });
   return withSessionLock(options.out, async () => {
-    await prepareComparison(options);
-    return measureComparison(options.out);
+    if (!multiple) {
+      await prepareComparison(options);
+      return measureComparison(options.out);
+    }
+    return withComparisonBuild(options, controlledPlan(options.plan), async (executable) => {
+      const sessions: { name: string; result: Awaited<ReturnType<typeof measureComparison>> }[] =
+        [];
+      for (const plan of plansByOperation(options.plan)) {
+        const name = operationKey(planOperations(plan)[0]).replaceAll("/", "-");
+        const out = join(options.out, name);
+        await mkdir(out);
+        await withSessionLock(out, async () => {
+          await prepareComparison({ ...options, plan, out }, executable);
+          sessions.push({ name, result: await measureComparison(out) });
+        });
+      }
+      return { kind: "implementation-comparison", sessions };
+    });
   });
 }
 
-/** Build the timing/memory executable pair before starting any measurement. */
-async function prepareComparison(options: ReleaseOptions) {
-  const { root, out, cpu, group, sampleMs, memoryMib, blocks } = options;
+function controlledPlan(plan: Plan) {
   // Controls belong to this measurement operation, not the shared selection parser.
-  const plan = parsePlan({
-    ...options.plan,
+  return parsePlan({
+    ...plan,
     implementations: [
       ...new Set([
-        "tessera",
-        ...planOperations(options.plan).map(
+        ...planOperations(plan).map(comparisonControl),
+        ...planOperations(plan).map(
           (operation) => referenceColumn(operation, "serial")!.implementation,
         ),
-        ...options.plan.implementations,
+        ...plan.implementations,
       ]),
     ],
   });
-  if (cpu) await command("taskset", ["-c", cpu, "true"]);
+}
+
+function withComparisonBuild<T>(
+  options: ReleaseOptions,
+  plan: Plan,
+  run: (executable: string) => Promise<T>,
+) {
   const native = plan.implementations.some((id) =>
     catalog.implementations.some((entry) => entry.id === id && entry.adapter === "native"),
   );
-  const planPath = join(out, "plan.json");
-  await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
-  const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
+  return withComparisonWorkspace(options.root, native, async ({ tree, target }) => {
     const features = [...planFeatures(plan), ...(native ? ["compare-native"] : [])];
-    if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
+    if (options.revisions) await prepareRevisions(options.root, tree, options.revisions, features);
     diagnostic("Building comparison workers");
     const { executable } = await buildBenchmark(tree, target, "compare", features);
-    return retainBuild(out, executable);
+    return run(executable);
   });
+}
+
+/** Retain the timing/memory executable pair before starting any measurement. */
+async function prepareComparison(options: ReleaseOptions, executable?: string) {
+  const { out, cpu, group, sampleMs, memoryMib, blocks } = options;
+  const plan = controlledPlan(options.plan);
+  if (cpu) await command("taskset", ["-c", cpu, "true"]);
+  const planPath = join(out, "plan.json");
+  await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n");
+  const build = executable
+    ? await retainBuild(out, executable)
+    : await withComparisonBuild(options, plan, (path) => retainBuild(out, path));
   const session: Session = {
     schema: 2,
     platform: process.platform,

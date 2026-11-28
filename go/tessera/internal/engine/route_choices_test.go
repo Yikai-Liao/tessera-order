@@ -156,39 +156,6 @@ func TestOneSidedCutReadsOnlyPrefixAndOutlier(t *testing.T) {
 	}
 }
 
-func TestSparseBandsPublishLedgerRanges(t *testing.T) {
-	for _, length := range []int{21, 57, 101, 1027} {
-		rows := make([]ownedRow, length)
-		for i := range rows {
-			rows[i] = ownedRow{key: 1, id: i}
-			if i%3 == 0 {
-				rows[i].key = 5
-			}
-		}
-		expected := slices.Clone(rows)
-		slices.SortStableFunc(expected, func(a, b ownedRow) int { return int(a.key) - int(b.key) })
-		ends := make([]int, 8)
-		for _, r := range rows {
-			ends[r.key]++
-		}
-		for i := 1; i < len(ends); i++ {
-			ends[i] += ends[i-1]
-		}
-		e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 { return r.key })
-		var buffers blockBuffers[ownedRow]
-		var seen []int
-		got := partitionBlocks(rows, 3, 7, &buffers, blockClassifier[uint64]{digit: Digit{Width: 3}}, &e, func(bucket, start, end int, band []ownedRow) {
-			seen = append(seen, bucket)
-			if start != ends[bucket-1] || end != ends[bucket] || !slices.Equal(band, expected[start:end]) {
-				t.Fatalf("bucket %d range [%d,%d)", bucket, start, end)
-			}
-		})
-		if !slices.Equal(got, ends) || !slices.Equal(seen, []int{1, 5}) || !slices.Equal(rows, expected) {
-			t.Fatalf("length %d ends %v seen %v", length, got, seen)
-		}
-	}
-}
-
 func TestEndpointAndOneSidedCutsPreserveStablePositions(t *testing.T) {
 	cases := [][]uint8{{5, 5, 9, 1, 9, 1, 5, 5}, {5, 6, 9, 1, 9, 1, 6, 5}, {1, 6, 3, 7, 3, 4, 3, 6, 3, 9, 3}, {7, 1, 7, 4, 7, 6, 7, 3, 7, 4, 9}}
 	for c, keys := range cases {

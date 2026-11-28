@@ -3,7 +3,7 @@
 //! Cross-language key and stable ordering vectors.
 
 use std::cmp::Reverse;
-use std::fmt::{Debug, LowerHex, Write};
+use std::fmt::{Debug, LowerHex};
 use std::num::NonZero;
 use tessera_order::{
     RadixKey, argsort, argsort_by_key, select_nth, select_nth_by_key, sort, sort_by_cached_key,
@@ -103,19 +103,6 @@ where
         .map(|v| format!("{v:0storage_digits$x}"))
         .collect();
     let mask = K::VARYING_MASK;
-    let mut output = format!(
-        r#"    {{
-      "name": "{name}",
-      "width_bits": {width},
-      "storage_bits": {storage_bits},
-      "varying_mask": "{mask:0storage_digits$x}",
-      "input": {input:?},
-      "encoded": {bits:?},
-      "stable_order": {expected:?},
-      "argsort": {permutation:?},
-      "selections": [
-"#
-    );
     for (rank, &selected_id) in expected.iter().enumerate() {
         let mut direct = keys.clone();
         let (before, nth, after) = select_nth(&mut direct, rank);
@@ -147,16 +134,18 @@ where
         after_ids.sort_unstable();
         assert_eq!(before_ids, before_expected, "{name} before rank {rank}");
         assert_eq!(after_ids, after_expected, "{name} after rank {rank}");
-
-        let comma = if rank + 1 == keys.len() { "" } else { "," };
-        writeln!(
-            output,
-            "        {{\"rank\": {rank}, \"before\": {before_ids:?}, \"nth\": {selected_id}, \"after\": {after_ids:?}}}{comma}"
-        )
-        .unwrap();
     }
-    output.push_str("      ]\n    }");
-    output
+    format!(
+        r#"    {{
+      "name": "{name}",
+      "width_bits": {width},
+      "storage_bits": {storage_bits},
+      "varying_mask": "{mask:0storage_digits$x}",
+      "input": {input:?},
+      "encoded": {bits:?},
+      "stable_order": {expected:?}
+    }}"#
+    )
 }
 
 fn raw_float32(raw: u128) -> f32 {
@@ -261,12 +250,13 @@ fn vectors() -> String {
         (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
     }));
     format!(
-        "{{\n  \"schema\": 1,\n  \"cases\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"schema\": 2,\n  \"cases\": [\n{}\n  ]\n}}\n",
         cases.join(",\n")
     )
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "reads conformance vectors from disk")]
 fn golden_vectors() {
     let generated = vectors();
     // Run this same test with TESSERA_UPDATE_ORDERING_VECTORS=1 to regenerate.

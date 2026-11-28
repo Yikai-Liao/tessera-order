@@ -1,0 +1,221 @@
+name: PR benchmark feedback
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        required: true
+      reused-from:
+        type: string
+
+env:
+  BENCHMARK_LANGUAGE: ${{ inputs.language }}
+  PUBLISH: ${{ inputs.publish }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: inputs.reused-from == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
+      CARGO_BUILD_TARGET: ${{ inputs.language == 'rust' && 'x86_64-unknown-linux-gnu' || '' }}
+      CARGO_PROFILE_BENCH_DEBUG: ${{ inputs.language == 'rust' && '0' || '' }}
+      # Short sorts take hundreds of nanoseconds. Shifting hot instructions during a
+      # rebuild can move their timing enough to look like a regression (u64/random/49).
+      # Apply the same layout rules to the baseline and candidate x86-64 binaries:
+      # LLVM pads selected branches (including fused compare-and-branch pairs) away
+      # from 32-byte boundaries and aligns function entries to 2^6 = 64 bytes.
+      # For the Xeon and EPYC replay results, see docs/design/evidence.md#reading-small-case-results.
+      RUSTFLAGS: ${{ inputs.language == 'rust' && '-C target-feature=+crt-static -C llvm-args=-x86-branches-within-32B-boundaries -C llvm-args=-align-all-functions=6' || '' }}
+      CC: ${{ inputs.language == 'rust' && 'clang' || '' }}
+      CXX: ${{ inputs.language == 'rust' && 'clang++' || '' }}
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      no-baseline: ${{ steps.build.outputs.no-baseline }}
+      baseline: ${{ steps.build.outputs.baseline }}
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/benchmark"
+          # Main tracking saves this key from main; save here only for same-repo PRs while it is off.
+          save-if: ${{ inputs.language == 'rust' && inputs.publish && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}
+          # Include virtual-root profiles and builder-owned flags in both workflows.
+          shared-key: ${{ inputs.language == 'go' && 'go-benchmark-plan' || format('benchmark-aligned-{0}', hashFiles('Cargo.toml', 'bench/workspace.ts')) }}
+      - uses: actions/setup-go@v7
+        if: inputs.language == 'go'
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build both revisions once
+        id: build
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          baseline=$(git merge-base "$PR_BASE" HEAD)
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          if [[ "$BENCHMARK_LANGUAGE" == go ]]; then
+            if ! git cat-file -e "$baseline:go/tessera/go.mod"; then
+              echo "no-baseline=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            unset CARGO_BUILD_TARGET CARGO_PROFILE_BENCH_DEBUG RUSTFLAGS CC CXX
+          else
+            echo "matrix=$(bun run --silent tools continuous matrix)" >> "$GITHUB_OUTPUT"
+          fi
+          bun run tools continuous prepare "$baseline" --language "$BENCHMARK_LANGUAGE" \
+            --out bench/results/prepared
+          if [[ "$BENCHMARK_LANGUAGE" == go ]]; then
+            echo "matrix=$(bun run --silent tools continuous matrix --go-prepared bench/results/prepared)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Retain preparation log
+        if: always() && inputs.language == 'rust'
+        run: |
+          if [ -f bench/results/prepared.log ]; then
+            mkdir -p bench/results/prepared
+            cp bench/results/prepared.log bench/results/prepared/preparation.log
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always() && (inputs.language == 'rust' || steps.build.outputs.matrix != '')
+        id: artifact
+        with:
+          name: ${{ inputs.language == 'go' && 'go-prepared' || 'prepared-revisions' }}-${{ github.run_attempt }}
+          path: bench/results/prepared/
+          retention-days: 14
+          if-no-files-found: error
+
+  measure:
+    needs: prepare
+    if: needs.prepare.outputs.artifact != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          merge-multiple: true
+          path: bench/results/prepared
+      - name: Measure retained revisions without compiling
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          bun run tools continuous measure bench/results/prepared --shard "$SHARD" \
+            --out bench/results/continuous
+      - name: Retain measurement log
+        if: always() && inputs.language == 'rust'
+        run: |
+          if [ -f bench/results/continuous.log ]; then
+            mkdir -p bench/results/continuous
+            cp bench/results/continuous.log bench/results/continuous/measurement.log
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ matrix.artifact }}-${{ inputs.language == 'go' && 'go-' || '' }}${{ needs.prepare.outputs.artifact }}
+          path: |
+            bench/results/continuous/
+            !bench/results/continuous/binaries/**
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    needs: [prepare, measure]
+    if: always() && !cancelled() && (inputs.language == 'go' || inputs.reused-from != '' || needs.prepare.result == 'success')
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
+    env:
+      HASH: ${{ github.event.pull_request.head.sha }}
+      BASE_HASH: ${{ needs.prepare.outputs.baseline || github.event.pull_request.base.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE: ${{ github.event.pull_request.base.ref }}
+      NO_BASELINE: ${{ needs.prepare.outputs.no-baseline }}
+      REUSED_FROM: ${{ inputs.reused-from }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        if: needs.prepare.outputs.artifact != ''
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/prepared
+      - uses: actions/download-artifact@v8
+        if: needs.prepare.outputs.artifact != ''
+        continue-on-error: true
+        with:
+          pattern: paired-*-${{ inputs.language == 'go' && 'go-' || '' }}${{ needs.prepare.outputs.artifact }}
+          # A single download match extracts directly into the destination.
+          path: ${{ inputs.language == 'go' && fromJSON(needs.prepare.outputs.matrix).include[0].shard == '1/1' && format('{0}/paired/paired-1-go-{1}', runner.temp, needs.prepare.outputs.artifact) || format('{0}/paired', runner.temp) }}
+      - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
+        continue-on-error: true
+        if: inputs.publish && inputs.reused-from == '' && (inputs.language == 'rust' || needs.measure.result == 'success')
+        with:
+          version: 0.6.16
+      - name: Upload paired JSON to Bencher Cloud
+        id: upload
+        continue-on-error: true
+        if: inputs.publish && inputs.reused-from == '' && (inputs.language == 'rust' || needs.measure.result == 'success')
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+        run: |
+          bun run tools continuous submit --language "$BENCHMARK_LANGUAGE" --project "$BENCHER_PROJECT" \
+            --hash "$HASH" --base-hash "$BASE_HASH" --pr "$PR_NUMBER" \
+            --prepared "$RUNNER_TEMP/prepared" --artifacts "$RUNNER_TEMP/paired" \
+            --out "$RUNNER_TEMP/submission"
+      - name: Publish paired checks and PR report
+        run: bun .github/scripts/publish-report.ts
+        env:
+          GITHUB_TOKEN: ${{ inputs.publish && github.token || '' }}
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.reused-from == '' && (inputs.language == 'rust' || steps.upload.outcome != 'skipped')
+        with:
+          name: ${{ inputs.language == 'go' && 'continuous-go-submission' || 'continuous-submission' }}
+          path: |
+            ${{ runner.temp }}/submission/
+            ${{ runner.temp }}/submission.log
+          if-no-files-found: ignore
+      - name: Preserve Cloud archival failure
+        if: always() && steps.upload.outcome == 'failure'
+        run: exit 1

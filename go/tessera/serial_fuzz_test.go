@@ -12,8 +12,13 @@ import (
 )
 
 func goldenSeeds(f *testing.F) [][]byte {
+	vectors := readOrderingVectors(f)
+	if vectors == nil {
+		// The module archive omits repository fixtures.
+		return [][]byte{[]byte("b.......a"), []byte("a.......b"), []byte("b.......b"), []byte("a.......c.......b")}
+	}
 	var seeds [][]byte
-	for _, vector := range readOrderingVectors(f) {
+	for _, vector := range vectors {
 		data := make([]byte, 0, len(vector.Encoded)*8)
 		for _, encoded := range vector.Encoded {
 			raw, err := hex.DecodeString(encoded)
@@ -98,45 +103,48 @@ func FuzzChangingKeys(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, data []byte, mode uint8) {
 		source := fuzzRows(data, mode)
-		rows := slices.Clone(source)
-		calls := 0
-		const exhausted = "extractor call bound exceeded"
-		key := func(row *testRow) uint64 {
-			calls++
-			if calls > 200*len(rows) {
-				panic(exhausted)
-			}
-			return row.key ^ uint64(calls)*0x9e3779b97f4a7c15
+		checkChangingKeys(t, source, int(mode%3), len(source)/2)
+	})
+}
+
+func checkChangingKeys(t *testing.T, source []testRow, operation, rank int) {
+	t.Helper()
+	rows := slices.Clone(source)
+	calls := 0
+	const exhausted = "extractor call bound exceeded"
+	key := func(row *testRow) uint64 {
+		calls++
+		if calls > 200*len(rows) {
+			panic(exhausted)
 		}
-		var indices []int
-		p := recoverPanic(func() {
-			switch mode % 3 {
-			case 0:
-				SortByKey(rows, key)
-			case 1:
-				if len(rows) > 0 {
-					SelectNthByKey(rows, len(rows)/2, key)
-				}
-			case 2:
-				indices = ArgsortByKey(rows, key)
+		return row.key ^ uint64(calls)*0x9e3779b97f4a7c15
+	}
+	var indices []int
+	p := recoverPanic(func() {
+		switch operation {
+		case 0:
+			SortByKey(rows, key)
+		case 1:
+			if len(rows) > 0 {
+				SelectNthByKey(rows, rank, key)
 			}
-		})
-		if p != nil {
-			if mode%3 != 2 || p != "tessera: inconsistent radix partition" {
-				t.Fatalf("unexpected panic: %v", p)
-			}
-			return
-		}
-		checkRecordOwners(t, rows, source)
-		if mode%3 == 2 {
-			if !slices.Equal(rows, source) {
-				t.Fatal("argsort moved source on changing keys")
-			}
-			if p == nil {
-				checkPermutation(t, indices, len(rows))
-			}
+		case 2:
+			indices = ArgsortByKey(rows, key)
 		}
 	})
+	if p != nil {
+		if operation != 2 || p != "tessera: inconsistent radix partition" {
+			t.Fatalf("unexpected panic: %v", p)
+		}
+		return
+	}
+	checkRecordOwners(t, rows, source)
+	if operation == 2 {
+		if !slices.Equal(rows, source) {
+			t.Fatal("argsort moved source on changing keys")
+		}
+		checkPermutation(t, indices, len(rows))
+	}
 }
 
 func FuzzPanicPosition(f *testing.F) {

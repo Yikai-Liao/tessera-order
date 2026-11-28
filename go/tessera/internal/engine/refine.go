@@ -31,9 +31,6 @@ func refine[T any, V encoded](records []T, e *extractor[T, V], rank, budgetBytes
 	}
 	tileLen := tileCapacity[T](budgetBytes)
 	if rank != allRanks && len(records) > tileLen && finishCut(records, rank, e) {
-		if observeRoutes {
-			emitRoute(routeEvent{stage: routeCut, a: rank})
-		}
 		return
 	}
 	varying := prepare(records, e.mask, e, tileLen, true)
@@ -278,9 +275,6 @@ func sortNode[T any, V encoded](records []T, varying Uint128, rank, tileLen int,
 		return
 	}
 	if order := sourceOrderForNode(records, varying, rank, e, recordBytes[T]()); order != nil {
-		if observeRoutes {
-			emitRoute(routeEvent{stage: routeSpans, a: len(records)})
-		}
 		applySpans(order, records)
 		return
 	}
@@ -362,4 +356,10 @@ func traceNodePlan[V encoded](plan nodePlan[V], varying Uint128) {
 		}
 		emitRoute(routeEvent{stage: routeNodeDigit, a: kind, b: plan.boundary, digit: plan.digit, mask: varying})
 	}
+}
+
+// Workspace reuses capacity across the nodes and tiles of one refinement.
+type workspace[T any] struct {
+	tile  tileScratch[T]
+	block blockBuffers[T]
 }

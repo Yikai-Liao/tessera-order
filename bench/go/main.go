@@ -149,9 +149,7 @@ func serve(input io.Reader, output io.Writer) error {
 			config = req
 			result := map[string]any{"id": req.ID, "buffer_bytes": slot.bytes, "route": route}
 			if req.Action == "verify" {
-				slot.restore(1)
-				slot.run()
-				if err := slot.check(); err != nil {
+				if err := verifyPrepared(slot); err != nil {
 					return err
 				}
 				result["digest"] = slot.digest()
@@ -198,4 +196,10 @@ func sample(slot prepared, batch int, budget time.Duration) (elapsed, sorts uint
 			return elapsed, sorts, nil
 		}
 	}
+}
+
+func verifyPrepared(slot prepared) error {
+	slot.restore(1)
+	slot.run()
+	return slot.check()
 }

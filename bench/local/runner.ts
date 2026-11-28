@@ -21,7 +21,7 @@ import {
   type Workspace,
   withWorkspace,
 } from "../workspace.ts";
-import { listGo } from "./go.ts";
+import { assertGoInventory, listGo } from "./go.ts";
 import {
   engineOrderingSymbols,
   type LayoutControl,
@@ -379,11 +379,13 @@ export async function comparePrepared(options: {
   const allCases = pair.go
     ? await listGo(binaries.current, pair.go.requests)
     : await selectedCases(binaries, join(out, "plan.json"), undefined, root, planExecutions(plan));
-  if (
-    pair.go &&
-    JSON.stringify(await listGo(binaries.baseline, pair.go.requests)) !== JSON.stringify(allCases)
-  )
-    throw new Error("Go baseline inventory differs");
+  if (pair.go)
+    await assertGoInventory(
+      binaries.baseline,
+      pair.go.requests,
+      allCases,
+      "Go baseline inventory differs",
+    );
   if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
   const run = measurementRun(pair, cpu, options.shard);

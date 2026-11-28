@@ -82,22 +82,52 @@ func TestTileCachesChangingClassifications(t *testing.T) {
 
 func TestBlockReturnsStableBandEnds(t *testing.T) {
 	for _, length := range []int{2, 7, 8, 57, 101, 123} {
-		rows := rowsForRecovery(length)
-		expected := slices.Clone(rows)
-		slices.SortStableFunc(expected, func(a, b ownedRow) int { return int(a.key&7) - int(b.key&7) })
-		e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 { return r.key })
-		var buffers blockBuffers[ownedRow]
-		start := 0
-		ends := partitionBlocks(rows, 3, 7, &buffers, blockClassifier[uint64]{digit: Digit{Width: 3}}, &e,
-			func(bucket, lo, hi int, band []ownedRow) {
-				if lo != start || !slices.Equal(band, expected[lo:hi]) {
-					t.Fatalf("published bucket %d", bucket)
-				}
-				start = hi
-			})
-		if !slices.Equal(rows, expected) || ends[7] != len(rows) {
-			t.Fatal("wrong block distribution")
+		checkBlockBands(t, rowsForRecovery(length))
+	}
+	for _, length := range []int{21, 57, 101, 1027} {
+		rows := make([]ownedRow, length)
+		for i := range rows {
+			rows[i] = ownedRow{key: 1, id: i}
+			if i%3 == 0 {
+				rows[i].key = 5
+			}
 		}
+		checkBlockBands(t, rows)
+	}
+}
+
+func checkBlockBands(t *testing.T, rows []ownedRow) {
+	t.Helper()
+	bucketOf := func(r ownedRow) int { return int(r.key & 7) }
+	expected := slices.Clone(rows)
+	slices.SortStableFunc(expected, func(a, b ownedRow) int { return bucketOf(a) - bucketOf(b) })
+	want := make([]int, 8)
+	for _, r := range rows {
+		want[bucketOf(r)]++
+	}
+	for i := 1; i < len(want); i++ {
+		want[i] += want[i-1]
+	}
+	e := testKeyed[ownedRow, uint64](func(r *ownedRow) uint64 { return r.key })
+	var buffers blockBuffers[ownedRow]
+	seen := make([]int, 0, len(want))
+	got := partitionBlocks(rows, 3, 7, &buffers, blockClassifier[uint64]{digit: Digit{Width: 3}}, &e,
+		func(bucket, start, end int, band []ownedRow) {
+			seen = append(seen, bucket)
+			if start != want[bucket]-len(band) || end != want[bucket] || !slices.Equal(band, expected[start:end]) {
+				t.Fatalf("bucket %d range [%d,%d)", bucket, start, end)
+			}
+		})
+	var nonempty []int
+	start := 0
+	for bucket, end := range want {
+		if end > start {
+			nonempty = append(nonempty, bucket)
+		}
+		start = end
+	}
+	if !slices.Equal(got, want) || !slices.Equal(seen, nonempty) || !slices.Equal(rows, expected) {
+		t.Fatalf("length %d ends %v seen %v", len(rows), got, seen)
 	}
 }
 
@@ -147,7 +177,7 @@ func TestTileDigitPlansMatchExhaustiveOracle(t *testing.T) {
 	for varying := uint64(1); varying < 256; varying++ {
 		for width := uint(1); width <= 5; width++ {
 			passes, slots := optimum(varying, width)
-			plan := planDigits(Uint128{Lo: varying}, width, maxInt, false)
+			plan := planDigits(Uint128{Lo: varying}, width)
 			if plan.msd {
 				if passes <= 2 {
 					t.Fatalf("unexpected MSD for %x width %d", varying, width)

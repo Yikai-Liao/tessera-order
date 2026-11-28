@@ -13,30 +13,27 @@ import (
 	"testing"
 
 	. "github.com/Yikai-Liao/tessera-order/go/tessera"
+	"github.com/Yikai-Liao/tessera-order/go/tessera/internal/engine"
 )
 
 type orderingVector struct {
-	Name        string          `json:"name"`
-	WidthBits   uint            `json:"width_bits"`
-	StorageBits uint            `json:"storage_bits"`
-	VaryingMask string          `json:"varying_mask"`
-	Input       []string        `json:"input"`
-	Encoded     []string        `json:"encoded"`
-	StableOrder []int           `json:"stable_order"`
-	Argsort     []int           `json:"argsort"`
-	Selections  []rankSelection `json:"selections"`
+	Name        string   `json:"name"`
+	WidthBits   uint     `json:"width_bits"`
+	StorageBits uint     `json:"storage_bits"`
+	VaryingMask string   `json:"varying_mask"`
+	Input       []string `json:"input"`
+	Encoded     []string `json:"encoded"`
+	StableOrder []int    `json:"stable_order"`
 }
 
-type rankSelection struct {
-	Rank   int   `json:"rank"`
-	Before []int `json:"before"`
-	Nth    int   `json:"nth"`
-	After  []int `json:"after"`
-}
+const orderingVectorsPath = "../../conformance/vectors/ordering.json"
 
 func readOrderingVectors(t testing.TB) []orderingVector {
 	t.Helper()
-	data, err := os.ReadFile("../../conformance/vectors/ordering.json")
+	data, err := os.ReadFile(orderingVectorsPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +44,7 @@ func readOrderingVectors(t testing.TB) []orderingVector {
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}
-	if file.Schema != 1 || len(file.Cases) == 0 {
+	if file.Schema != 2 || len(file.Cases) == 0 {
 		t.Fatalf("invalid ordering vectors: schema %d, %d cases", file.Schema, len(file.Cases))
 	}
 	return file.Cases
@@ -77,7 +74,7 @@ func checkVector[K comparable](t *testing.T, vector orderingVector, fromRaw func
 	for i, raw := range vector.Input {
 		keys[i] = fromRaw(readKeyBits(t, raw, vector.WidthBits))
 	}
-	codec := directCodec(keys)
+	codec := engine.BindKey[K]()
 	if codec.Width != vector.WidthBits || codec.StorageBits != vector.StorageBits {
 		t.Fatalf("width/storage = %d/%d, want %d/%d",
 			codec.Width, codec.StorageBits, vector.WidthBits, vector.StorageBits)
@@ -101,8 +98,8 @@ func checkVector[K comparable](t *testing.T, vector orderingVector, fromRaw func
 func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys []K, encode func(K) Uint128, same func(K, K) bool) {
 	t.Helper()
 	for _, argsort := range []func([]K) []int{Argsort[K], ParArgsort[K]} {
-		if got := argsort(keys); !slices.Equal(got, vector.Argsort) {
-			t.Fatalf("argsort = %v, want %v", got, vector.Argsort)
+		if got := argsort(keys); !slices.Equal(got, vector.StableOrder) {
+			t.Fatalf("argsort = %v, want %v", got, vector.StableOrder)
 		}
 	}
 	for _, sort := range []func([]K){Sort[K], ParSort[K]} {
@@ -114,16 +111,16 @@ func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys
 			}
 		}
 	}
-	for _, want := range vector.Selections {
+	for rank, expectedID := range vector.StableOrder {
 		selected := slices.Clone(keys)
-		before, nth, after := SelectNth(selected, want.Rank)
-		if !same(*nth, keys[want.Nth]) {
-			t.Fatalf("rank %d did not select input %d", want.Rank, want.Nth)
+		before, nth, after := SelectNth(selected, rank)
+		if !same(*nth, keys[expectedID]) {
+			t.Fatalf("rank %d did not select input %d", rank, expectedID)
 		}
 		for _, region := range []struct {
 			actual []K
 			ids    []int
-		}{{before, want.Before}, {after, want.After}} {
+		}{{before, vector.StableOrder[:rank]}, {after, vector.StableOrder[rank+1:]}} {
 			counts := make(map[Uint128]int)
 			for _, id := range region.ids {
 				counts[encode(keys[id])]++
@@ -133,7 +130,7 @@ func checkGoldenOrdering[K comparable](t *testing.T, vector orderingVector, keys
 			}
 			for _, n := range counts {
 				if n != 0 {
-					t.Fatalf("wrong membership at rank %d", want.Rank)
+					t.Fatalf("wrong membership at rank %d", rank)
 				}
 			}
 		}
@@ -157,7 +154,7 @@ func checkGoldenIDs(t *testing.T, vector orderingVector, bits []Uint128) {
 	}
 	key := func(id *int) Uint128 { return bits[*id] }
 	for _, argsort := range []func([]int, func(*int) Uint128) []int{ArgsortByKey[int, Uint128], ParArgsortByKey[int, Uint128]} {
-		if got := argsort(ids, key); !slices.Equal(got, vector.Argsort) {
+		if got := argsort(ids, key); !slices.Equal(got, vector.StableOrder) {
 			t.Fatal("keyed argsort changed tie order")
 		}
 	}
@@ -168,25 +165,28 @@ func checkGoldenIDs(t *testing.T, vector orderingVector, bits []Uint128) {
 			t.Fatal("keyed sort changed tie order")
 		}
 	}
-	for _, want := range vector.Selections {
+	for rank := range vector.StableOrder {
 		got := slices.Clone(ids)
-		before, nth, after := SelectNthByKey(got, want.Rank, key)
-		checkRankIDs(t, got, before, *nth, after, want, bits)
+		before, nth, after := SelectNthByKey(got, rank, key)
+		checkRankIDs(t, got, before, *nth, after, rank, vector.StableOrder, bits)
 	}
 }
 
-func checkRankIDs(t testing.TB, all, before []int, nth int, after []int, want rankSelection, keys []Uint128) {
+func checkRankIDs(t testing.TB, all, before []int, nth int, after []int, rank int, order []int, keys []Uint128) {
 	t.Helper()
 	left, right := slices.Clone(before), slices.Clone(after)
+	wantLeft, wantRight := slices.Clone(order[:rank]), slices.Clone(order[rank+1:])
+	slices.Sort(wantLeft)
+	slices.Sort(wantRight)
 	slices.Sort(left)
 	slices.Sort(right)
-	if nth != want.Nth || !slices.Equal(left, want.Before) || !slices.Equal(right, want.After) {
-		t.Fatalf("wrong stable rank %d: %v / %d / %v", want.Rank, left, nth, right)
+	if nth != order[rank] || !slices.Equal(left, wantLeft) || !slices.Equal(right, wantRight) {
+		t.Fatalf("wrong stable rank %d: %v / %d / %v", rank, left, nth, right)
 	}
 	last := make(map[Uint128]int)
 	for _, id := range all {
 		if previous, ok := last[keys[id]]; ok && previous >= id {
-			t.Fatalf("rank %d changed tie order: %d before %d", want.Rank, previous, id)
+			t.Fatalf("rank %d changed tie order: %d before %d", rank, previous, id)
 		}
 		last[keys[id]] = id
 	}
@@ -215,7 +215,11 @@ func sameFloat32(a, b float32) bool { return math.Float32bits(a) == math.Float32
 func sameFloat64(a, b float64) bool { return math.Float64bits(a) == math.Float64bits(b) }
 
 func TestGoldenKeyEncodings(t *testing.T) {
-	for _, vector := range readOrderingVectors(t) {
+	vectors := readOrderingVectors(t)
+	if vectors == nil {
+		t.Skipf("requires repository fixture %s", orderingVectorsPath)
+	}
+	for _, vector := range vectors {
 		t.Run(vector.Name, func(t *testing.T) {
 			switch vector.Name {
 			case "u8":

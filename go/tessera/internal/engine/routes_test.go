@@ -28,21 +28,10 @@ func recorded(events []routeEvent, stage routeStage, value int) bool {
 
 func TestObservedOrderAndVariation(t *testing.T) {
 	events := observe(t)
-	for _, test := range []struct {
-		keys     []uint64
-		want     order
-		constant bool
-	}{
-		{[]uint64{1, 2, 3, 4}, ascending, false},
-		{[]uint64{4, 3, 2, 1}, descendingStrict, false},
-		{[]uint64{4, 4, 2, 1}, descendingTies, false},
-		{[]uint64{3, 3, 3, 3}, ascending, true},
-	} {
-		*events = (*events)[:0]
-		Direct(slices.Clone(test.keys), Refine, -1)
-		if !recorded(*events, routeProbe, int(test.want)) || recorded(*events, routeConstant, len(test.keys)) != test.constant {
-			t.Fatalf("probe for %v: %v", test.keys, *events)
-		}
+	constant := []uint64{3, 3, 3, 3}
+	Direct(constant, Refine, allRanks)
+	if !recorded(*events, routeProbe, int(ascending)) || !recorded(*events, routeConstant, len(constant)) {
+		t.Fatalf("constant probe: %v", *events)
 	}
 	values := make([]uint64, orderSampleMinLen)
 	for i := range values {

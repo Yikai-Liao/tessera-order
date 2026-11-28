@@ -58,11 +58,7 @@ func checkScanBoundaries[T any, V encoded](t *testing.T) {
 	}
 }
 
-func TestPrefixAndMSDDispatchBoundaries(t *testing.T) {
-	e := extractor[uint16, uint16]{encode: func(key *uint16) Uint128 { return Uint128{Lo: uint64(*key)} }}
-	if canFinishMSD(&e) {
-		t.Fatal("planner enabled an unavailable MSD network")
-	}
+func TestPrefixSumBoundaries(t *testing.T) {
 	for n := 0; n <= 3*32+1; n++ {
 		counts := make([]uint16, n)
 		want := make([]uint16, n)
@@ -78,10 +74,6 @@ func TestPrefixAndMSDDispatchBoundaries(t *testing.T) {
 		}
 		if got := prefixSum(counts); got != largest || !slices.Equal(counts, want) {
 			t.Fatalf("length %d: wrong prefix or largest count %d (want %d)", n, got, largest)
-		}
-		before := slices.Clone(counts)
-		if finishMSD(counts, 2, &e) || !slices.Equal(counts, before) {
-			t.Fatalf("length %d: unavailable MSD network changed input or claimed to finish", n)
 		}
 	}
 }

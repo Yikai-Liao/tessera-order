@@ -51,9 +51,11 @@ func assemble[T comparable, K any](c inputCase, req request, r records[T, K]) (p
 	}
 	indexBytes := int(unsafe.Sizeof(int(0)))
 	var offsets []int
+	var original []T
 	switch op.Kind {
 	case "argsort":
 		size = indexBytes * c.Len
+		original = slices.Clone(r.values)
 	case "partition-buckets":
 		size += indexBytes * (op.Buckets + 1)
 		offsets = make([]int, op.Buckets+1)
@@ -105,6 +107,9 @@ func assemble[T comparable, K any](c inputCase, req request, r records[T, K]) (p
 			}
 		},
 		check: func() error {
+			if op.Kind == "argsort" && !slices.EqualFunc(r.values, original, same) {
+				return fmt.Errorf("argsort modified the source records")
+			}
 			for i, values := range buffers {
 				if op.Kind == "argsort" {
 					if !slices.Equal(outputs[i], ranks) {

@@ -30,6 +30,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [PLAN_RESOLVER, ["comparison", "benchmark", "benchmark_go"]],
   [PLAN_THRESHOLDS, ["rust", "benchmark", "benchmark_go", "docs"]],
   [/^go\/tessera\//, ["go", "benchmark_go"]],
+  [/^\.github\/workflows\/pr-benchmarks\.yml$/, ["benchmark", "benchmark_go"]],
   [/^(go\/|\.github\/actions\/go-test\/|\.github\/workflows\/go-ci\.yml$)/, ["go"]],
   [/^(bench\/go\/|conformance\/vectors\/benchmark-inputs\.json$)/, ["comparison"]],
   [/^conformance\/vectors\//, ["rust", "go"]],
@@ -37,7 +38,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|go-release|go-benchmarks|bench-diagnostics|main-benchmarks)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|go-release|bench-diagnostics|main-benchmarks)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.

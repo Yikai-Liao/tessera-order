@@ -17,13 +17,10 @@ const (
 	routeCached
 	routeIndices
 	routeRank
-	routeCut
-	routeSpans
 	routeScatter
 	routeSource
 	routeTransfer
 	routeBand
-	routeParallelEntry
 	routeParallelRoot
 	routeShards
 	routeParallelTies

@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/** Current single-backend check name. */
-export const BENCHMARK_CHECK = benchmarkCheck("rust");
-
 export function benchmarkCheck(language: "rust" | "go") {
   return `Benchmarks (${language})`;
 }

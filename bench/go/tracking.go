@@ -53,9 +53,7 @@ func track(input io.Reader, output io.Writer, verify bool) error {
 			return fmt.Errorf("%s: %s", req.ID, route)
 		}
 		if verify {
-			slot.restore(1)
-			slot.run()
-			if err := slot.check(); err != nil {
+			if err := verifyPrepared(slot); err != nil {
 				return err
 			}
 			continue

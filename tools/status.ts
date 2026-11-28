@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { parseCriterionId } from "../bench/catalog.ts";
-import { BENCHMARK_CHECK, benchmarkCheck, marker } from "../bench/continuous/marker.ts";
+import { benchmarkCheck, marker } from "../bench/continuous/marker.ts";
 import { indexSchema, parseRuns } from "../bench/tracking/result.ts";
 import { command } from "./process.ts";
 
@@ -137,6 +137,7 @@ export async function readStatus(
     | undefined;
   let resolved: RepositoryStatus["target"];
   let url: string;
+  let headCommitDate = "";
   if ("pr" in target) {
     pull = await api.get(`pulls/${target.pr}`);
     if (!pull) throw new Error("PR response is missing");
@@ -147,11 +148,14 @@ export async function readStatus(
     };
     url = pull.html_url;
   } else {
-    const commit = await api.get<{ sha: string; html_url: string }>(
-      `commits/${encodeURIComponent(target.ref)}`,
-    );
+    const commit = await api.get<{
+      sha: string;
+      html_url: string;
+      commit: { committer: { date: string } };
+    }>(`commits/${encodeURIComponent(target.ref)}`);
     resolved = { ref: target.ref, head: commit.sha, merge: null };
     url = commit.html_url;
+    headCommitDate = commit.commit.committer.date;
   }
   const heads = [...new Set([resolved.head, resolved.merge].filter((sha) => sha !== null))];
   const [checkPages, runPages, commentPages] = await Promise.all([
@@ -164,7 +168,6 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const check = candidates.find((candidate) => candidate.name === BENCHMARK_CHECK);
   const currentRuns = runPages
     .flat()
     .flatMap((page) => page.workflow_runs)
@@ -179,27 +182,21 @@ export async function readStatus(
       return { run, jobs: pages.flatMap((page) => page.jobs).filter(hasUnfinishedOrFailedResult) };
     }),
   );
-  const current = commentPages
-    .flat()
-    .filter(
-      (comment) =>
-        comment.user?.login === "github-actions[bot]" &&
-        comment.body.includes(marker("rust", resolved.head)),
-    )
-    .at(-1);
-  const comment = current ? { url: current.html_url, body: current.body } : null;
-  const goCheck = candidates.find((candidate) => candidate.name === benchmarkCheck("go"));
-  const goComment = commentPages
-    .flatMap((page) => page)
-    .filter(
+  const comments = commentPages.flat();
+  const feedback = (language: "rust" | "go") => ({
+    check: candidates.find((candidate) => candidate.name === benchmarkCheck(language)),
+    comment: comments.findLast(
       (entry) =>
         entry.user?.login === "github-actions[bot]" &&
-        entry.body.includes(marker("go", resolved.head)),
-    )
-    .at(-1);
+        entry.body.includes(marker(language, resolved.head)),
+    ),
+  });
+  const { check, comment: current } = feedback("rust");
+  const { check: goCheck, comment: goComment } = feedback("go");
+  const comment = current ? { url: current.html_url, body: current.body } : null;
   const tracking =
     !pull && resolved.ref === "main"
-      ? await readGoTracking(api, resolved.head, details)
+      ? await readGoTracking(api, resolved.head, headCommitDate, details)
       : undefined;
   return {
     repository: api.repo,
@@ -285,6 +282,7 @@ export async function readStatus(
 async function readGoTracking(
   api: Awaited<ReturnType<typeof repositoryGitHub>>,
   head: string,
+  headCommitDate: string,
   details: boolean,
 ) {
   const path = "go-tessera";
@@ -301,7 +299,9 @@ async function readGoTracking(
   );
   const headRuns = new Map<string, ReturnType<typeof parseRuns>[number]>();
   const latest = new Map(headRuns);
+  const firstMonth = new Date(headCommitDate).toISOString().slice(0, 7);
   for (const month of index.months.toReversed()) {
+    if (month < firstMonth) break;
     const monthRuns = parseRuns(
       await api.getRaw(`contents/${path}/${month}.jsonl?ref=benchmark-data`),
     );

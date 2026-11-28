@@ -56,18 +56,14 @@ export function continuousCommands(program: Command) {
         const plan = await loadPlan(options.plan);
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
-        if (options.language === "go") {
-          await runTask(out, Boolean(program.opts().verbose), () =>
-            prepareGo(root, baseline ?? "HEAD", out, {
-              ...plan,
-              implementations: ["go-tessera"],
-            }),
-          );
-        } else if (options.language === "rust") {
-          await runTask(out, Boolean(program.opts().verbose), () =>
-            compareLocal({ root, baseline: baseline ?? "HEAD", plan, out, prepareOnly: true }),
-          );
-        } else throw new Error("Unsupported benchmark language");
+        if (options.language !== "go" && options.language !== "rust")
+          throw new Error("Unsupported benchmark language");
+        const revision = baseline ?? "HEAD";
+        const prepare =
+          options.language === "go"
+            ? () => prepareGo(root, revision, out, { ...plan, implementations: ["go-tessera"] })
+            : () => compareLocal({ root, baseline: revision, plan, out, prepareOnly: true });
+        await runTask(out, Boolean(program.opts().verbose), async () => await prepare());
       },
     );
   continuous

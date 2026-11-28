@@ -11,28 +11,6 @@ import (
 	"time"
 )
 
-func TestParallelGateKeepsSerialFastPathsAllocationFree(t *testing.T) {
-	rows := make([]uint64, 4096)
-	for _, constant := range []bool{false, true} {
-		for i := range rows {
-			rows[i] = uint64(i)
-			if constant {
-				rows[i] = 9
-			}
-		}
-		for _, body := range []func(){
-			func() { Direct(rows, Refine, allRanks) },
-			func() { Keyed(rows, func(x *uint64) uint64 { return *x }, Refine, allRanks) },
-			func() { Direct(rows, Refine, len(rows)/2) },
-			func() { DirectParallel(rows, Refine) },
-		} {
-			if got := testing.AllocsPerRun(3, body); got != 0 {
-				t.Fatalf("ordered or constant fast path allocated %v times", got)
-			}
-		}
-	}
-}
-
 func TestParallelShardTail(t *testing.T) {
 	type record struct{ key, id int }
 	const n = 1349

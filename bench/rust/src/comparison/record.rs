@@ -444,40 +444,63 @@ mod identity_tests {
     fn benchmark_input_vectors() {
         // All generator branches, both sides of the sorted-tail boundary,
         // and records long enough to exercise run transitions.
-        let mut pins = Vec::new();
+        let lengths = [127, 4097];
+        let mut types = serde_json::Map::new();
         for ty in &catalog().types {
+            let mut distributions = serde_json::Map::new();
             for distribution in &catalog().distributions {
-                for len in [127, 4097] {
+                let digests = lengths.map(|len| {
                     let case = InputCase {
                         ty: ty.id.clone(),
                         distribution: distribution.id.clone(),
                         len,
                         operation: Operation::default(),
                     };
-                    pins.push(json!({
-                        "ty": case.ty, "distribution": case.distribution,
-                        "len": len, "seed": 1, "record_bytes": crate::plan::record_bytes(&case.ty),
-                        "fnv1a64": format!("{:016x}", input_digest(&case)),
-                    }));
-                }
+                    format!("{:016x}", input_digest(&case))
+                });
+                distributions.insert(distribution.id.clone(), json!(digests));
             }
+            types.insert(
+                ty.id.clone(),
+                json!({
+                    "record_bytes": crate::plan::record_bytes(&ty.id),
+                    "distributions": distributions,
+                }),
+            );
         }
-        let actual = json!({"schema": 1, "inputs": pins});
+        let actual = json!({"schema": 2, "seed": 1, "lengths": lengths, "types": types});
         if let Some(path) = std::env::var_os("TESSERA_WRITE_INPUT_VECTORS") {
-            // Keep one complete case per line so generator changes are reviewable.
+            // Keep one distribution's digests per line so generator changes are reviewable.
             use std::io::Write;
             let mut file = std::fs::File::create(path).unwrap();
-            writeln!(file, "{{\"schema\":1,\"inputs\":[").unwrap();
-            let pins = actual["inputs"].as_array().unwrap();
-            for (index, pin) in pins.iter().enumerate() {
+            writeln!(
+                file,
+                "{{\"schema\":2,\"seed\":1,\"lengths\":{},\"types\":{{",
+                actual["lengths"]
+            )
+            .unwrap();
+            let types = actual["types"].as_object().unwrap();
+            for (index, (ty, spec)) in types.iter().enumerate() {
                 writeln!(
                     file,
-                    "  {pin}{}",
-                    if index + 1 == pins.len() { "" } else { "," }
+                    "  {}:{{\"record_bytes\":{},\"distributions\":{{",
+                    json!(ty),
+                    spec["record_bytes"]
                 )
                 .unwrap();
+                let distributions = spec["distributions"].as_object().unwrap();
+                for (index, (distribution, digests)) in distributions.iter().enumerate() {
+                    let comma = if index + 1 == distributions.len() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    writeln!(file, "    {}:{digests}{comma}", json!(distribution)).unwrap();
+                }
+                let comma = if index + 1 == types.len() { "" } else { "," };
+                writeln!(file, "  }}}}{comma}").unwrap();
             }
-            writeln!(file, "]}}").unwrap();
+            writeln!(file, "}}}}").unwrap();
         }
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../conformance/vectors/benchmark-inputs.json");

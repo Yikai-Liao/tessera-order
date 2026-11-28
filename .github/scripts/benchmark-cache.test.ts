@@ -12,13 +12,14 @@ test("PR and main static tracking share alignment flags and cache while native s
       process.execPath,
       [
         "-e",
-        String.raw`const ci = Bun.YAML.parse(await Bun.file(".github/workflows/ci.yml").text());
+        String.raw`const pr = Bun.YAML.parse(await Bun.file(".github/workflows/pr-benchmarks.yml").text());
 const tracking = Bun.YAML.parse(await Bun.file(".github/workflows/main-benchmarks.yml").text());
 function configuration(job, native) {
   const resolve = value => typeof value !== "string" ? value : value.replace(
     /\$\{\{(.*?)\}\}/g,
-    (_, expression) => new Function("matrix", "github", "hashFiles", "return (" + expression + ")")(
-      { native }, { workspace: "/workspace" }, (...paths) => JSON.stringify(paths),
+    (_, expression) => new Function("matrix", "github", "inputs", "hashFiles", "format", "return (" + expression + ")")(
+      { native }, { workspace: "/workspace" }, { language: "rust" }, (...paths) => JSON.stringify(paths),
+      (template, ...values) => template.replace(/\{(\d+)\}/g, (_, i) => values[i]),
     ),
   );
   const cache = job.steps.find(step => step.uses === "Swatinem/rust-cache@v2").with;
@@ -32,7 +33,7 @@ function configuration(job, native) {
   };
 }
 console.log(JSON.stringify([
-  configuration(ci.jobs.prepare, false),
+  configuration(pr.jobs.prepare, false),
   configuration(tracking.jobs.build, false),
   configuration(tracking.jobs.build, true),
 ]));`,
@@ -54,7 +55,10 @@ console.log(JSON.stringify([
   assert.equal(pr.environment.CARGO_PROFILE_BENCH_DEBUG, "0");
   assert.equal(pr.environment.CARGO_BUILD_TARGET, "x86_64-unknown-linux-gnu");
   assert.match(pr.environment.RUSTFLAGS, /target-feature=\+crt-static/);
-  assert.equal(pr.saveIf, "${{ env.PUBLISH == 'true' && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}");
+  assert.equal(
+    pr.saveIf,
+    "${{ inputs.language == 'rust' && inputs.publish && vars.MAIN_BENCHMARKS_ENABLED != 'true' }}",
+  );
   assert.ok(
     main.saveIf === null || main.saveIf === true || main.saveIf === "true",
     `main static tracking must allow cache saves, got ${JSON.stringify(main.saveIf)}`,

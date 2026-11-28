@@ -32,7 +32,7 @@ func topWindow(remaining Uint128, width uint) (Digit, Uint128) {
 
 // One or two flat passes minimize table slots. Longer plans inspect actual
 // children instead of predicting their work.
-func planDigits(varying Uint128, width uint, len int, simdMSD bool) tilePlan {
+func planDigits(varying Uint128, width uint) tilePlan {
 	high, window := topWindow(varying, width)
 	remaining := varying.andNot(window)
 	if remaining == (Uint128{}) {
@@ -54,10 +54,6 @@ func planDigits(varying Uint128, width uint, len int, simdMSD bool) tilePlan {
 				slots = cost
 			}
 		}
-	}
-	msdSlots := 1 << high.Width
-	if simdMSD && msdSlots >= len && slots > msdSlots {
-		return tilePlan{digits: [2]Digit{high}, passes: 1, msd: true}
 	}
 	return tilePlan{digits: digits, passes: 2}
 }

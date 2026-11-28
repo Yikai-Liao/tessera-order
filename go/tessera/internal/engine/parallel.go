@@ -40,16 +40,8 @@ func useSerial(length, recordLen int, op Serial, workers int) bool {
 		minLen = 4 * tileCapacity[int](tileBytes)
 		recordLen = max(recordLen, recordBytes[int]())
 	}
-	fallback := workers == 1 || length < minLen || recordLen == 0 ||
+	return workers == 1 || length < minLen || recordLen == 0 ||
 		length < ceilDiv(minParallelBytes, recordLen)
-	if observeRoutes {
-		active := workers
-		if fallback {
-			active = 1
-		}
-		emitRoute(routeEvent{stage: routeParallelEntry, a: int(op), b: active})
-	}
-	return fallback
 }
 
 // Bind the same codec widths in a separate entry to keep goroutine escapes

@@ -279,15 +279,32 @@ func TestOrderedAndConstantInPlaceAllocateNothing(t *testing.T) {
 				}
 				keyed[i].key = direct[i]
 			}
-			for _, op := range []struct {
+			type operation struct {
 				name string
 				run  func()
-			}{
+			}
+			ops := []operation{
 				{"Sort", func() { Sort(direct) }},
 				{"SortByKey", func() { SortByKey(keyed, rowKey) }},
 				{"SelectNth", func() { SelectNth(direct, n/2) }},
 				{"SelectNthByKey", func() { SelectNthByKey(keyed, n/2, rowKey) }},
-			} {
+			}
+			if n == 4096 {
+				compact := make([]uint64, n)
+				for i := range compact {
+					compact[i] = uint64(i)
+					if constant {
+						compact[i] = 9
+					}
+				}
+				ops = append(ops,
+					operation{"Sort compact", func() { Sort(compact) }},
+					operation{"SortByKey compact", func() { SortByKey(compact, func(x *uint64) uint64 { return *x }) }},
+					operation{"SelectNth compact", func() { SelectNth(compact, n/2) }},
+					operation{"ParSort compact", func() { ParSort(compact) }},
+				)
+			}
+			for _, op := range ops {
 				if got := testing.AllocsPerRun(20, op.run); got != 0 {
 					t.Fatalf("%s len=%d constant=%v allocated %g", op.name, n, constant, got)
 				}
@@ -299,41 +316,8 @@ func TestOrderedAndConstantInPlaceAllocateNothing(t *testing.T) {
 func TestChangingKeysPreserveOwnersOnReturn(t *testing.T) {
 	for _, n := range []int{21, 709, 9102} {
 		source := testRows(n, "random")
-		const limitMessage = "unbounded key evaluation"
 		for operation := range 3 {
-			rows := slices.Clone(source)
-			calls := 0
-			key := func(row *testRow) uint64 {
-				calls++
-				if calls > 200*n {
-					panic(limitMessage)
-				}
-				return row.key ^ uint64(calls)*0x9e3779b97f4a7c15
-			}
-			var indices []int
-			p := recoverPanic(func() {
-				switch operation {
-				case 0:
-					SortByKey(rows, key)
-				case 1:
-					SelectNthByKey(rows, n/3, key)
-				default:
-					indices = ArgsortByKey(rows, key)
-				}
-			})
-			if p != nil {
-				if operation != 2 || p != "tessera: inconsistent radix partition" {
-					t.Fatalf("n=%d op=%d unexpected panic: %v", n, operation, p)
-				}
-				continue
-			}
-			checkRecordOwners(t, rows, source)
-			if operation == 2 {
-				if !slices.Equal(rows, source) {
-					t.Fatal("argsort moved records")
-				}
-				checkPermutation(t, indices, n)
-			}
+			checkChangingKeys(t, source, operation, n/3)
 		}
 	}
 }

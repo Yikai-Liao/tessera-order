@@ -103,6 +103,16 @@ export async function listGo(binary: string, requests: GoRequests) {
   return supported.sort();
 }
 
+export async function assertGoInventory(
+  binary: string,
+  requests: GoRequests,
+  expected: string[],
+  message: string,
+) {
+  if (JSON.stringify(await listGo(binary, requests)) !== JSON.stringify(expected))
+    throw new Error(message);
+}
+
 export async function prepareGo(root: string, baseline: string, out: string, plan: Plan) {
   const head = await resolveCommit(root, "HEAD");
   baseline = await resolveCommit(root, baseline);
@@ -149,8 +159,12 @@ export async function prepareGo(root: string, baseline: string, out: string, pla
       await cp(binary, retained);
       binaries[role] = await fileHash(retained);
       builds[role] = await goBuildInfo(retained);
-      if (JSON.stringify(await listGo(retained, requests)) !== JSON.stringify(allCases))
-        throw new Error("Go Tessera inventory does not cover the prepared plan");
+      await assertGoInventory(
+        retained,
+        requests,
+        allCases,
+        "Go Tessera inventory does not cover the prepared plan",
+      );
       // Compare each immutable input in the two worker builds without sampling.
       digest[role] = [];
       await command(retained, [], {

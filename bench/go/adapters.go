@@ -168,17 +168,7 @@ func chooseCall[T comparable, K any](c inputCase, req request, r records[T, K]) 
 		}, route + " on categories plus offsets"
 	case "sort", "select_nth":
 		if req.Implementation == "go-radsort" && (c.Type == "u32" || c.Type == "u64") {
-			run := radixUnsigned[T](c.Type, parallel)
-			switch {
-			case c.Type == "u32" && parallel:
-				route = "radsort.ParallelUint32s"
-			case c.Type == "u32":
-				route = "radsort.Uint32s"
-			case parallel:
-				route = "radsort.ParallelUint64s"
-			default:
-				route = "radsort.Uint64s"
-			}
+			run, route := radixUnsigned[T](c.Type, parallel)
 			if op.Kind == "select_nth" {
 				route += " (full sort)"
 			}
@@ -207,16 +197,16 @@ func unsignedSort[T any, U uint32 | uint64](name string) func([]T) {
 	return func(v []T) { pdqsort.Slice(any(v).([]U)) }
 }
 
-func radixUnsigned[T any](ty string, parallel bool) func([]T) {
+func radixUnsigned[T any](ty string, parallel bool) (func([]T), string) {
 	switch {
 	case ty == "u32" && parallel:
-		return func(v []T) { radsort.ParallelUint32s(any(v).([]uint32)) }
+		return func(v []T) { radsort.ParallelUint32s(any(v).([]uint32)) }, "radsort.ParallelUint32s"
 	case ty == "u32":
-		return func(v []T) { radsort.Uint32s(any(v).([]uint32)) }
+		return func(v []T) { radsort.Uint32s(any(v).([]uint32)) }, "radsort.Uint32s"
 	case parallel:
-		return func(v []T) { radsort.ParallelUint64s(any(v).([]uint64)) }
+		return func(v []T) { radsort.ParallelUint64s(any(v).([]uint64)) }, "radsort.ParallelUint64s"
 	default:
-		return func(v []T) { radsort.Uint64s(any(v).([]uint64)) }
+		return func(v []T) { radsort.Uint64s(any(v).([]uint64)) }, "radsort.Uint64s"
 	}
 }
 

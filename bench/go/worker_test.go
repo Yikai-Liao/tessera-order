@@ -20,26 +20,33 @@ func TestInputVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fixture struct {
-		Schema int
-		Inputs []struct {
-			inputCase
-			Seed        int
-			RecordBytes int    `json:"record_bytes"`
-			Hash        string `json:"fnv1a64"`
+		Schema  int
+		Seed    int
+		Lengths []int
+		Types   map[string]struct {
+			RecordBytes   int `json:"record_bytes"`
+			Distributions map[string][]string
 		}
 	}
-	if err := json.Unmarshal(data, &fixture); err != nil || fixture.Schema != 1 || len(fixture.Inputs) == 0 {
+	if err := json.Unmarshal(data, &fixture); err != nil || fixture.Schema != 2 || fixture.Seed != 1 ||
+		len(fixture.Lengths) == 0 || len(fixture.Types) == 0 {
 		t.Fatalf("invalid input vectors: %v", err)
 	}
-	for _, v := range fixture.Inputs {
-		c := v.inputCase
-		c.Operation.Kind = "sort"
-		p, route := prepare(c, request{Implementation: "go-tessera", Threads: 1, RecordBytes: v.RecordBytes}, false)
-		if v.Seed != 1 || p.digest == nil {
-			t.Fatalf("unsupported fixture %s/%s/%d: %s", c.Type, c.Distribution, c.Len, route)
-		}
-		if actual := p.digest(); actual != v.Hash {
-			t.Errorf("%s/%s/%d: got %s, expected %s", c.Type, c.Distribution, c.Len, actual, v.Hash)
+	for ty, spec := range fixture.Types {
+		for distribution, hashes := range spec.Distributions {
+			if len(hashes) != len(fixture.Lengths) {
+				t.Fatalf("%s/%s: expected a digest per length", ty, distribution)
+			}
+			for i, length := range fixture.Lengths {
+				c := inputCase{Type: ty, Distribution: distribution, Len: length, Operation: operation{Kind: "sort"}}
+				p, route := prepare(c, request{Implementation: "go-tessera", Threads: 1, RecordBytes: spec.RecordBytes}, false)
+				if p.digest == nil {
+					t.Fatalf("unsupported fixture %s/%s/%d: %s", ty, distribution, length, route)
+				}
+				if actual := p.digest(); actual != hashes[i] {
+					t.Errorf("%s/%s/%d: got %s, expected %s", ty, distribution, length, actual, hashes[i])
+				}
+			}
 		}
 	}
 }
@@ -109,6 +116,33 @@ func TestVerifyGates(t *testing.T) {
 				t.Fatalf("got %v, expected %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestArgsortVerifierRejectsSourceMutation(t *testing.T) {
+	for _, mutate := range []bool{false, true} {
+		values := []float64{math.Float64frombits(0x7ff8000000000001), math.Copysign(0, -1), 0}
+		input := inputCase{Type: "f64", Len: len(values), Operation: operation{Kind: "argsort"}}
+		slot, route := assemble(input, request{Implementation: "go-tessera", RecordBytes: 8}, records[float64, float64]{
+			values: values,
+			order:  func(v float64) word { return word{Lo: floatOrder(math.Float64bits(v))} },
+			direct: directCalls[float64]{argsort: func(source []float64) []int {
+				if mutate {
+					source[1] = 0
+				}
+				return []int{1, 2, 0}
+			}},
+		})
+		if slot.run == nil {
+			t.Fatal(route)
+		}
+		err := verifyPrepared(slot)
+		if mutate && (err == nil || err.Error() != "argsort modified the source records") {
+			t.Fatalf("correct indices with a modified source returned %v", err)
+		}
+		if !mutate && err != nil {
+			t.Fatalf("unchanged source returned %v", err)
+		}
 	}
 }
 

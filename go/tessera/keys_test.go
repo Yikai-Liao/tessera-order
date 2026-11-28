@@ -10,29 +10,16 @@ import (
 	"github.com/Yikai-Liao/tessera-order/go/tessera/internal/engine"
 )
 
-// These fixtures exercise entry-time binding with the planned operation
-// signatures while only the key model is available.
-func directCodec[K any](_ []K) engine.Codec[K] {
-	return engine.BindKey[K]()
-}
-
-func keyedEncoding[T, K any](records []T, key func(*T) K) Uint128 {
-	codec := engine.BindKey[K]()
-	return codec.Encode(key(&records[0]))
-}
-
-func TestKeyAPIFixture(t *testing.T) {
-	type row struct {
-		score float64
-		id    uint32
+func TestComposedKeyEncodings(t *testing.T) {
+	reverse := engine.BindKey[ReverseKey[uint16]]()
+	if got := reverse.Encode(Reverse(uint16(1))); got != (Uint128{Lo: 0xfffe}) {
+		t.Fatalf("encoded Reverse(1) as %#v", got)
 	}
-	records := []row{{score: 1.0, id: 23}}
-	got := keyedEncoding(records, func(record *row) PairKey[ReverseKey[float64], uint32] {
-		return Pair(Reverse(record.score), record.id)
-	})
+	codec := engine.BindKey[PairKey[ReverseKey[float64], uint32]]()
+	got := codec.Encode(Pair(Reverse(1.0), uint32(23)))
 	want := Uint128{Hi: 0x400f_ffff, Lo: 0xffff_ffff_0000_0017}
 	if got != want {
-		t.Fatalf("keyed encoding = %#v, want %#v", got, want)
+		t.Fatalf("paired encoding = %#v, want %#v", got, want)
 	}
 }
 

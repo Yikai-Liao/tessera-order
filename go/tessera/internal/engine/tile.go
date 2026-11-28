@@ -68,7 +68,7 @@ func sortTile[T any, V encoded](scratch *tileScratch[T], records []T, varying Ui
 		insertionLoop(records, maxInt, e)
 		return
 	}
-	plan := planDigits(varying, tileDigitBits(len(records), recordBytes[T]()), len(records), canFinishMSD(e))
+	plan := planDigits(varying, tileDigitBits(len(records), recordBytes[T]()))
 	digit := plan.digits[0]
 	if observeRoutes {
 		for i, digit := range plan.digits[:plan.passes] {
@@ -80,7 +80,7 @@ func sortTile[T any, V encoded](scratch *tileScratch[T], records []T, varying Ui
 	}
 	var counts [maxDigitBuckets]uint16
 	largest := int(countingPasses(scratch, records, plan.digits[:plan.passes], &counts, e))
-	if !plan.msd || largest <= 1 || finishMSD(records, largest, e) {
+	if !plan.msd || largest <= 1 {
 		return
 	}
 	// Whole-tile insertion has the same inversion count as separately
@@ -158,13 +158,4 @@ func prefixSum(counts []uint16) uint16 {
 		offset += count
 	}
 	return largest
-}
-
-// The portable package lacks the interleave and slide operations of the MSD network.
-func canFinishMSD[T any, V encoded](_ *extractor[T, V]) bool {
-	return false
-}
-
-func finishMSD[T any, V encoded](_ []T, _ int, _ *extractor[T, V]) bool {
-	return false
 }

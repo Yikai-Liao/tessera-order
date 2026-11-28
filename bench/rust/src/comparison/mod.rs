@@ -147,10 +147,7 @@ impl Options {
         if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
-        let available = variant::list_variants()
-            .into_iter()
-            .chain(variant::go_variants().filter(|_| options.go_worker.is_some()))
-            .collect::<Vec<_>>();
+        let available: Vec<_> = options.available_variants().collect();
         for id in &options.plan.implementations {
             if BUILD == "default"
                 && options.plan_path.is_some()
@@ -257,11 +254,15 @@ impl Options {
         )
     }
 
-    /// Retains the selected implementations available in this build configuration.
-    fn variants(&self) -> Vec<variant::Variant> {
+    fn available_variants(&self) -> impl Iterator<Item = Variant> {
         variant::list_variants()
             .into_iter()
             .chain(variant::go_variants().filter(|_| self.go_worker.is_some()))
+    }
+
+    /// Retains the selected implementations available in this build configuration.
+    fn variants(&self) -> Vec<variant::Variant> {
+        self.available_variants()
             .filter(|entry| self.plan.implementations.iter().any(|id| id == entry.name))
             .collect()
     }

@@ -36,7 +36,13 @@ const error = shallowRef("");
 let scrolledToHash = false;
 function scrollToFragment() {
   if (!location.hash || scrolledToHash) return;
-  const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  let id: string;
+  try {
+    id = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return;
+  }
+  const target = document.getElementById(id);
   if (!target) return;
   scrolledToHash = true;
   // The router's own offset clears the navbar and, at medium widths, the outline bar below it.
@@ -86,15 +92,17 @@ onMounted(async () => {
   }
   try {
     const next = comparisonSchema.parse(await response.json());
-    for (const fig of [
-      ...(next.overview ? [next.overview] : []),
-      ...next.operations.flatMap((op) => op.figures),
-    ]) {
+    if (data.value && JSON.stringify(next) === JSON.stringify(data.value)) {
+      error.value = "";
+      return;
+    }
+    // Validate only the charts this view renders so unchanged or non-chart views do zero extra SVG work.
+    for (const fig of comparisonSections(next, props.view).flatMap((section) => section.figures)) {
       if (fig.kind === "curves") renderCurves({ ...(fig.chart as CurveChart), id: "check" });
       else renderRows({ ...(fig.chart as RowChart), id: "check" });
     }
     error.value = "";
-    if (!data.value || JSON.stringify(next) !== JSON.stringify(data.value)) data.value = next;
+    data.value = next;
   } catch (cause) {
     console.error("Implementation comparison:", cause);
     if (!data.value)

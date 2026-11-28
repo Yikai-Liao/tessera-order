@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { bucketColor } from "../palette";
 import { blockName, type Frame, type Phase, simulate } from "../sim/blockPartition";
 import { type Engine, instantiate } from "../sim/engine";
@@ -12,15 +12,20 @@ const BUCKETS = 1 << RADIX;
 const RANGE = ["0–9", "10–19", "20–29", "30–39"] as const;
 const DIVISOR = 10;
 
+const figureEl = useTemplateRef<HTMLElement>("figureEl");
 const engine = shallowRef<Engine | null>(null);
 const failed = ref(false);
 onMounted(async () => {
+  figureEl.value?.addEventListener("keydown", onFigureKeydown);
   try {
     engine.value = await instantiate(await (await fetch(wasmUrl)).arrayBuffer());
   } catch (error) {
     failed.value = true;
     console.error(error);
   }
+});
+onUnmounted(() => {
+  figureEl.value?.removeEventListener("keydown", onFigureKeydown);
 });
 
 const blockSize = ref(3);
@@ -186,9 +191,43 @@ const tailCells = computed(() => {
   return frame.value.input.slice(result.value.fullBlocks * blockSize.value);
 });
 
-const sliderBounds = computed(() => {
-  const b = phaseBounds.value[activePhase.value];
-  return { min: b.first, max: b.last };
+function step(delta: number) {
+  if (!frames.value.length) return;
+  frameIndex.value = Math.max(0, Math.min(frames.value.length - 1, frameIndex.value + delta));
+}
+
+function onFigureKeydown(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === "SELECT" || target?.tagName === "INPUT") return;
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    step(-1);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    step(1);
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    frameIndex.value = 0;
+  } else if (event.key === "End" && frames.value.length) {
+    event.preventDefault();
+    frameIndex.value = frames.value.length - 1;
+  }
+}
+
+const stepLabel = computed(() => {
+  const f = frame.value;
+  if (!f || !result.value) return "";
+  if (f.phase === "setup") return `Setup · ${BUCKETS} head blocks + ${BUCKETS} reserve blocks`;
+  if (f.phase === "scatter")
+    return `Scatter · read ${readIndex.value} / ${length.value} records (${readBlocks.value} input blocks freed)`;
+  if (f.phase === "ledger") {
+    const occupied = result.value.bands.filter((band) => band.len > 0).length;
+    return `Ledger · ${occupied} bucket bands mapped to final ranges`;
+  }
+  if (f.phase === "done") return `Complete · all ${length.value} records in stable bucket bands`;
+  const remaining = f.chains.reduce((sum, chain) => sum + chain.length, 0);
+  return `Write back · ${remaining} chain ${remaining === 1 ? "source" : "sources"} remaining`;
 });
 
 function blockDimmed(physical: number, bucket: number | null) {
@@ -210,7 +249,7 @@ function jumpToSource(sourceId?: number) {
 </script>
 
 <template>
-  <figure class="tsr-figure bp-root">
+  <figure ref="figureEl" class="tsr-figure bp-root">
     <p v-if="failed" class="tsr-note">The WebAssembly engine replay could not be loaded.</p>
     <p v-else-if="!result || !frame" class="tsr-note">Loading WebAssembly engine…</p>
     <template v-else>
@@ -246,21 +285,31 @@ function jumpToSource(sourceId?: number) {
         </div>
       </div>
 
-      <div v-if="sliderBounds.max > sliderBounds.min" class="bp-scrub">
-        <span class="bp-scrub-label">
-          {{
-            activePhase === 'scatter'
-              ? `Read frontier: ${readIndex} / ${length} records (${readBlocks} input blocks freed)`
-              : `Write-back progress: step ${frameIndex - sliderBounds.min + 1} / ${sliderBounds.max - sliderBounds.min + 1}`
-          }}
-        </span>
-        <input
-          type="range"
-          :min="sliderBounds.min"
-          :max="sliderBounds.max"
-          v-model.number="frameIndex"
-          :aria-label="activePhase === 'scatter' ? 'Scatter progress' : 'Write-back progress'"
-        />
+      <p class="tsr-caption bp-lead-caption" aria-live="polite">{{ frame.caption }}</p>
+
+      <div class="bp-stepper">
+        <div class="bp-step-btns">
+          <button
+            type="button"
+            class="bp-step-btn"
+            :aria-disabled="frameIndex <= 0"
+            aria-label="Previous step"
+            @click="step(-1)"
+          >
+            ← Prev
+          </button>
+          <button
+            type="button"
+            class="bp-step-btn"
+            :aria-disabled="frameIndex >= frames.length - 1"
+            aria-label="Next step"
+            @click="step(1)"
+          >
+            Next →
+          </button>
+        </div>
+        <span class="bp-scrub-label">{{ stepLabel }}</span>
+        <span class="bp-step-hint">← / → keys step across phases</span>
       </div>
 
       <!-- Physical memory: Input array + Small scratch blocks -->
@@ -437,8 +486,6 @@ function jumpToSource(sourceId?: number) {
           </div>
         </div>
       </div>
-
-      <p class="tsr-caption" aria-live="polite">{{ frame.caption }}</p>
     </template>
   </figure>
 </template>
@@ -470,11 +517,15 @@ function jumpToSource(sourceId?: number) {
   font-size: 12.5px;
   cursor: pointer;
 }
-.bp-scrub {
+.bp-lead-caption {
+  margin: 0 0 10px;
+  min-height: 2.6em;
+}
+.bp-stepper {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
+  gap: 8px 12px;
   margin-bottom: 14px;
   padding: 8px 12px;
   border: 1px solid var(--tsr-line);
@@ -482,13 +533,36 @@ function jumpToSource(sourceId?: number) {
   background: var(--vp-c-bg);
   font-size: 12.5px;
 }
+.bp-step-btns {
+  display: inline-flex;
+  gap: 6px;
+}
+.bp-step-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 6px;
+  background: var(--tsr-panel);
+  color: var(--vp-c-text-1);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bp-step-btn:hover:not([aria-disabled="true"]) {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+.bp-step-btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
 .bp-scrub-label {
-  color: var(--vp-c-text-2);
+  color: var(--vp-c-text-1);
   font-family: var(--vp-font-family-mono);
 }
-.bp-scrub input {
-  flex: 1 1 200px;
-  accent-color: var(--vp-c-brand-1);
+.bp-step-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--vp-c-text-3);
 }
 .bp-section-label {
   display: flex;

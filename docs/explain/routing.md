@@ -9,7 +9,7 @@
 | All keys equal | Varying-bit scan (`varying == 0`) | ~1 read pass, zero allocation |
 | Nearly sorted | Budgeted insertion | Linear in $n$ plus inversions |
 | Few misplaced keys or one dominant key | Sparse source order | Sorts only exceptions; moves each run once |
-| ≤8 varying bits (direct keys) | Counted window | 1 count pass + 1 fill, zero moves |
+| ≤8-bit varying span (direct keys) | Counted window | 1 count pass + 1 fill, zero moves |
 | One frequent key (≥25% of sample) | Equality partition | 1 pass; equal band is finished |
 | Already grouped by top varying bit | Top-bit split (with optional rotation) | 1 scan, zero partition pass |
 | Everything else | Top-digit [block partition](block-partition.md), then [tiles](tiles.md) | 1 streaming pass per level, then L2 tiles |
@@ -39,7 +39,7 @@ When almost every record is already in order (a few scattered inversions) or alm
 
 - **Dominant key:** when nearly all sampled keys equal the middle record's key, every other record becomes an exception while the dominant key's records stay in input order between the smaller and larger exceptions.
 - **Few inversions (full sort only):** scan left to right; whenever a key drops below the previous kept key, pull both records into the exception list. Removing both handles the ambiguity of which one was misplaced while removing at most twice the minimum needed.
-- **Bounded fallback:** exceptions are capped at $O(\sqrt{n})$ and every key is scanned before any record moves, so exceeding the cap falls back cleanly to normal partitioning with nothing to undo. Selection skips the inversion form because one radix partition already discards ~99% of buckets ([7. Beyond sorting](operations.md#select-one-rank)).
+- **Bounded fallback:** exceptions are capped at $O(\sqrt{n})$ and every key is scanned before any record moves, so exceeding the cap falls back cleanly to normal partitioning with nothing to undo. Selection skips the inversion form because one radix partition already discards every bucket that does not contain the target rank ([7. Beyond sorting](operations.md#select-one-rank)).
 
 ## Nodes and tiles
 
@@ -50,7 +50,7 @@ Everything that survives the shortcuts is handled recursively by size:
 
 ### Counted window
 
-When all varying bits span at most 8 bits and records are their own keys (`sort`), equal keys are bit-identical. Tessera counts each value in the window and writes each run directly from its count and the shared constant bits — zero record movement. Keyed records (`sort_by_key`) carry payloads, so they take one [block partition](block-partition.md) over the window instead.
+When the span from the lowest to the highest varying bit is at most 8 bits and records are their own keys (`sort`), equal keys are bit-identical. (Keys varying only at bits 0 and 20 span 21 positions, so they do not qualify for this single-window shortcut.) Tessera counts each value in the window and writes each run directly from its count and the shared constant bits—zero record movement. Keyed records (`sort_by_key`) carry payloads, so they take one [block partition](block-partition.md) over the window instead.
 
 ### Repeated key
 

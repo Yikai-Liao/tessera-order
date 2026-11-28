@@ -36,7 +36,7 @@ If a key closure unwinds, Tessera restores every original record into the input 
 | **Insertion pass** | `Hole`'s destructor writes the lifted moving record back into the sole vacated slot. |
 | **Parallel completion callback** | Rayon jobs join first; the parent completion guard finishes every unpublished band without running callbacks and never touches bands already lent to callbacks. |
 
-Every build requires `std`, so unwinding recovery is always active; there is no abort-only mode.
+Recovery runs through `Drop` guards whenever a panic unwinds, preserving every record as promised by [ordering semantics](../../conformance/semantics.md#panics-and-unwinding). In applications compiled with `panic = "abort"`, the process terminates immediately without unwinding or running destructors.
 
 ## Where this is tested
 

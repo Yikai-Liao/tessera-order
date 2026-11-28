@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bucketColor, recordLabel } from "../palette";
+import { blockPartitionMemory, formatBytesBinary, TILE_BYTES } from "../sim/blockSize";
 import { comparisonInput } from "../sim/comparisonInput";
 import {
   blockLsd,
@@ -20,18 +21,23 @@ interface Lane {
   stages: Stage[];
 }
 
+const modeled10M = blockPartitionMemory(10_000_000, 256, 8);
+const lsdLabel = formatBytesBinary(modeled10M.lsdBytes);
+const partitionLabel = formatBytesBinary(modeled10M.totalBytes);
+const tileLabel = formatBytesBinary(TILE_BYTES);
+
 const lanes = computed<Lane[]>(() => [
   {
     name: "LSD radix sort",
     stable: true,
-    ram10M: "76 MiB (O(n))",
+    ram10M: `${lsdLabel} (O(n))`,
     order: "low → high",
     stages: lsd(comparisonInput),
   },
   {
     name: "Block LSD",
     stable: true,
-    ram10M: "5.9 MiB (O(√n))",
+    ram10M: "O(√n) blocks",
     order: "low → high",
     stages: blockLsd(comparisonInput),
   },
@@ -45,7 +51,7 @@ const lanes = computed<Lane[]>(() => [
   {
     name: "Tessera",
     stable: true,
-    ram10M: "5.9 MiB (O(√n))",
+    ram10M: `~${partitionLabel} partition + ${tileLabel} tile`,
     order: "high split → cache tiles",
     stages: tessera(comparisonInput),
   },
@@ -127,7 +133,8 @@ function groupStarts(s: Stage): Set<number> {
     <p class="tsr-caption">
       Small numbers show each record's original input position (<code>0</code>…<code>11</code>). In-place MSD's swap
       cycles flip equal keys out of input order (outlined in red); Tessera matches LSD's exact stable order while
-      cutting 10M-record extra memory from 76 MiB to 5.9 MiB.
+      cutting modeled 10M-record 8-byte extra memory from {{ lsdLabel }} to ~{{ partitionLabel }} of partition scratch
+      plus a {{ tileLabel }} tile buffer.
     </p>
   </figure>
 </template>

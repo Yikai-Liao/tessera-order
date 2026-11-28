@@ -12,9 +12,9 @@ A radix sort never compares two keys. Instead it reads one **digit** (a fixed wi
 
 <CountingPassDemo />
 
-Reading the input left to right fills every bucket in input order, so records with the same digit never cross each other — the pass is **stable**. That stability is what lets multi-digit radix sort work.
+Take the twelve keys `[31, 12, 7, 25, 14, 38, 3, 19, 22, 11, 30, 16]` grouped by their tens digit (`0–9`, `10–19`, `20–29`, `30–39`). Counting finds 2, 5, 2, and 3 records per bucket, so prefix sums reserve output ranges `0–1`, `2–6`, `7–8`, and `9–11`. Reading the input left to right fills every bucket in input order, so equal digits never cross each other—the pass is **stable**, which is what lets multi-digit radix sort work.
 
-Notice the catch when you hover any record above: its destination slot in the output usually still holds an unread record in the input. That is why a textbook counting pass needs a separate $n$-record output buffer. Tessera uses this exact counting pass (`counting_pass` in [`tile.rs`](../../rust/tessera-order/src/engine/tile.rs)) only inside small cache-sized [tiles](tiles.md), where the buffer is 64 KiB instead of 76 MiB.
+Notice why an in-place scatter breaks: moving key `31` from slot 0 to output slot 9 would overwrite unread key `11`, and moving key `12` from slot 1 forward to output slot 2 would overwrite unread key `7`. Even though a backward move (such as key `7` from slot 2 to slot 0) writes into a slot already read, forward moves in the same pass collide with unread input, so a textbook counting pass needs a separate $n$-record output buffer. Tessera runs this exact counting pass only inside small cache-sized [tiles](tiles.md), where the buffer is 64 KiB instead of 76 MiB (see the [engine reference](../design/engine.md) for the code map).
 
 ## Four ways to sort multiple digits
 
@@ -36,13 +36,13 @@ A multi-digit key (such as a 32-bit integer split into four 8-bit bytes) can be 
 | **Digit order** | Low → high | High → low | Low → high | High split, then cache tiles |
 | **Adapts to data** | No | Small buckets only | No | Probes order, drops constant bits, isolates ties, picks tile leaf |
 
-For a top-digit split into $R = 256$ buckets on a 64-bit machine (derived in [choosing the block size](block-partition.md#choosing-the-block-size)), the difference grows dramatically with input size:
+For a modeled serial top-digit split into $R = 256$ buckets on a 64-bit target (derived in [choosing the block size](block-partition.md#choosing-the-block-size), before the separate tile buffer), the gap grows rapidly with input size:
 
-| Records ($n$) | 8-byte records: Tessera | 8-byte records: LSD buffer | 16-byte records: Tessera | 16-byte records: LSD buffer |
+| Records ($n$) | 8-byte records: Tessera partition | 8-byte records: LSD buffer | 16-byte records: Tessera partition | 16-byte records: LSD buffer |
 |---:|---:|---:|---:|---:|
-| $10^6$ | 1.9 MiB | 7.6 MiB | 2.7 MiB | 15 MiB |
-| $10^7$ | 5.9 MiB | 76 MiB | 8.4 MiB | 153 MiB |
-| $10^8$ | 19 MiB | 763 MiB | 26 MiB | 1.5 GiB |
-| $10^9$ | 59 MiB | 7.5 GiB | 84 MiB | 15 GiB |
+| $10^6$ | 1.1 MiB | 7.6 MiB | 1.6 MiB | 15 MiB |
+| $10^7$ | 3.5 MiB | 76 MiB | 4.9 MiB | 153 MiB |
+| $10^8$ | 11 MiB | 763 MiB | 16 MiB | 1.5 GiB |
+| $10^9$ | 35 MiB | 7.5 GiB | 49 MiB | 15 GiB |
 
 Tile scratch (at most 64 KiB of records plus cached bucket IDs) sits on top of these numbers; see [memory](index.md#memory). Next: [2. Keys as unsigned integers](keys.md) shows how signed integers, floats, tuples, and `Reverse` become radix keys and how constant bits disappear for free.

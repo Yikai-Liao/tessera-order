@@ -22,7 +22,13 @@ const tileLeaf = computed(() =>
   chooseTileLeaf(RECORDS, varying.value, width.value, BITS, 4, simdMsd.value),
 );
 const tileLeafLabel = computed(
-  () => ({ done: "done (all equal)", insertion: "insertion sort", msd: "1-pass MSD", lsd: "flat LSD" })[tileLeaf.value],
+  () =>
+    ({
+      done: "done (all equal)",
+      insertion: "insertion sort",
+      msd: "Tile MSD (first split)",
+      lsd: "flat LSD",
+    })[tileLeaf.value],
 );
 const plan = computed(() => planDigits(varying.value, width.value, BITS, RECORDS, simdMsd.value));
 const fixed = computed<Digit[]>(() => {
@@ -124,7 +130,15 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
             font-weight="600"
             style="fill: var(--tsr-ink)"
           >
-            {{ d.width > 1 ? `pass ${row.digits.length - i} · ${d.width}b` : row.digits.length - i }}
+            {{
+              row.name === 'Tessera' && tileLeaf === 'msd'
+                ? d.width > 1
+                  ? `split 1 · ${d.width}b`
+                  : '1'
+                : d.width > 1
+                  ? `pass ${row.digits.length - i} · ${d.width}b`
+                  : row.digits.length - i
+            }}
           </text>
         </g>
       </template>
@@ -133,8 +147,11 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
     <div class="dp-summary">
       <div><span>Selected leaf (8,192 u32)</span><strong>{{ tileLeafLabel }}</strong></div>
       <div>
-        <span>Tessera plan</span>
-        <strong>{{ [...plan].reverse().map((d) => `${d.width}b`).join(' + ') || 'none' }} ({{ slots(plan).toLocaleString('en-US') }} slots)</strong>
+        <span>{{ tileLeaf === 'msd' ? 'Tessera first split (MSD)' : 'Tessera plan' }}</span>
+        <strong>
+          {{ [...plan].reverse().map((d) => `${d.width}b`).join(' + ') || 'none' }}
+          ({{ slots(plan).toLocaleString('en-US') }} slots<template v-if="tileLeaf === 'msd'">, first split; unfinished buckets re-plan</template>)
+        </strong>
       </div>
       <div>
         <span>Fixed {{ width }}b windows</span>

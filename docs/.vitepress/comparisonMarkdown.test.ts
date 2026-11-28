@@ -22,45 +22,46 @@ const SPEC_UUID = "eaf61c35-a989-4097-bdd0-ef1dc30a7009";
 const TESSERA_HASH = "d849b6801234567890abcdef1234567890abcdef";
 const OTHER_HASH = "b67122201234567890abcdef1234567890abcdef";
 
-function makeFixture(validChart = true) {
-  const chart = validChart
-    ? {
-        title: "Fastest of 7 stable sorts",
-        guide: "Speed vs slice::sort",
-        columns: ["Speed"],
-        groups: [
+function makeFixture(validOverview = true, validOperation = validOverview) {
+  const validChart = {
+    title: "Fastest of 7 stable sorts",
+    guide: "Speed vs slice::sort",
+    columns: ["Speed"],
+    groups: [
+      {
+        title: "SORT",
+        rows: [
           {
-            title: "SORT",
-            rows: [
-              {
-                name: { input: "random", sub: "u64 · 1M", tag: "" },
-                marks: [{ value: 2.6, tone: "primary" }],
-                cells: ["2.6×"],
-              },
-            ],
+            name: { input: "random", sub: "u64 · 1M", tag: "" },
+            marks: [{ value: 2.6, tone: "primary" }],
+            cells: ["2.6×"],
           },
         ],
-        scale: {
-          low: 0.5,
-          high: 4,
-          ticks: [
-            { value: 1, label: "1×" },
-            { value: 2, label: "2×" },
-          ],
-          origin: 1,
-          clamp: false,
-        },
-        legend: { note: "Median of runs" },
-        axis: ["slower", "faster"],
-      }
-    : { title: "Fastest of 7 stable sorts" };
-  const figure = {
+      },
+    ],
+    scale: {
+      low: 0.5,
+      high: 4,
+      ticks: [
+        { value: 1, label: "1×" },
+        { value: 2, label: "2×" },
+      ],
+      origin: 1,
+      clamp: false,
+    },
+    legend: { note: "Median of runs" },
+    axis: ["slower", "faster"],
+  };
+  const invalidChart = { title: "Fastest of 7 stable sorts" };
+  const makeFigure = (valid: boolean) => ({
     name: "overview",
     title: "Fastest of 7 stable sorts",
     summary: "Every sort on the same records.",
-    chart,
+    chart: valid ? validChart : invalidChart,
     table: "| Sort | Speed |\n| --- | --- |\n| Tessera | 2.6× |",
-  };
+  });
+  const overviewFigure = makeFigure(validOverview);
+  const opFigure = makeFigure(validOperation);
   const sort = {
     id: "sort",
     label: "Full sort",
@@ -91,9 +92,9 @@ function makeFixture(validChart = true) {
       },
     ].map((run) => ({ ...run, workflow: "https://example.test/run" })),
     figures: [
-      figure,
+      makeFigure(true),
       {
-        ...figure,
+        ...opFigure,
         name: "memory",
         title: "Grows as √n",
         summary: "Peak heap allocation beyond the input.",
@@ -102,7 +103,7 @@ function makeFixture(validChart = true) {
   };
   return comparisonSchema.parse({
     spec: SPEC_UUID,
-    overview: figure,
+    overview: overviewFigure,
     operations: [
       sort,
       {
@@ -120,7 +121,7 @@ function makeFixture(validChart = true) {
           referenceMemoryBytes: null,
           noun: "selections",
         },
-        figures: [figure],
+        figures: [makeFigure(true)],
       },
     ],
   });
@@ -139,12 +140,15 @@ test("renderComparisonMarkdown renders headlines, overview, all, and empty views
     headlines,
     /\| Stable \\\| selection \| Ranked 2nd of 4 stable selections \| 1\.04× \| — \|/,
   );
+  assert.doesNotMatch(headlines, /^\| Tessera \| 2\.6× \|$/m);
 
   const overview = renderComparisonMarkdown(data, "overview");
   assert.doesNotMatch(overview, /^#{1,6}\s/m);
   assert.match(overview, /^\*\*Fastest of 7 stable sorts\.\*\*/m);
+  assert.match(overview, /^\| Tessera \| 2\.6× \|$/m);
   assert.match(overview, /2026-11-23 to 2026-11-27; Tessera at \[d849b68\]/);
   assert.match(overview, /Memory not yet recorded for radsort\./);
+  assert.ok(overview.includes(COMPARISON_DATA_URL));
 
   const all = renderComparisonMarkdown(data, "all");
   assert.match(all, /^## At a glance$/m);
@@ -201,7 +205,10 @@ test("snapshot loading validates local and remote sources and preserves offline 
   });
   process.env.DOCS_COMPARISON_FILE = file;
   assert.deepEqual(await loadComparisonSnapshot(), { data: fixture, overridden: true });
-  await writeFile(file, JSON.stringify(makeFixture(false)));
+  // Valid overview with one unrenderable operation figure must still be rejected.
+  await writeFile(file, JSON.stringify(makeFixture(true, false)));
+  assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
+  await writeFile(file, JSON.stringify(makeFixture(false, true)));
   assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });
   await writeFile(file, "{}");
   assert.deepEqual(await loadComparisonSnapshot(), { data: null, overridden: true });

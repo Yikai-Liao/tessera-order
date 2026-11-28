@@ -184,7 +184,7 @@ onMounted(() => {
       index.value = null;
       journals.value = new Map();
       // Seed from the same-origin build snapshot only when its latest month overlaps the active range.
-      let seeded = false;
+      let seededMonth: string | null = null;
       if (source === HISTORY_DATA_SOURCE) {
         try {
           const snapshotBase = withBase("/benchmarks/data/tessera/");
@@ -198,15 +198,14 @@ onMounted(() => {
             Boolean(latestMonth) &&
             (!start || latestMonth! >= start) &&
             (!end || latestMonth! <= end);
-          const seededJournals = new Map<string, TrackingRun[]>();
           if (latestNeeded && latestMonth) {
             const raw = await download(snapshotBase, `${latestMonth}.jsonl`, controller.signal);
-            seededJournals.set(latestMonth, parseRuns(raw));
+            const seededRuns = parseRuns(raw);
             if (!controller.signal.aborted) {
-              journals.value = seededJournals;
+              journals.value = new Map([[latestMonth, seededRuns]]);
               index.value = snapIndex;
               loading.value = false;
-              seeded = true;
+              seededMonth = latestMonth;
             }
           }
         } catch {
@@ -217,7 +216,7 @@ onMounted(() => {
         const text = await download(source, "index.json", controller.signal);
         const liveIndex = readable(() => indexSchema.parse(JSON.parse(text)));
         if (controller.signal.aborted) return;
-        if (seeded) {
+        if (seededMonth) {
           const start = from.value.slice(0, 7);
           const end = to.value.slice(0, 7);
           const needed = liveIndex.months.filter(
@@ -230,11 +229,16 @@ onMounted(() => {
             }),
           );
           if (controller.signal.aborted) return;
-          journals.value = new Map([...journals.value, ...batches]);
+          // Evict the provisional snapshot month so changing ranges during initial refresh never
+          // leaves stale build-time data cached for that month.
+          const next = new Map(journals.value);
+          next.delete(seededMonth);
+          for (const [month, runs] of batches) next.set(month, runs);
+          journals.value = next;
         }
         index.value = liveIndex;
       } catch (cause) {
-        if (controller.signal.aborted || seeded) return;
+        if (controller.signal.aborted || seededMonth) return;
         fail(cause);
         loading.value = false;
       }

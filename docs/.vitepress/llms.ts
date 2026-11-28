@@ -52,6 +52,25 @@ export function canonicalSiteUrl(docsBase = "/tessera-order/"): string {
   return `${DEFAULT_ORIGIN}${path === "//" ? "/" : path}`;
 }
 
+/** Parse the single-owner chapter sequence from `docs/explain/index.md#reading-order`. */
+export function explainReadingOrder(raw: string): string[] {
+  const start = raw.search(/^##\s+Reading order\b/m);
+  const tail = start >= 0 ? raw.slice(start).replace(/^##\s+Reading order\b[^\n]*\n?/, "") : "";
+  const nextHeading = tail.search(/^##\s/m);
+  const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
+  const seen = new Set<string>(["explain/index.md"]);
+  const order = ["explain/index.md"];
+  for (const [, target] of section.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)\s]*)?\)/g)) {
+    if (/^[a-z][a-z0-9+.-]*:|\.\./i.test(target)) continue;
+    const normalized = `explain/${target.replace(/^\.\//, "")}`;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      order.push(normalized);
+    }
+  }
+  return order;
+}
+
 export async function discoverSitePages(repoRoot: string) {
   // Use VitePress's discovery and exclusions for both HTML and Markdown exports.
   const { pages: allMarkdown } = await resolvePages(
@@ -59,14 +78,18 @@ export async function discoverSitePages(repoRoot: string) {
     { srcExclude: ["target/**", ".*/**"] },
     createLogger(),
   );
+  let explainOrder: string[] = ["explain/index.md"];
   const pages = await Promise.all(
     allMarkdown.filter(isPage).map(async (sourcePath) => {
       const raw = await readFile(resolve(repoRoot, sourcePath), "utf8");
-      return { sourcePath, sitePath: sitePath(sourcePath), ...(await extractPageMetadata(raw)) };
+      const path = sitePath(sourcePath);
+      if (path === "explain/index.md") explainOrder = explainReadingOrder(raw);
+      return { sourcePath, sitePath: path, ...(await extractPageMetadata(raw)) };
     }),
   );
   return {
     pages,
+    explainOrder,
     sitePageSet: new Set(pages.map((p) => p.sitePath)),
     rewrites: Object.fromEntries(pages.map((p) => [p.sourcePath, p.sitePath])),
     srcExclude: ["target/**", ".*/**", ...allMarkdown.filter((path) => !isPage(path))],
@@ -290,8 +313,12 @@ export async function renderPageMarkdown(p: {
 
 type SitePage = Awaited<ReturnType<typeof discoverSitePages>>["pages"][number];
 
-/** Path groups are shared by navigation and AI bundles; chapter order comes from page titles. */
-export function pageSections<P extends SitePage>(pages: readonly P[]) {
+/** Path groups are shared by navigation and AI bundles; explanation order comes from `docs/explain/index.md#reading-order`. */
+export function pageSections<P extends SitePage>(
+  pages: readonly P[],
+  explainOrder: readonly string[] = ["explain/index.md"],
+) {
+  const explainRank = new Map(explainOrder.map((path, index) => [path, index]));
   const group = (p: SitePage) => {
     const path = p.sitePath;
     if (path === "index.md") return "home";
@@ -301,10 +328,10 @@ export function pageSections<P extends SitePage>(pages: readonly P[]) {
     if (/proposal|python-binding|ROADMAP/.test(path)) return "proposals";
     return path.startsWith("design/") ? "design" : "development";
   };
-  const order = (p: SitePage) =>
-    p.sitePath.endsWith("/index.md") || p.sitePath.startsWith("guide/")
-      ? 0
-      : Number(p.title.match(/^(\d+)\./)?.[1] ?? 999);
+  const order = (p: SitePage) => {
+    if (p.sitePath.startsWith("explain/")) return explainRank.get(p.sitePath) ?? 999;
+    return p.sitePath.endsWith("/index.md") || p.sitePath.startsWith("guide/") ? 0 : 999;
+  };
   return [
     ["home", "Overview"],
     ["guide", "User guide"],
@@ -353,7 +380,7 @@ export async function exportLlmsArtifacts(opts: {
     }),
   );
 
-  const sections = pageSections(pages);
+  const sections = pageSections(pages, catalog.explainOrder);
   const using = sections
     .filter((s) => ["home", "guide", "benchmarks"].includes(s.id))
     .flatMap((s) => s.pages);

@@ -19,6 +19,7 @@ export default {
   Layout() {
     return h(DefaultTheme.Layout, null, {
       "doc-before": () => h(PageMarkdownBar),
+      "home-hero-before": () => h("div", { class: "tsr-home-md-wrap" }, [h(PageMarkdownBar)]),
     });
   },
   enhanceApp({ app }) {

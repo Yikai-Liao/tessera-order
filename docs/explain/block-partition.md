@@ -6,11 +6,13 @@ This mechanism is adapted from Robert Clausecker's `radixsort_permuted.c` ([*Par
 
 ## Step by step
 
-Explore the real Rust engine compiled to WebAssembly below. Drag the **Read frontier** across the input during scatter to watch read input blocks turn green and get recycled by filling buckets, hover any bucket row to trace its physical blocks, then switch to **Write back** to see the chains move into their final contiguous ranges:
+Explore the real Rust engine compiled to WebAssembly below. Use the phase tabs, the step buttons (or Left/Right arrow keys), click any input slot to jump to its read step, or hover any bucket row to trace its physical blocks:
 
 <BlockPartitionDemo />
 
-Every grey cell is a **stale copy** left behind after its record moved — stale bytes are never read or dropped again. Only the live prefix of each block holds active records (checked on every frame by [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) against the engine's real output).
+To follow one recycled block without the figure: take 4 buckets (`0–9`, `10–19`, `20–29`, `30–39`) and block size 3, so buckets start in scratch blocks `S0`–`S3` while `S4`–`S7` stay empty as the completion reserve. As the engine scans input blocks `I0`, `I1`, … left to right, the first bucket to collect 3 records fills its head block (`S1`, say); at that moment at least 3 input records have been read, so `I0` is completely read and links onto bucket 1's chain as recycled output space. When scatter finishes, the completion ledger maps each bucket to its contiguous final slice in the input array. Before bucket 0 copies its sources into `I0`, completion checks whether `I0` still holds an unread source for another bucket; it evacuates bucket 1's prefix from `I0` into a free reserve block (`S4`), marks `I0` *final*, and copies bucket 0's records cleanly into place.
+
+Every grey cell is a **stale copy** left behind after its record moved—stale bytes are never read or dropped again. Only the live prefix of each block holds active records (see the [engine reference](../design/engine.md) for the code map).
 
 ## Scatter
 
@@ -33,7 +35,7 @@ With the `rayon` feature, large roots divide the input into disjoint shards, eac
 
 ## Choosing the block size
 
-Choosing block size $b$ balances two competing costs for $n$ records of $s$ bytes, $R$ buckets, and $d$ bytes of per-block ledger metadata (`finish::serial_descriptor_bytes`):
+Choosing block size $b$ balances two competing costs for $n$ records of $s$ bytes, $R$ buckets, and $d$ bytes of per-block ledger metadata (52 bytes on 64-bit targets; see the [engine reference](../design/engine.md) for layout details):
 
 $$
 \text{memory}(b) = \underbrace{2 R\, b\, s}_{\text{scratch blocks}} + \underbrace{\frac{d\, n}{b}}_{\text{ledger}}
@@ -47,7 +49,7 @@ $$
 
 <BlockSizeChart />
 
-Because smaller blocks add per-block copy and lock overhead, `block_size` uses **$2 \cdot b^{*}$** (rounded up) — only $1.25\times$ minimum memory while cutting per-block overhead in half. At small $n$, fixed floors dominate; above a few million records, $b^*$ takes over and both terms grow as $\sqrt{n}$.
+Because smaller blocks add per-block copy and lock overhead, Tessera sizes each block to **$2 \cdot b^{*}$** (rounded up)—only $1.25\times$ minimum memory while cutting per-block overhead in half. At small $n$, fixed floors dominate; above a few million records, $b^*$ takes over and both terms grow as $\sqrt{n}$.
 
 ## What the port adds to the C reference
 
@@ -64,13 +66,13 @@ The paper's future work (Section 7) notes that naive MSD recursion accumulates p
 
 | Rule | Value / contract |
 |---|---|
-| Block-size scale | `2 * b*` (halved from `4 * b*` in [#202](https://github.com/Yikai-Liao/tessera-order/pull/202), cutting scratch ~40% at ≥1M records for 2–5% runtime on large random inputs, up to 8.8% on `{u64, u32}`). |
+| Block-size scale | `2 * b*` (~1.25× minimum modeled memory while halving per-block overhead; see [engine evidence](../design/evidence.md) for the measured memory–runtime trade-off). |
 | Block-size floors | At least **1,024 bytes** and at least **32 records** per block (independent of $n$, keeping $O(\sqrt{n})$ asymptotics; a 12-bit digit reserves 8 MiB, which is why [routing](routing.md) widens only over varying bits). |
 | Parallel root gate | Uses serial engine below **1 MiB** of records or in a 1-thread pool; above that, spawns 1 shard per **256 KiB** up to pool width, clamped to full input blocks. Parallel block sizing uses $b^* = \sqrt{dn / (2qRs)}$ for $q$ shards with the same scale and floors. |
 
 ## Invariants
 
-Debug builds assert the first two in `Partition::validate` after scatter; the replay tests verify all five on every frame:
+The block partition maintains five core invariants. Debug builds assert the first two after scatter; the site's replay tests independently verify one live owner per frame, stable final order, and bounded relocation and final transfer counts across full and partial blocks:
 
 1. Each physical block belongs to at most one bucket chain.
 2. The chains, read with their prefix lengths, contain every input record exactly once.

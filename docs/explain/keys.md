@@ -8,7 +8,8 @@ Unsigned integers (`u8` through `u128`) already sort identically by bit pattern 
 
 | Key family | Bit transform | Why it preserves order |
 |---|---|---|
-| `bool`, `char`, `NonZero<T>` | Identity | Bit patterns already sort by value (`false < true`, Unicode scalar order, zero absent). |
+| `bool`, `char` | Identity | Bit patterns already sort by value (`false < true`, Unicode scalar order). |
+| `NonZero<T>` | Underlying integer's transform | `NonZero<u*>` uses identity; `NonZero<i*>` flips the sign bit so signed nonzero order matches `i*` (for example, `NonZero<i8>` puts `-1` before `1`). |
 | Signed integers (`i8`…`i128`) | Flip the sign bit | Two's complement puts negatives above positives when read as unsigned; flipping the top bit swaps the halves cleanly. |
 | Floats (`f32`, `f64`) | Negative: invert all bits; positive: flip sign bit | IEEE 754 positives already sort like unsigned integers while negatives run backwards; this produces exact `total_cmp` order, including subnormals, `-0.0 < +0.0`, and NaNs. |
 | Byte arrays `[u8; 1..=16]` | Big-endian pack, zero high padding | First byte sits in the highest bits, matching lexicographical order. |
@@ -36,7 +37,7 @@ Tessera finds the active bits with two bitwise reductions in one pass:
 ### Exact rules & thresholds
 
 - **Zero varying bits (`varying == 0`):** every key in the slice is equal, so the sort finishes immediately without allocating scratch.
-- **Digit placement:** every digit window is placed strictly over varying bits; constant gaps cost zero passes (for example, a `u64` varying only in 20 bits takes two 10-bit tile passes instead of eight byte passes).
+- **Digit placement and span:** every digit window is placed over contiguous bit positions from its lowest varying bit to its highest varying bit, skipping constant gaps between separate windows (for example, a `u64` whose varying bits span 20 contiguous positions takes two 10-bit tile passes instead of eight byte passes). A single digit window can contain constant bits between its endpoints, so single-window shortcuts check the **span** (highest varying bit minus lowest varying bit + 1) rather than just the count of varying bits.
 - **128-bit narrowing:** if a 128-bit key's variation fits entirely within its low or high 64-bit half, the engine drops the constant half and sorts it as a 64-bit key.
 - **Effective candidate masks:** the scan ignores guaranteed-constant padding bits (the top 8 zero bits of `(u16, u8)` or `[u8; 3]`, bits 1–7 of `bool`, bits 21–31 of `char`, and their `1`-filled complements under `Reverse`).
 - **Doubling-batch early exit:** after reading the first key, the scan reads batches of `64, 128, 256, …` keys and stops as soon as every candidate bit has been seen in both `0` and `1` states — random narrow or padded keys typically saturate in the first 65 records. Inside every recursive child, partitioned parent bits are excluded from the candidate mask so they can never reappear.

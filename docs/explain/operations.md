@@ -27,7 +27,7 @@ On 1 million random `u32` keys, the 8-bit band plus packed prefix resolves the t
 
 `select_nth` needs the exact record at one zero-based rank (matching a full stable sort, even across equal-key ties) and the right elements on each side, without ordering either side internally.
 
-**The trick: refine only the one bucket containing the target rank.** After each partition, every bucket completes its stable movement so both sides preserve relative equal-key order, and then Tessera discards every bucket that does not contain the requested rank (dropping ~99% of the slice after pass 1). A tile containing the rank finishes completely.
+**The trick: refine only the one bucket containing the target rank.** After each partition, every bucket completes its stable movement so both sides preserve relative equal-key order, and then Tessera discards every bucket that does not contain the requested rank. How much work that skips depends on the selected band's size: on a balanced 256-way digit split it drops roughly 255/256 (~99.6%) of the slice after pass 1, whereas on a skewed input where the target rank lands inside a large outer band (for example after a 4-band equality split) that outer band is refined further on its remaining bits. A tile containing the rank finishes completely.
 
 Before partitioning a multi-tile slice, selection checks four cheap shortcuts around the key $p$ currently sitting at the target rank:
 
@@ -41,5 +41,5 @@ Before partitioning a multi-tile slice, selection checks four cheap shortcuts ar
 When a key closure is expensive or must run at most once per record, `sort_by_cached_key` calls it once per record in input order, stores the encoded keys ($O(n)$ cache, matching `slice::sort_by_cached_key`), and learns in that same pass whether keys are already ascending and which bits vary:
 
 - **Already ascending:** return immediately.
-- **Narrow variation (≤ 12 varying bits, e.g., categories):** run one stable distribution pass replaying cached keys in input order without calling the closure again (one counting pass for a tile, or one [block partition](block-partition.md) with no recursion for larger inputs).
+- **Narrow varying span (≤ 12-bit span from lowest to highest varying bit, e.g., categories):** run one stable distribution pass replaying cached keys in input order without calling the closure again (one counting pass for a tile, or one [block partition](block-partition.md) with no recursion for larger inputs). Keys whose varying bits are widely spaced (such as bits 0 and 20, spanning 21 positions) exceed this 12-bit window and take the wider-key path below.
 - **Wider keys:** `argsort` the cached keys with prefix packing, free the key cache, and permute the records in linear time (run by run if sparse, otherwise by cycles).

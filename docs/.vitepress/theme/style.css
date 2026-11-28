@@ -285,6 +285,24 @@
 }
 
 /* Home page: crisp hero spacing and two-column code + fit layout. */
+.tsr-home-md-wrap {
+  max-width: 1152px;
+  margin: 12px auto -28px;
+  padding: 0 24px;
+}
+
+@media (min-width: 640px) {
+  .tsr-home-md-wrap {
+    padding: 0 48px;
+  }
+}
+
+@media (min-width: 960px) {
+  .tsr-home-md-wrap {
+    padding: 0 64px;
+  }
+}
+
 .VPHome .VPHero {
   padding-bottom: 32px;
 }

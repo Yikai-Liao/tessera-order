@@ -118,7 +118,7 @@ function chainedChanges(runs: TrackingRun[], ids: string[]) {
   });
 }
 
-function isCurrentCase(
+function isLatestCase(
   runs: TrackingRun[],
   entry: TrackingCase,
   latestHash: string | undefined,
@@ -128,11 +128,22 @@ function isCurrentCase(
   return last === runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
 }
 
-/** Cases that have a measurement in the latest comparable commit of the range. */
+/**
+ * Cases that remain active at the end of the range: each case must appear in its execution's
+ * latest report, and that execution must have reported on either the latest commit or the
+ * immediately preceding commit (preserving other executions while a new commit's reports arrive,
+ * while hiding omitted cases and retired/one-off executions).
+ */
 export function currentCases(input: TrackingRun[], cases: TrackingCase[]): TrackingCase[] {
   const runs = comparableRuns(input);
   const latestHash = runs.at(-1)?.hash;
-  return latestHash ? cases.filter((entry) => isCurrentCase(runs, entry, latestHash)) : [];
+  if (!latestHash) return [];
+  const previousHash = runs.findLast((run) => run.hash !== latestHash)?.hash;
+  return cases.filter((entry) => {
+    const lastExec = runs.findLast((run) => caseUsesExecution(entry.id, run.execution));
+    if (!lastExec || (lastExec.hash !== latestHash && lastExec.hash !== previousHash)) return false;
+    return Boolean(lastExec.values[entry.id]);
+  });
 }
 
 /** Each measured case's latest comparable estimate, interval and change from its first run. */
@@ -144,7 +155,7 @@ export function latestValues(input: TrackingRun[], cases: TrackingCase[]) {
     if (!last) return [];
     const [value, lower, upper] = last.values[entry.id];
     const change = caseChanges(runs, entry.id).findLast((value) => typeof value === "number") ?? 0;
-    const current = isCurrentCase(runs, entry, latestHash, last);
+    const current = isLatestCase(runs, entry, latestHash, last);
     return [{ entry, value, lower, upper, change, time: last.time, current }];
   });
 }

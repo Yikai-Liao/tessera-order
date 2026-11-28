@@ -139,7 +139,10 @@ export function renderComparisonMarkdown(data: ComparisonData, view: ComparisonV
     const lead = formatLead(figure, true);
     if (lead) blocks.push(lead);
     if (figure.table.trim()) blocks.push(figure.table.trim());
-    if (section.provenance) blocks.push(formatProvenance(section.provenance));
+    if (section.provenance)
+      blocks.push(
+        `${formatProvenance(section.provenance)} Snapshot embedded at build time; latest live dataset: [comparison.json](${COMPARISON_DATA_URL}).`,
+      );
     return blocks.join("\n\n");
   }
 
@@ -154,5 +157,8 @@ export function renderComparisonMarkdown(data: ComparisonData, view: ComparisonV
       if (figure.table.trim()) blocks.push(figure.table.trim());
     }
   }
+  blocks.push(
+    `Snapshot embedded at build time; latest live dataset: [comparison.json](${COMPARISON_DATA_URL}).`,
+  );
   return blocks.join("\n\n");
 }

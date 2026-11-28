@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://yikai-liao.github.io/tessera-order/sitemap.xml

@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: BSD-2-Clause
+name: Python test cell
+description: >-
+  Build one wheel and test it in fresh environments. Pull request cells and
+  main-only cells share these commands, including optional NumPy-free tests.
+
+inputs:
+  python-version:
+    description: Python interpreter version to build and test with.
+    required: true
+  abi3:
+    description: Build an abi3 wheel for Python 3.11 and newer.
+    default: "false"
+  with-numpy:
+    description: Install NumPy in the primary test environment.
+    default: "true"
+  test-numpy-free:
+    description: Also test the same wheel in a second environment without NumPy.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: "python -> target"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        save-cache: ${{ github.ref == 'refs/heads/main' }}
+    - name: Build wheel
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        ABI3: ${{ inputs.abi3 }}
+      run: |
+        features=()
+        if [ "$ABI3" = true ]; then
+          features=(--features abi3-py311)
+        fi
+        uv python install "$PYTHON_VERSION"
+        interpreter="$(uv python find "$PYTHON_VERSION")"
+        test -n "$interpreter"
+        uvx maturin build --release --locked -m python/Cargo.toml \
+          --interpreter "$interpreter" \
+          --out "$RUNNER_TEMP/python-wheels" "${features[@]}"
+    - name: Test installed wheel
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        WITH_NUMPY: ${{ inputs.with-numpy }}
+      run: |
+        venv="$RUNNER_TEMP/python-tests"
+        uv venv --python "$PYTHON_VERSION" "$venv"
+        uv pip install --python "$venv" pytest "$RUNNER_TEMP"/python-wheels/*.whl
+        if [ "$WITH_NUMPY" = true ]; then
+          uv pip install --python "$venv" numpy
+        fi
+        uv run --no-project --python "$venv" python -m pytest python/tests -q
+    - name: Test installed wheel without NumPy
+      if: inputs.test-numpy-free == 'true'
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: |
+        venv="$RUNNER_TEMP/python-tests-numpy-free"
+        uv venv --python "$PYTHON_VERSION" "$venv"
+        uv pip install --python "$venv" pytest "$RUNNER_TEMP"/python-wheels/*.whl
+        uv run --no-project --python "$venv" python -c \
+          'import importlib.util; assert importlib.util.find_spec("numpy") is None; import tessera_order'
+        uv run --no-project --python "$venv" python -m pytest python/tests -q

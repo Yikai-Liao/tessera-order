@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-const LANES = ["rust", "cpp", "comparison", "benchmark", "docs"] as const;
+const LANES = ["rust", "cpp", "python", "comparison", "benchmark", "docs"] as const;
 type Lane = (typeof LANES)[number];
 
 /**
@@ -19,11 +19,15 @@ type Lane = (typeof LANES)[number];
 const ROUTES: [RegExp, Lane[]][] = [
   // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
+  [
+    /^(python\/|bench\/python\/|\.github\/workflows\/python-ci\.yml$|\.github\/actions\/python-test\/)/,
+    ["python"],
+  ],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|python-release|bench-diagnostics|main-benchmarks)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.
@@ -33,11 +37,12 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // The figures replay the library through this WebAssembly crate.
   [/^rust\/tessera-trace\//, ["docs"]],
-  [/^rust\/tessera-order\/(src\/|Cargo\.toml$)/, ["rust", "benchmark", "docs"]],
+  [/^rust\/tessera-order\/(src\/|Cargo\.toml$)/, ["rust", "python", "benchmark", "docs"]],
   [/^rust\//, ["rust", "benchmark"]],
+  [/^Cargo\.lock$/, ["rust", "comparison", "benchmark"]],
   [
-    /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
-    ["rust", "comparison", "benchmark"],
+    /^\.cargo\/|^(Cargo\.toml|rust-toolchain(\.toml)?)$/,
+    ["rust", "python", "comparison", "benchmark"],
   ],
   [
     /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
@@ -82,7 +87,14 @@ const lanesOf = (path: string) => ROUTES.find(([pattern]) => pattern.test(path))
 
 /** Select automatic checks once; paths no row names select every lane. */
 export function select(paths: string[]) {
-  const selected = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+  const selected = {
+    rust: false,
+    cpp: false,
+    python: false,
+    comparison: false,
+    benchmark: false,
+    docs: false,
+  };
   for (const path of paths) for (const lane of lanesOf(path)) selected[lane] = true;
   return selected;
 }

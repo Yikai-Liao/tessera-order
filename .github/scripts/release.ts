@@ -14,6 +14,107 @@ export async function verifyRustRelease(tag: string, root: string) {
   return { tag, state: "verified" };
 }
 
+export interface VerifyReleaseOptions {
+  /** Confirm the embedded Rust crate version is published and not yanked on crates.io. */
+  checkPublished?: boolean;
+  /** Override sparse-index fetching in tests. */
+  fetchIndex?: (url: string) => Promise<string>;
+}
+
+const CRATES_INDEX_URL = "https://index.crates.io/te/ss/tessera-order";
+
+async function defaultFetchIndex(url: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: { "user-agent": "tessera-order-release-verify" },
+  });
+  if (!response.ok)
+    throw new Error(`Failed to fetch crates.io index (${response.status} ${response.statusText})`);
+  return response.text();
+}
+
+/** Verify Python package and adapter versions against the embedded Rust core. */
+export async function verifyPythonRelease(
+  tag: string,
+  root: string,
+  options: VerifyReleaseOptions = {},
+) {
+  const core = parse(await readFile(join(root, "rust/tessera-order/Cargo.toml"), "utf8"));
+  const pyproject = parse(await readFile(join(root, "python/pyproject.toml"), "utf8"));
+  const adapter = parse(await readFile(join(root, "python/Cargo.toml"), "utf8"));
+  const coreVersion = (core.package as { version: string }).version;
+  const version = (pyproject.project as { version: string }).version;
+  if (!tag.startsWith("python/v") || tag !== `python/v${version}`)
+    throw new Error("Python tag/project version mismatch; expected python/v<project.version>");
+  const suffix = version.slice(coreVersion.length);
+  if (
+    version !== coreVersion &&
+    !(version.startsWith(coreVersion) && /^\.post[1-9][0-9]*$/.test(suffix))
+  )
+    throw new Error(
+      `Python project version must be ${coreVersion} or ${coreVersion}.postN (N >= 1, no leading zeros)`,
+    );
+  const pkg = adapter.package as { version: string; publish?: boolean };
+  if (pkg.version !== coreVersion || pkg.publish !== false)
+    throw new Error(
+      "Python Cargo package.version must match the Rust core and package.publish must be false",
+    );
+  const deps = adapter.dependencies as Record<string, { path?: string } | string> | undefined;
+  const coreDep = deps?.["tessera-order"];
+  if (typeof coreDep !== "object" || coreDep?.path !== "../rust/tessera-order")
+    throw new Error("Python Cargo dependency tessera-order must point to ../rust/tessera-order");
+  const coreTag = `rust/v${coreVersion}`;
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    git("rev-parse", "--verify", "--quiet", `refs/tags/${coreTag}^{commit}`);
+  } catch {
+    throw new Error(
+      `Published Rust release tag ${coreTag} not found; release Rust ${coreVersion} before Python ${version}`,
+    );
+  }
+  const diff = git(
+    "diff",
+    "--name-only",
+    `refs/tags/${coreTag}`,
+    "--",
+    "rust/tessera-order",
+  ).trim();
+  const untracked = git(
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+    "--",
+    "rust/tessera-order",
+  ).trim();
+  if (diff !== "" || untracked !== "")
+    throw new Error(
+      `Embedded rust/tessera-order source differs from published tag ${coreTag}; bump and release Rust before tagging Python`,
+    );
+  if (options.checkPublished) {
+    const fetchIndex = options.fetchIndex ?? defaultFetchIndex;
+    const raw = await fetchIndex(CRATES_INDEX_URL);
+    const published = raw
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .some((line) => {
+        const entry = JSON.parse(line) as { vers?: string; yanked?: boolean };
+        return entry.vers === coreVersion && entry.yanked !== true;
+      });
+    if (!published)
+      throw new Error(
+        `Rust crate tessera-order ${coreVersion} is not published (or is yanked) on crates.io`,
+      );
+  }
+  return { tag, state: "verified" };
+}
+
+/** Dispatch release verification by the independently versioned package tag. */
+export async function verifyRelease(tag: string, root: string, options: VerifyReleaseOptions = {}) {
+  if (tag.startsWith("rust/v")) return verifyRustRelease(tag, root);
+  if (tag.startsWith("python/v")) return verifyPythonRelease(tag, root, options);
+  throw new Error(`Unsupported release tag ${tag}; expected rust/v<version> or python/v<version>`);
+}
+
 /**
  * Release notes are the message of the annotated release tag, so publication
  * needs no manual step. Reject a lightweight tag, a tag that does not point at

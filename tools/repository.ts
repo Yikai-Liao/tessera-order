@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
-import { readTagNotes, verifyRustRelease } from "../.github/scripts/release.ts";
+import { readTagNotes, verifyRelease } from "../.github/scripts/release.ts";
 import { checkImplementations } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
@@ -56,8 +56,15 @@ export function repositoryCommands(program: Command) {
   release
     .command("verify")
     .requiredOption("--tag <tag>", "release tag")
-    .action(async (options: { tag: string }) =>
-      console.log(JSON.stringify(await verifyRustRelease(options.tag, await repositoryRoot()))),
+    .option("--check-published", "verify embedded Rust crate is published on crates.io")
+    .action(async (options: { tag: string; checkPublished?: boolean }) =>
+      console.log(
+        JSON.stringify(
+          await verifyRelease(options.tag, await repositoryRoot(), {
+            checkPublished: Boolean(options.checkPublished),
+          }),
+        ),
+      ),
     );
   release
     .command("notes")

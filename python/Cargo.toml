@@ -1,0 +1,32 @@
+[package]
+name = "tessera-order-py"
+version = "0.2.0"
+description = "Python bindings for tessera-order: stable radix sorting, argsort and selection"
+edition = "2024"
+rust-version = "1.89"
+license = "BSD-2-Clause"
+publish = false
+repository = "https://github.com/Yikai-Liao/tessera-order"
+
+[lib]
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+abi3-py311 = ["pyo3/abi3-py311"]
+
+[dependencies]
+pyo3 = "0.30"
+rayon = "1.12"
+tessera-order = { path = "../rust/tessera-order", features = ["rayon"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
+doc_markdown = "warn"

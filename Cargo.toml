@@ -1,7 +1,8 @@
 [workspace]
 members = ["rust/tessera-order", "bench/rust"]
-# Built for the documentation site only; see its manifest.
-exclude = ["rust/tessera-trace"]
+# `tessera-trace` is built for the documentation site only; `python` is an
+# independent PyO3/maturin crate with its own lockfile and CI boundary.
+exclude = ["rust/tessera-trace", "python"]
 resolver = "3"
 
 [workspace.package]

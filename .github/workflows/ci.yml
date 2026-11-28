@@ -28,6 +28,7 @@ jobs:
     outputs:
       rust: ${{ steps.changes.outputs.rust }}
       cpp: ${{ steps.changes.outputs.cpp }}
+      python: ${{ steps.changes.outputs.python }}
       cpp_present: ${{ steps.changes.outputs.cpp_present }}
       comparison: ${{ steps.changes.outputs.comparison }}
       benchmark: ${{ steps.changes.outputs.benchmark }}
@@ -80,6 +81,11 @@ jobs:
     if: needs.changes.outputs.cpp == 'true' && needs.changes.outputs.cpp_present == 'true'
     uses: ./.github/workflows/cpp-ci.yml
 
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    uses: ./.github/workflows/python-ci.yml
+
   docs:
     needs: changes
     if: needs.changes.outputs.docs == 'true'
@@ -94,7 +100,7 @@ jobs:
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp, docs, comparison, registry-msvc, prepare, measure, report, reuse-report]
+    needs: [changes, lint, rust, cpp, python, docs, comparison, registry-msvc, prepare, measure, report, reuse-report]
     runs-on: ubuntu-latest
     steps:
       - env:

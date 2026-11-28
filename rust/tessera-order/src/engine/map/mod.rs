@@ -269,6 +269,7 @@ struct RefineState<K, V> {
     unrefineds: Vec<Option<UnrefinedNode>>,
     free_unrefineds: Vec<u32>,
     slabs: Vec<Option<RawSlab<K, V>>>,
+    free_slabs: Vec<u32>,
     workspace: Workspace<(K, V)>,
 }
 
@@ -281,14 +282,26 @@ impl<K, V> RefineState<K, V> {
             unrefineds: Vec::new(),
             free_unrefineds: Vec::new(),
             slabs: Vec::new(),
+            free_slabs: Vec::new(),
             workspace: Workspace::new(),
         }
     }
 
     fn alloc_slab(&mut self, slab: RawSlab<K, V>) -> u32 {
-        let id = u32::try_from(self.slabs.len()).expect("slab index overflow");
-        self.slabs.push(Some(slab));
-        id
+        if let Some(id) = self.free_slabs.pop() {
+            self.slabs[id as usize] = Some(slab);
+            id
+        } else {
+            let id = u32::try_from(self.slabs.len()).expect("slab index overflow");
+            self.slabs.push(Some(slab));
+            id
+        }
+    }
+
+    fn take_slab(&mut self, id: u32) -> RawSlab<K, V> {
+        let slab = self.slabs[id as usize].take().expect("live slab");
+        self.free_slabs.push(id);
+        slab
     }
 
     fn alloc_unrefined(&mut self, node: UnrefinedNode) -> u32 {
@@ -351,6 +364,7 @@ impl<K, V> RefineState<K, V> {
             self.workspace = Workspace::new();
             if self.slabs.iter().all(Option::is_none) {
                 self.slabs.clear();
+                self.free_slabs.clear();
             }
         }
     }
@@ -366,7 +380,7 @@ impl<K, V> RefineState<K, V> {
             slab.live_count == 0
         };
         if should_free {
-            self.slabs[slab_id as usize] = None;
+            self.take_slab(slab_id);
         }
     }
 
@@ -377,7 +391,7 @@ impl<K, V> RefineState<K, V> {
             None => return,
         };
         if live_count == 0 {
-            self.slabs[slab_id as usize] = None;
+            self.take_slab(slab_id);
             return;
         }
         if total_cap < COMPACT_MIN_SLAB_LEN || live_count * 4 >= total_cap {
@@ -386,9 +400,6 @@ impl<K, V> RefineState<K, V> {
 
         // Pre-reserve before mutating any slab or descriptor so OOM leaves state intact.
         let mut packed: Vec<(K, V)> = Vec::with_capacity(live_count);
-        self.slabs.reserve(1);
-        let new_slab_id = u32::try_from(self.slabs.len()).expect("slab index overflow");
-
         {
             let old_slab = self.slabs[slab_id as usize].as_mut().unwrap();
             for u in self.unrefineds.iter_mut().flatten() {
@@ -398,15 +409,13 @@ impl<K, V> RefineState<K, V> {
                         // SAFETY: live `UnrefinedNode` exclusively owns initialized `u.start..u.end`.
                         packed.push(unsafe { slot.assume_init_read() });
                     }
-                    u.slab_id = new_slab_id;
                     u.start = new_start;
                     u.end = packed.len();
                 }
             }
         }
         debug_assert_eq!(packed.len(), live_count);
-        self.slabs[slab_id as usize] = None;
-        self.slabs.push(Some(RawSlab::from_vec(packed)));
+        self.slabs[slab_id as usize] = Some(RawSlab::from_vec(packed));
     }
 }
 
@@ -748,7 +757,7 @@ impl<E: Unsigned, V> NodePools<E, V> {
         // Zero-copy fast path when `u` owns the entire backing slab.
         let mut records =
             if s == 0 && len == state.slabs[slab_id as usize].as_ref().unwrap().data.len() {
-                let slab = state.slabs[slab_id as usize].take().unwrap();
+                let slab = state.take_slab(slab_id);
                 // SAFETY: `u` exclusively owns every initialized slot `0..len` in `slab`.
                 let mut records = unsafe { slab.into_vec() };
                 if len > 1 {
@@ -1538,8 +1547,9 @@ impl<K: RadixKey, V> TesseraMap<K, V> {
                             self.alloc_leaf_mut(|slot| Leaf::init_single(slot, ek, val)),
                         );
                         let wrapped = NodeId::internal(if ek < min_cov {
+                            let sep = K::Encoded::from_u128(min_cov.to_u128() - 1);
                             self.alloc_internal_mut(|slot| {
-                                Internal::init_pair(slot, new_leaf, ek, cur)
+                                Internal::init_pair(slot, new_leaf, sep, cur)
                             })
                         } else {
                             self.alloc_internal_mut(|slot| {

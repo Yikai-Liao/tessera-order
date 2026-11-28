@@ -427,6 +427,148 @@ fn sequential_inserts_and_slab_compaction() {
     assert_eq!(map.stats().live_slabs, 0);
 }
 
+#[test]
+#[cfg_attr(miri, ignore = "radix routing stress covered in native test")]
+fn out_of_prefix_inserts_use_leaf_splits() {
+    const BASE: u64 = 1 << 40;
+    const PREFIX_END: u64 = BASE + (1 << 15);
+    const INSERTED: usize = 1792;
+    let initial: Vec<_> = (0..20_000)
+        .map(|i| (BASE + (i * 7919) % 20_000, i))
+        .collect();
+    let mut rng = Rng::new(0x1122_3344_5566_7788);
+    for below in [true, false] {
+        for order in ["ascending", "descending", "shuffled", "nested batch"] {
+            let mut records = initial.clone();
+            let nested = order == "nested batch";
+            if nested {
+                records.push((1 << 55, 0));
+            }
+            let mut oracle: BTreeMap<_, _> = records.iter().copied().collect();
+            let mut map = TesseraMap::from_unique(records);
+            assert_eq!(map.get(BASE), oracle.get(&BASE));
+            let before = map.stats();
+            assert!(before.radixes >= if nested { 2 } else { 1 });
+
+            let start = if below {
+                BASE - INSERTED as u64
+            } else {
+                PREFIX_END
+            };
+            let mut keys: Vec<_> = (start..start + INSERTED as u64).collect();
+            if order == "descending" {
+                keys.reverse();
+            } else if order == "shuffled" {
+                for i in (1..keys.len()).rev() {
+                    keys.swap(i, rng.next_u64() as usize % (i + 1));
+                }
+            }
+            oracle.extend(keys.iter().map(|&k| (k, k)));
+            if nested {
+                map.extend_vec(keys.into_iter().map(|k| (k, k)).collect());
+            } else {
+                for k in keys {
+                    assert_eq!(map.insert(k, k), None);
+                }
+            }
+
+            let after = map.stats();
+            let bound = INSERTED.div_ceil(28) + 2;
+            let leaves = after.leaves - before.leaves;
+            let internals = after.internals - before.internals;
+            assert!(
+                leaves <= bound,
+                "{order}, below={below}: {leaves} leaves > {bound}"
+            );
+            assert!(
+                internals <= bound,
+                "{order}, below={below}: {internals} internals > {bound}"
+            );
+            assert_eq!(map.len(), oracle.len());
+            let mut got = Vec::new();
+            map.range(.., |k, v| got.push((k, *v)));
+            assert!(got.into_iter().eq(oracle));
+        }
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "native thread stack limit")]
+fn large_values_split_on_small_stack() {
+    const VALUE_BYTES: usize = 4096;
+
+    struct LargeValue {
+        bytes: [u8; VALUE_BYTES],
+        tracker: DropTracker,
+    }
+
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let live = Arc::new(AtomicUsize::new(0));
+            let value_for = |key: u32| LargeValue {
+                bytes: [key as u8; VALUE_BYTES],
+                tracker: DropTracker::new(u64::from(key), &live),
+            };
+            {
+                let mut map = TesseraMap::new();
+                for key in (1..=64u32).chain([0]).chain(65..=128) {
+                    assert!(map.insert(key, value_for(key)).is_none());
+                }
+                assert_eq!(map.len(), 129);
+                assert!(map.stats().leaves >= 3);
+                assert_eq!(live.load(Ordering::Relaxed), 129);
+                for key in 0..=128 {
+                    let value = map.get(key).unwrap();
+                    assert_eq!(value.tracker._id, u64::from(key));
+                    assert!(value.bytes.iter().all(|&byte| byte == key as u8));
+                }
+            }
+            assert_eq!(live.load(Ordering::Relaxed), 0);
+
+            for lazy in [false, true] {
+                let records = (0..129).map(|key| (key, value_for(key))).collect();
+                let map = if lazy {
+                    TesseraMap::from_vec_lazy_for_test(records, false)
+                } else {
+                    TesseraMap::from(records)
+                };
+                assert_eq!(map.len(), 129);
+                for key in 0..129 {
+                    let value = map.get(key).unwrap();
+                    assert_eq!(value.tracker._id, u64::from(key));
+                    assert!(value.bytes.iter().all(|&byte| byte == key as u8));
+                }
+                assert_eq!(live.load(Ordering::Relaxed), 129);
+                drop(map);
+                assert_eq!(live.load(Ordering::Relaxed), 0);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn slab_slots_reused_with_unrefined_bucket() {
+    let anchor = 15u64 << 56;
+    let records = (0..600).flat_map(|i| [(i, i), (anchor + i, i)]).collect();
+    let mut map = TesseraMap::from_vec_lazy_for_test(records, false);
+    assert_eq!(map.get(0), Some(&0));
+    assert_eq!(map.stats().unrefined, 1);
+    let empty_key = 2 << 56;
+
+    for cycle in 0..64 {
+        map.extend_vec((0..256).map(|i| (empty_key, cycle + i)).collect());
+        assert_eq!(map.stats().unrefined, 2);
+        assert_eq!(map.remove(empty_key), Some(cycle + 255));
+        assert_eq!(map.stats().unrefined, 1);
+        let slots = map.refine_mut().slabs.len();
+        assert!(slots <= 2, "cycle {cycle}: {slots} slab slots");
+    }
+    assert_eq!(map.get(anchor + 599), Some(&599));
+}
+
 fn generic_lookup<K: crate::RadixKey, V>(map: &TesseraMap<K, V>, key: K) -> Option<&V> {
     map.get(key)
 }

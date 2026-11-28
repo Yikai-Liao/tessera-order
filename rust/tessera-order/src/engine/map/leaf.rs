@@ -466,30 +466,25 @@ impl<E: Unsigned, V> Leaf<E, V> {
         LeafInsert::Inserted
     }
 
-    /// Packs `n` (`32` or `33`) sorted entries from `keys`/`vals` into this leaf with proactive
+    /// Sets keys and liveness for `n` (`32` or `33`) values already placed with proactive
     /// alternating `B^S-Tree` gaps (even slots `0, 2, ...`, plus slot 63 when `n == 33`).
     ///
     /// # Safety
-    /// Every element of `vals[..keys.len()]` must be initialized; ownership transfers into `self`.
-    unsafe fn pack_gapped_half(&mut self, keys: &[E], vals: &mut [MaybeUninit<V>]) {
+    /// Exactly the slots corresponding to `keys` must hold owned values.
+    unsafe fn pack_gapped_half_keys(&mut self, keys: &[E]) {
         let n = keys.len();
         debug_assert!(n == 32 || n == 33);
         let even_pairs = n.min(32);
         let mut mask = 0u64;
-        for i in 0..even_pairs {
-            let k = keys[i];
+        for (i, &k) in keys[..even_pairs].iter().enumerate() {
             let s = i * 2;
             self.set_key(s, k);
             let gap_key = if i + 1 < n { k } else { E::MAX };
             self.set_key(s + 1, gap_key);
-            // SAFETY: caller guarantees `vals[i]` is initialized and transferred once.
-            self.write_val(s, unsafe { vals[i].assume_init_read() });
             mask |= 1u64 << s;
         }
         if n == 33 {
             self.set_key(63, keys[32]);
-            // SAFETY: caller guarantees `vals[32]` is initialized and transferred once.
-            self.write_val(63, unsafe { vals[32].assume_init_read() });
             mask |= 1u64 << 63;
         }
         self.refresh_sub_max(0, 55);
@@ -524,29 +519,60 @@ impl<E: Unsigned, V> Leaf<E, V> {
             return self.subs[7].keys[7];
         }
 
-        let mut all_keys = [key; LEAF_CAP + 1];
-        let mut all_vals: [MaybeUninit<V>; LEAF_CAP + 1] =
-            [const { MaybeUninit::uninit() }; LEAF_CAP + 1];
-
-        self.valid_mask = 0;
-        for i in 0..ins_pos {
-            all_keys[i] = self.key_at(i);
-            // SAFETY: all 64 slots were live before `valid_mask` was cleared.
-            all_vals[i].write(unsafe { self.read_val(i) });
-        }
-        all_keys[ins_pos] = key;
-        all_vals[ins_pos].write(val);
-        for i in ins_pos..LEAF_CAP {
-            all_keys[i + 1] = self.key_at(i);
-            // SAFETY: all 64 slots were live before `valid_mask` was cleared.
-            all_vals[i + 1].write(unsafe { self.read_val(i) });
-        }
-
         const LEFT_N: usize = 32;
-        // SAFETY: `all_vals[0..65]` are all initialized and partitioned disjointly into left/right.
+        let mut all_keys = [key; LEAF_CAP + 1];
+        for (i, k) in all_keys.iter_mut().enumerate() {
+            if i != ins_pos {
+                *k = self.key_at(i - usize::from(i > ins_pos));
+            }
+        }
+
+        for i in LEFT_N..=LEAF_CAP {
+            if i == ins_pos {
+                continue;
+            }
+            let src = i - usize::from(i > ins_pos);
+            let dst = ((i - LEFT_N) * 2).min(LEAF_CAP - 1);
+            // SAFETY: `src` is live and `dst` is a distinct, vacant slot in the right leaf.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    &self.subs[src >> 3].vals[src & 7],
+                    &mut right.subs[dst >> 3].vals[dst & 7],
+                    1,
+                );
+            }
+        }
+
+        let subs = self.subs.as_mut_ptr();
+        for i in (0..LEFT_N).rev() {
+            if i == ins_pos {
+                continue;
+            }
+            let src = i - usize::from(i > ins_pos);
+            let dst = i * 2;
+            if src != dst {
+                // SAFETY: both slots are in bounds. Moving the right half first and expanding
+                // the left half backwards vacates `dst > src` before copying each live `src`.
+                unsafe {
+                    let src = ptr::addr_of!((*subs.add(src >> 3)).vals)
+                        .cast::<MaybeUninit<V>>()
+                        .add(src & 7);
+                    let dst = ptr::addr_of_mut!((*subs.add(dst >> 3)).vals)
+                        .cast::<MaybeUninit<V>>()
+                        .add(dst & 7);
+                    ptr::copy_nonoverlapping(src, dst, 1);
+                }
+            }
+        }
+        if ins_pos < LEFT_N {
+            self.write_val(ins_pos * 2, val);
+        } else {
+            right.write_val((ins_pos - LEFT_N) * 2, val);
+        }
+        // SAFETY: the two copies and the insertion placed each owned value in its final slot.
         unsafe {
-            self.pack_gapped_half(&all_keys[..LEFT_N], &mut all_vals[..LEFT_N]);
-            right.pack_gapped_half(&all_keys[LEFT_N..], &mut all_vals[LEFT_N..]);
+            self.pack_gapped_half_keys(&all_keys[..LEFT_N]);
+            right.pack_gapped_half_keys(&all_keys[LEFT_N..]);
         }
 
         #[cfg(debug_assertions)]

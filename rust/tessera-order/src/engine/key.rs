@@ -151,6 +151,7 @@ pub trait Unsigned:
     + Not<Output = Self>
 {
     const BITS: usize;
+    const MAX: Self;
     fn from_usize(value: usize) -> Self;
     fn from_u128(value: u128) -> Self;
     fn to_usize(self) -> usize;
@@ -161,6 +162,7 @@ macro_rules! unsigned {
     ($($ty:ty),* $(,)?) => {$(
         impl Unsigned for $ty {
             const BITS: usize = <$ty>::BITS as usize;
+            const MAX: Self = <$ty>::MAX;
             #[inline] fn from_usize(value: usize) -> Self { value as Self }
             #[inline] fn from_u128(value: u128) -> Self { value as Self }
             #[inline] fn to_usize(self) -> usize { self as usize }

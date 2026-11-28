@@ -13,11 +13,12 @@ rayon = ["tessera-order/rayon"]
 compare-native = []
 # Current serial operation adapters; historical full-sort builds leave this off.
 operations = []
-collections = ["dep:blart", "dep:indexset", "dep:index-db"]
+collections = ["dep:fearless_simd", "dep:blart", "dep:indexset", "dep:index-db"]
 # Parallel operation adapters beyond full sorting; left off for pre-par_argsort revisions.
 parallel-operations = ["operations", "rayon"]
 
 [dependencies]
+fearless_simd = { version = "1.2", optional = true }
 blart = { version = "=0.6.0", optional = true }
 indexset = { version = "=0.18.0", optional = true }
 index-db = { version = "=1.0.1", optional = true }

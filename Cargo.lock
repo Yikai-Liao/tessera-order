@@ -754,6 +754,7 @@ version = "0.0.0"
 dependencies = [
  "blart",
  "criterion 0.7.0",
+ "fearless_simd",
  "fs2",
  "glidesort",
  "index-db",

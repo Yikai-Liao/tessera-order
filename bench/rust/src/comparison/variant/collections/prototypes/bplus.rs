@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use super::super::{Collection, IntKey, Value};
-use std::mem::{replace, size_of, swap};
+use fearless_simd::{Level, Simd, dispatch, prelude::*};
+use std::mem::{replace, size_of};
 
-const NODE_PAYLOAD_BYTES: usize = 1024;
-const MIN_LEAF_CAPACITY: usize = 16;
+const LEAF_PAYLOAD_BYTES: usize = 960;
+const BRANCH_PAYLOAD_BYTES: usize = 1024;
 
 pub(in super::super) const fn leaf_capacity<K, V>() -> usize {
-    let entries = NODE_PAYLOAD_BYTES / (size_of::<K>() + size_of::<V>());
-    if entries < MIN_LEAF_CAPACITY {
-        MIN_LEAF_CAPACITY
-    } else {
-        entries
-    }
+    LEAF_PAYLOAD_BYTES / (size_of::<K>() + size_of::<V>())
 }
 
 // Non-root nodes are at least half full, except the rightmost leaf after packing or appending.
@@ -20,18 +16,41 @@ const fn min_fill(capacity: usize) -> usize {
     capacity / 2
 }
 
-fn bound<K: Copy>(keys: &[K], before: impl Fn(K) -> bool) -> usize {
-    let mut base = 0;
-    let mut len = keys.len();
-    while len > 1 {
-        let half = len / 2;
-        base += usize::from(before(keys[base + half - 1])) * half;
-        len -= half;
+#[inline(always)]
+fn count_lt<S: Simd, K: IntKey>(simd: S, keys: &[K], key: K) -> usize {
+    let lanes = K::lanes::<S>();
+    let mut rest = keys;
+    let mut count = 0;
+    if lanes > 1 {
+        let target = K::splat_encoded(simd, key);
+        while rest.len() >= lanes {
+            let (block, tail) = rest.split_at(lanes);
+            count += K::load_encoded(simd, block)
+                .simd_lt(target)
+                .to_bitmask()
+                .count_ones() as usize;
+            rest = tail;
+        }
     }
-    base + usize::from(keys.get(base).is_some_and(|&key| before(key)))
+    count + rest.iter().filter(|&&k| k < key).count()
+}
+
+#[inline(always)]
+fn lower_bound<S: Simd, K: IntKey>(simd: S, keys: &[K], key: K) -> usize {
+    const BLOCK: usize = 16;
+    if keys.len() < BLOCK {
+        return count_lt(simd, keys, key);
+    }
+    let last = keys.len() - BLOCK;
+    let (blocks, _) = keys[..keys.len() - 1].as_chunks::<BLOCK>();
+    let block = blocks.partition_point(|keys| keys[BLOCK - 1] < key);
+    // The last window may overlap its predecessor. All keys before its start are smaller.
+    let start = (block * BLOCK).min(last);
+    start + count_lt(simd, &keys[start..start + BLOCK], key)
 }
 
 pub(in super::super) struct BPlus<K, V, const CAP: usize> {
+    level: Level,
     root: Option<Node<K, V, CAP>>,
 }
 
@@ -49,15 +68,17 @@ struct Leaf<K, V, const CAP: usize> {
 struct Branch<K, V, const CAP: usize> {
     // Each separator is the inclusive maximum of its child.
     keys: Vec<K>,
-    children: Vec<Child<K, V, CAP>>,
+    children: Vec<Node<K, V, CAP>>,
+    counts: Vec<usize>,
 }
 
-struct Child<K, V, const CAP: usize> {
-    node: Node<K, V, CAP>,
-    count: usize,
+enum Insert<V, N> {
+    Done(Option<V>),
+    FullLeaf(usize),
+    Split(N),
 }
 
-impl<K: Copy + Ord, V: Copy, const CAP: usize> Leaf<K, V, CAP> {
+impl<K: IntKey, V: Copy, const CAP: usize> Leaf<K, V, CAP> {
     fn single(key: K, value: V) -> Self {
         Self {
             keys: [key; CAP],
@@ -66,8 +87,8 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Leaf<K, V, CAP> {
         }
     }
 
-    fn lower_bound(&self, key: K) -> usize {
-        bound(&self.keys[..self.len], |other| other < key)
+    fn lower_bound(&self, simd: impl Simd, key: K) -> usize {
+        lower_bound(simd, &self.keys[..self.len], key)
     }
 
     fn entry(&self, index: usize) -> Option<(K, V)> {
@@ -109,87 +130,84 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Leaf<K, V, CAP> {
         left.len = left_len;
     }
 
-    fn insert_into_pair(left: &mut Self, right: &mut Self, key: K, value: V) {
+    fn insert_into_pair(simd: impl Simd, left: &mut Self, right: &mut Self, key: K, value: V) {
         let target = if key <= left.keys[left.len - 1] {
             left
         } else {
             right
         };
-        target.insert(target.lower_bound(key), key, value);
+        target.insert(target.lower_bound(simd, key), key, value);
     }
 
-    fn split_insert(&mut self, key: K, value: V) -> Node<K, V, CAP> {
+    fn split_insert(&mut self, simd: impl Simd, key: K, value: V) -> Node<K, V, CAP> {
         let mut right = Box::new(Self::single(key, value));
         if key < self.keys[CAP - 1] {
             right.len = 0;
             Self::balance(self, &mut right, min_fill(CAP));
-            Self::insert_into_pair(self, &mut right, key, value);
+            Self::insert_into_pair(simd, self, &mut right, key, value);
         }
         Node::Leaf(right)
     }
 }
 
-impl<K: Copy + Ord, V: Copy, const CAP: usize> Branch<K, V, CAP> {
-    const CAPACITY: usize = NODE_PAYLOAD_BYTES / (size_of::<K>() + size_of::<Child<K, V, CAP>>());
+impl<K: IntKey, V: Copy, const CAP: usize> Branch<K, V, CAP> {
+    // One temporary slot stages a child before a full-branch split.
+    const CAPACITY: usize = BRANCH_PAYLOAD_BYTES
+        / (size_of::<K>() + size_of::<Node<K, V, CAP>>() + size_of::<usize>())
+        - 1;
 
-    fn new() -> Self {
+    fn with_capacity(slots: usize) -> Self {
         Self {
-            keys: Vec::with_capacity(Self::CAPACITY + 1),
-            children: Vec::with_capacity(Self::CAPACITY + 1),
+            keys: Vec::with_capacity(slots),
+            counts: Vec::with_capacity(slots),
+            children: Vec::with_capacity(slots),
         }
     }
 
     fn push(&mut self, node: Node<K, V, CAP>) {
         self.keys.push(node.max_key());
         let count = node.count();
-        self.children.push(Child { node, count });
+        self.counts.push(count);
+        self.children.push(node);
     }
 
-    fn child_for(&self, key: K) -> usize {
-        bound(&self.keys, |other| other < key).min(self.keys.len() - 1)
+    fn child_for(&self, simd: impl Simd, key: K) -> usize {
+        lower_bound(simd, &self.keys[..self.keys.len() - 1], key)
     }
 
     fn child_at(&self, mut index: usize) -> Option<(usize, usize)> {
-        for (slot, child) in self.children.iter().enumerate() {
-            if index < child.count {
+        for (slot, &count) in self.counts.iter().enumerate() {
+            if index < count {
                 return Some((slot, index));
             }
-            index -= child.count;
+            index -= count;
         }
         None
     }
 
     fn refresh(&mut self, slot: usize) {
-        let child = &mut self.children[slot];
-        self.keys[slot] = child.node.max_key();
-        child.count = child.node.count();
+        self.keys[slot] = self.children[slot].max_key();
+        self.counts[slot] = self.children[slot].count();
     }
 
-    fn grow_child(
-        &mut self,
-        slot: usize,
-        change: isize,
-        right: Option<Node<K, V, CAP>>,
-    ) -> Option<Node<K, V, CAP>> {
-        self.keys[slot] = self.children[slot].node.max_key();
-        self.children[slot].count = self.children[slot].count.wrapping_add_signed(change);
-        let right = right?;
-        let count = right.count();
-        self.children[slot].count -= count;
-        self.keys.insert(slot + 1, right.max_key());
-        self.children.insert(slot + 1, Child { node: right, count });
+    fn insert_child(&mut self, slot: usize, node: Node<K, V, CAP>) -> Option<Node<K, V, CAP>> {
+        self.keys.insert(slot, node.max_key());
+        self.counts.insert(slot, node.count());
+        self.children.insert(slot, node);
         if self.children.len() <= Self::CAPACITY {
             return None;
         }
-        let mut right = Box::new(Self::new());
+        let mut right = Box::new(Self::with_capacity(Self::CAPACITY + 1));
         let midpoint = min_fill(Self::CAPACITY);
         right.keys.extend(self.keys.drain(midpoint..));
+        right.counts.extend(self.counts.drain(midpoint..));
         right.children.extend(self.children.drain(midpoint..));
         Some(Node::Branch(right))
     }
 
     fn remove_child(&mut self, slot: usize) {
         self.keys.remove(slot);
+        self.counts.remove(slot);
         self.children.remove(slot);
     }
 
@@ -199,8 +217,8 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Branch<K, V, CAP> {
         }
         let left_slot = slot.saturating_sub(1);
         let (left, right) = self.children.split_at_mut(left_slot + 1);
-        let left = &mut left[left_slot].node;
-        let right = &mut right[0].node;
+        let left = &mut left[left_slot];
+        let right = &mut right[0];
         let total = left.slots() + right.slots();
         let merged = total <= left.capacity();
         let left_len = if merged { total } else { total / 2 };
@@ -209,10 +227,12 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Branch<K, V, CAP> {
             (Node::Branch(left), Node::Branch(right)) => {
                 if left_len < left.children.len() {
                     right.keys.splice(..0, left.keys.drain(left_len..));
+                    right.counts.splice(..0, left.counts.drain(left_len..));
                     right.children.splice(..0, left.children.drain(left_len..));
                 } else {
                     let moved = left_len - left.children.len();
                     left.keys.extend(right.keys.drain(..moved));
+                    left.counts.extend(right.counts.drain(..moved));
                     left.children.extend(right.children.drain(..moved));
                 }
             }
@@ -227,7 +247,7 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Branch<K, V, CAP> {
     }
 }
 
-impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
+impl<K: IntKey, V: Copy, const CAP: usize> Node<K, V, CAP> {
     fn max_key(&self) -> K {
         match self {
             Self::Leaf(leaf) => leaf.keys[leaf.len - 1],
@@ -238,7 +258,7 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
     fn count(&self) -> usize {
         match self {
             Self::Leaf(leaf) => leaf.len,
-            Self::Branch(branch) => branch.children.iter().map(|child| child.count).sum(),
+            Self::Branch(branch) => branch.counts.iter().sum(),
         }
     }
 
@@ -256,10 +276,12 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
         }
     }
 
-    fn leaf_for(&self, key: K) -> &Leaf<K, V, CAP> {
+    fn leaf_for(&self, simd: impl Simd, key: K) -> &Leaf<K, V, CAP> {
         match self {
             Self::Leaf(leaf) => leaf,
-            Self::Branch(branch) => branch.children[branch.child_for(key)].node.leaf_for(key),
+            Self::Branch(branch) => {
+                branch.children[branch.child_for(simd, key)].leaf_for(simd, key)
+            }
         }
     }
 
@@ -268,21 +290,18 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
             Self::Leaf(leaf) => (index < leaf.len).then_some((leaf, index)),
             Self::Branch(branch) => {
                 let (slot, offset) = branch.child_at(index)?;
-                branch.children[slot].node.leaf_at(offset)
+                branch.children[slot].leaf_at(offset)
             }
         }
     }
 
-    fn rank(&self, key: K) -> usize {
+    fn rank(&self, simd: impl Simd, key: K) -> usize {
         match self {
-            Self::Leaf(leaf) => leaf.lower_bound(key),
+            Self::Leaf(leaf) => leaf.lower_bound(simd, key),
             Self::Branch(branch) => {
-                let slot = branch.child_for(key);
-                let prefix: usize = branch.children[..slot]
-                    .iter()
-                    .map(|child| child.count)
-                    .sum();
-                prefix + branch.children[slot].node.rank(key)
+                let slot = branch.child_for(simd, key);
+                let prefix: usize = branch.counts[..slot].iter().sum();
+                prefix + branch.children[slot].rank(simd, key)
             }
         }
     }
@@ -292,77 +311,66 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
             Self::Leaf(leaf) => leaf.entry(if last { leaf.len - 1 } else { 0 }),
             Self::Branch(branch) => {
                 let slot = if last { branch.children.len() - 1 } else { 0 };
-                branch.children[slot].node.endpoint(last)
+                branch.children[slot].endpoint(last)
             }
         }
     }
 
-    // An overflow returns the full leaf's starting rank without changing the tree.
-    fn try_insert(&mut self, key: K, value: V) -> Result<Option<V>, usize> {
+    fn insert(&mut self, simd: impl Simd, key: K, value: V) -> Insert<V, Self> {
         match self {
             Self::Leaf(leaf) => {
-                let index = leaf.lower_bound(key);
+                let index = leaf.lower_bound(simd, key);
                 if index < leaf.len && leaf.keys[index] == key {
-                    return Ok(Some(replace(&mut leaf.values[index], value)));
+                    return Insert::Done(Some(replace(&mut leaf.values[index], value)));
                 }
                 if leaf.len == CAP {
-                    return Err(0);
+                    return Insert::FullLeaf(index);
                 }
                 leaf.insert(index, key, value);
-                Ok(None)
+                Insert::Done(None)
             }
             Self::Branch(branch) => {
-                let slot = branch.child_for(key);
-                match branch.children[slot].node.try_insert(key, value) {
-                    Ok(old) => {
+                let slot = branch.child_for(simd, key);
+                let split = match branch.children[slot].insert(simd, key, value) {
+                    Insert::Done(old) => {
                         if old.is_none() {
-                            branch.grow_child(slot, 1, None);
+                            branch.counts[slot] += 1;
+                            if key > branch.keys[slot] {
+                                branch.keys[slot] = key;
+                            }
                         }
-                        Ok(old)
+                        return Insert::Done(old);
                     }
-                    Err(start) => Err(start
-                        + branch.children[..slot]
-                            .iter()
-                            .map(|c| c.count)
-                            .sum::<usize>()),
-                }
+                    Insert::Split(right) => {
+                        branch.refresh(slot);
+                        branch.insert_child(slot + 1, right)
+                    }
+                    Insert::FullLeaf(index) => branch.insert_full(slot, index, key, value),
+                };
+                split.map_or(Insert::Done(None), Insert::Split)
             }
         }
     }
 
-    fn grow_at(
-        &mut self,
-        index: usize,
-        change: isize,
-        edit: impl FnOnce(&mut Leaf<K, V, CAP>) -> Option<Self>,
-    ) -> Option<Self> {
-        match self {
-            Self::Leaf(leaf) => edit(leaf),
-            Self::Branch(branch) => {
-                let (slot, offset) = branch.child_at(index).unwrap();
-                let right = branch.children[slot].node.grow_at(offset, change, edit);
-                branch.grow_child(slot, change, right)
-            }
-        }
-    }
-
-    fn remove(&mut self, key: K) -> Option<V> {
+    fn remove(&mut self, simd: impl Simd, key: K) -> Option<V> {
         match self {
             Self::Leaf(leaf) => {
-                let index = leaf.lower_bound(key);
+                let index = leaf.lower_bound(simd, key);
                 (index < leaf.len && leaf.keys[index] == key).then(|| leaf.remove(index).1)
             }
             Self::Branch(branch) => {
-                let slot = branch.child_for(key);
+                let slot = branch.child_for(simd, key);
                 let child = &mut branch.children[slot];
-                let value = child.node.remove(key)?;
-                let slots = child.node.slots();
+                let value = child.remove(simd, key)?;
+                let slots = child.slots();
                 if slots == 0 {
                     branch.remove_child(slot);
                 } else {
-                    branch.keys[slot] = child.node.max_key();
-                    child.count -= 1;
-                    if slots < min_fill(child.node.capacity()) {
+                    if key == branch.keys[slot] {
+                        branch.keys[slot] = child.max_key();
+                    }
+                    branch.counts[slot] -= 1;
+                    if slots < min_fill(child.capacity()) {
                         branch.repair(slot);
                     }
                 }
@@ -371,11 +379,13 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
         }
     }
 
-    fn visit(&self, lo: Option<K>, hi: Option<K>, visit: &mut impl FnMut((K, V))) {
+    fn visit(&self, simd: impl Simd, lo: Option<K>, hi: Option<K>, visit: &mut impl FnMut((K, V))) {
         match self {
             Self::Leaf(leaf) => {
-                let start = lo.map_or(0, |key| leaf.lower_bound(key));
-                let end = hi.map_or(leaf.len, |key| bound(&leaf.keys[..leaf.len], |k| k <= key));
+                let start = lo.map_or(0, |key| leaf.lower_bound(simd, key));
+                let end = hi.map_or(leaf.len, |key| {
+                    leaf.keys[..leaf.len].partition_point(|&k| k <= key)
+                });
                 leaf.keys[start..end]
                     .iter()
                     .copied()
@@ -383,60 +393,76 @@ impl<K: Copy + Ord, V: Copy, const CAP: usize> Node<K, V, CAP> {
                     .for_each(visit);
             }
             Self::Branch(branch) => {
-                let first = lo.map_or(0, |key| branch.child_for(key));
-                let last = hi.map_or(branch.children.len() - 1, |key| branch.child_for(key));
+                let first = lo.map_or(0, |key| branch.child_for(simd, key));
+                let last = hi.map_or(branch.children.len() - 1, |key| branch.child_for(simd, key));
                 for slot in first..=last {
                     let lo = if slot == first { lo } else { None };
                     let hi = if slot == last { hi } else { None };
-                    branch.children[slot].node.visit(lo, hi, visit);
+                    branch.children[slot].visit(simd, lo, hi, visit);
                 }
             }
         }
     }
 }
 
-impl<K: Copy + Ord, V: Copy, const CAP: usize> BPlus<K, V, CAP> {
-    fn split_full_leaf(
-        root: &mut Node<K, V, CAP>,
-        start: usize,
+impl<K: IntKey, V: Copy, const CAP: usize> Branch<K, V, CAP> {
+    fn insert_full(
+        &mut self,
+        slot: usize,
+        index: usize,
         key: K,
         value: V,
     ) -> Option<Node<K, V, CAP>> {
-        let right = root.leaf_at(start + CAP);
-        let leaf = root.leaf_at(start).unwrap().0;
-        if (start == 0 && right.is_none()) || key > leaf.keys[CAP - 1] {
-            return root.grow_at(start, 1, |leaf| Some(leaf.split_insert(key, value)));
+        if index == CAP {
+            return self.insert_child(slot + 1, Node::Leaf(Box::new(Leaf::single(key, value))));
         }
-
-        // Split two full leaves into three. Move the sibling's entries out first,
-        // then use the target's new starting rank to finish the split.
+        let left_slot =
+            if slot > 0 && (self.counts[slot - 1] < CAP || slot + 1 == self.children.len()) {
+                slot - 1
+            } else {
+                slot
+            };
+        let (before, after) = self.children.split_at_mut(left_slot + 1);
+        let (Node::Leaf(left), Node::Leaf(right)) = (&mut before[left_slot], &mut after[0]) else {
+            unreachable!()
+        };
+        let total = left.len + right.len;
+        if total < 2 * CAP {
+            if slot == left_slot {
+                let (k, v) = left.remove(CAP - 1);
+                right.insert(0, k, v);
+                left.insert(index, key, value);
+            } else if index == 0 {
+                left.insert(left.len, key, value);
+            } else {
+                let (k, v) = right.remove(0);
+                left.insert(left.len, k, v);
+                right.insert(index - 1, key, value);
+            }
+            self.refresh(left_slot);
+            self.refresh(left_slot + 1);
+            return None;
+        }
         let moved = CAP / 3;
-        let kept = CAP - moved;
         let mut middle = Box::new(Leaf::single(key, value));
         middle.len = 0;
-        let target = if start > 0 {
-            root.grow_at(start - 1, -(moved as isize), |leaf| {
-                Leaf::balance(leaf, &mut middle, kept);
-                None
-            });
-            start - moved
+        Leaf::balance(&mut middle, right, moved);
+        Leaf::balance(left, &mut middle, CAP - moved);
+        let left_index = if slot == left_slot {
+            index
         } else {
-            root.grow_at(CAP, -(moved as isize), |leaf| {
-                Leaf::balance(&mut middle, leaf, moved);
-                None
-            });
-            start
+            CAP + index
         };
-        root.grow_at(target, moved as isize + 1, |leaf| {
-            if start > 0 {
-                Leaf::balance(&mut middle, leaf, kept);
-                swap(leaf, &mut middle);
-            } else {
-                Leaf::balance(leaf, &mut middle, kept);
-            }
-            Leaf::insert_into_pair(leaf, &mut middle, key, value);
-            Some(Node::Leaf(middle))
-        })
+        if left_index < left.len {
+            left.insert(left_index, key, value);
+        } else if left_index < left.len + middle.len {
+            middle.insert(left_index - left.len, key, value);
+        } else {
+            right.insert(left_index - left.len - middle.len, key, value);
+        }
+        self.refresh(left_slot);
+        self.refresh(left_slot + 1);
+        self.insert_child(left_slot + 1, Node::Leaf(middle))
     }
 }
 
@@ -469,15 +495,19 @@ impl<K: IntKey, V: Value, const CAP: usize> From<Vec<(K, V)>> for BPlus<K, V, CA
             let mut nodes = level.into_iter();
             level = (0..groups)
                 .map(|group| {
-                    let mut branch = Box::new(Branch::new());
-                    for node in nodes.by_ref().take(base + usize::from(group < extra)) {
+                    let slots = base + usize::from(group < extra);
+                    let mut branch = Box::new(Branch::with_capacity(slots + 1));
+                    for node in nodes.by_ref().take(slots) {
                         branch.push(node);
                     }
                     Node::Branch(branch)
                 })
                 .collect();
         }
-        Self { root: level.pop() }
+        Self {
+            level: Level::new(),
+            root: level.pop(),
+        }
     }
 }
 
@@ -488,7 +518,10 @@ impl<K: IntKey, V: Value, const CAP: usize> Collection<K, V> for BPlus<K, V, CAP
     const ORDER_STATISTICS: bool = true;
 
     fn empty() -> Self {
-        Self { root: None }
+        Self {
+            level: Level::new(),
+            root: None,
+        }
     }
 
     fn build(entries: Vec<(K, V)>) -> Self {
@@ -496,9 +529,12 @@ impl<K: IntKey, V: Value, const CAP: usize> Collection<K, V> for BPlus<K, V, CAP
     }
 
     fn get(&self, key: K) -> Option<V> {
-        let leaf = self.root.as_ref()?.leaf_for(key);
-        let index = leaf.lower_bound(key);
-        (index < leaf.len && leaf.keys[index] == key).then(|| leaf.values[index])
+        let root = self.root.as_ref()?;
+        dispatch!(self.level, simd => {
+            let leaf = root.leaf_for(simd, key);
+            let index = leaf.lower_bound(simd, key);
+            (index < leaf.len && leaf.keys[index] == key).then(|| leaf.values[index])
+        })
     }
 
     fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -506,52 +542,29 @@ impl<K: IntKey, V: Value, const CAP: usize> Collection<K, V> for BPlus<K, V, CAP
             self.root = Some(Node::Leaf(Box::new(Leaf::single(key, value))));
             return None;
         };
-        let start = match root.try_insert(key, value) {
-            Ok(old) => return old,
-            Err(start) => start,
+        let right = match dispatch!(self.level, simd => root.insert(simd, key, value)) {
+            Insert::Done(old) => return old,
+            Insert::Split(right) => right,
+            Insert::FullLeaf(_) => {
+                let Node::Leaf(leaf) = root else {
+                    unreachable!()
+                };
+                dispatch!(self.level, simd => leaf.split_insert(simd, key, value))
+            }
         };
-        let left = start
-            .checked_sub(1)
-            .filter(|&index| root.leaf_at(index).unwrap().0.len < CAP);
-        let right = start + CAP;
-        let neighbor = left.map(|index| (index, true)).or_else(|| {
-            root.leaf_at(right)
-                .filter(|(leaf, _)| leaf.len < CAP)
-                .map(|_| (right, false))
-        });
-        if let Some((neighbor, to_left)) = neighbor {
-            let mut entry = (key, value);
-            root.grow_at(start, 0, |leaf| {
-                let index = leaf.lower_bound(key);
-                if to_left && index > 0 {
-                    entry = leaf.remove(0);
-                    leaf.insert(index - 1, key, value);
-                } else if !to_left && index < CAP {
-                    entry = leaf.remove(CAP - 1);
-                    leaf.insert(index, key, value);
-                }
-                None
-            });
-            root.grow_at(neighbor, 1, |leaf| {
-                let index = if to_left { leaf.len } else { 0 };
-                leaf.insert(index, entry.0, entry.1);
-                None
-            });
-        } else if let Some(right) = Self::split_full_leaf(root, start, key, value) {
-            let mut branch = Box::new(Branch::new());
-            branch.push(self.root.take().unwrap());
-            branch.push(right);
-            self.root = Some(Node::Branch(branch));
-        }
+        let mut branch = Box::new(Branch::with_capacity(Branch::<K, V, CAP>::CAPACITY + 1));
+        branch.push(self.root.take().unwrap());
+        branch.push(right);
+        self.root = Some(Node::Branch(branch));
         None
     }
 
     fn remove(&mut self, key: K) -> Option<V> {
         let root = self.root.as_mut()?;
-        let value = root.remove(key)?;
+        let value = dispatch!(self.level, simd => root.remove(simd, key))?;
         match root {
             Node::Branch(branch) if branch.children.len() == 1 => {
-                *root = branch.children.pop().unwrap().node;
+                *root = branch.children.pop().unwrap();
             }
             _ if root.slots() == 0 => self.root = None,
             _ => {}
@@ -562,7 +575,7 @@ impl<K: IntKey, V: Value, const CAP: usize> Collection<K, V> for BPlus<K, V, CAP
     fn visit(&self, bounds: Option<(K, K)>, mut visit: impl FnMut((K, V))) {
         let (lo, hi) = bounds.map_or((None, None), |(lo, hi)| (Some(lo), Some(hi)));
         if let Some(root) = &self.root {
-            root.visit(lo, hi, &mut visit);
+            dispatch!(self.level, simd => root.visit(simd, lo, hi, &mut visit));
         }
     }
 
@@ -571,7 +584,10 @@ impl<K: IntKey, V: Value, const CAP: usize> Collection<K, V> for BPlus<K, V, CAP
     }
 
     fn rank(&self, key: K) -> usize {
-        self.root.as_ref().map_or(0, |root| root.rank(key))
+        self.root.as_ref().map_or(
+            0,
+            |root| dispatch!(self.level, simd => root.rank(simd, key)),
+        )
     }
 
     fn select(&self, index: usize) -> Option<(K, V)> {
@@ -616,15 +632,19 @@ mod tests {
             }
             Node::Branch(branch) => {
                 assert_eq!(branch.keys.len(), slots);
+                assert_eq!(branch.counts.len(), slots);
                 assert!(branch.keys.windows(2).all(|keys| keys[0] < keys[1]));
                 assert!(!root || slots >= 2);
                 let mut total = 0;
                 let mut height = 0;
                 for (slot, child) in branch.children.iter().enumerate() {
                     let (count, child_height) =
-                        check_node(&child.node, false, rightmost && slot + 1 == slots, leaves);
-                    assert_eq!(child.count, count, "child subtree count at slot {slot}");
-                    assert_eq!(branch.keys[slot], child.node.max_key());
+                        check_node(child, false, rightmost && slot + 1 == slots, leaves);
+                    assert_eq!(
+                        branch.counts[slot], count,
+                        "child subtree count at slot {slot}"
+                    );
+                    assert_eq!(branch.keys[slot], child.max_key());
                     assert!(slot == 0 || height == child_height);
                     height = child_height;
                     total += count;
@@ -643,6 +663,32 @@ mod tests {
             assert_eq!(count, model.len());
             height
         })
+    }
+
+    fn check_lower_bounds<K: IntKey>(high_bit: u64) {
+        let keys: Vec<_> = (0..128)
+            .map(|i| K::from_u64(high_bit - 64 + (i / 2) * 2))
+            .collect();
+        dispatch!(Level::new(), simd => {
+            for len in 0..=keys.len() {
+                let keys = &keys[..len];
+                for raw in (high_bit - 65..=high_bit + 65).chain([0, u64::MAX]) {
+                    let key = K::from_u64(raw);
+                    assert_eq!(lower_bound(simd, keys, key), keys.partition_point(|&k| k < key),
+                        "key {key:?}, length {len}");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn lower_bounds_u32() {
+        check_lower_bounds::<u32>(1 << 31);
+    }
+
+    #[test]
+    fn lower_bounds_u64() {
+        check_lower_bounds::<u64>(1 << 63);
     }
 
     #[test]

@@ -263,7 +263,16 @@ fn golden_vectors() {
     if std::env::var("TESSERA_UPDATE_ORDERING_VECTORS").as_deref() == Ok("1") {
         std::fs::write(VECTOR_PATH, &generated).unwrap();
     }
-    let committed = std::fs::read_to_string(VECTOR_PATH).unwrap();
+    // A packaged crate has no repository vectors; repository CI sets TESSERA_REQUIRE_VECTORS=1.
+    let committed = match std::fs::read_to_string(VECTOR_PATH) {
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && std::env::var("TESSERA_REQUIRE_VECTORS").as_deref() != Ok("1") =>
+        {
+            return;
+        }
+        result => result.unwrap(),
+    };
     if committed != generated {
         let line = committed
             .lines()

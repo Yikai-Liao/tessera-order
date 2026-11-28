@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p tessera-order --test golden_vectors
+        env:
+          TESSERA_REQUIRE_VECTORS: '1'
 
   publish:
     needs: [validate, golden-vectors]

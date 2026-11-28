@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: the Rust crate has supported stable full sorting since 0.1, under the `stable_` names that 0.2 renames. Cached-key sorting, argsort and single-rank selection are additions for 0.2. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
+Status: the Rust crate has supported stable full sorting since 0.1, under the `stable_` names that 0.2 renames. Cached-key sorting, argsort and single-rank selection are additions for 0.2. Cross-language golden vectors in `conformance/vectors/` record key encodings and stable orderings that the Rust and Go tests check. A published crate or module lacks that directory and skips them; repository CI sets `TESSERA_REQUIRE_VECTORS=1` so a missing file fails.
 
 ## Sort contracts
 

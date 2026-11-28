@@ -54,25 +54,26 @@ export function canonicalSiteUrl(docsBase = "/tessera-order/"): string {
 
 /** Parse the single-owner chapter sequence from `docs/explain/index.md#reading-order`. */
 export async function explainReadingOrder(raw: string): Promise<string[]> {
-  const start = raw.search(/^##\s+Reading order\b/m);
-  const tail = start >= 0 ? raw.slice(start).replace(/^##\s+Reading order\b[^\n]*\n?/, "") : "";
-  const nextHeading = tail.search(/^##\s/m);
-  const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
   renderer ??= createMarkdownRenderer(process.cwd());
   const md = await renderer;
-  const { document } = parseHTML(md.render(section, {}));
+  // Render the full document so reference-style link definitions anywhere on the page resolve.
+  const { document } = parseHTML(md.render(raw, {}));
+  const heading = [...document.querySelectorAll("h2")].find((h) =>
+    /^reading order\b/i.test(h.textContent?.trim() ?? ""),
+  );
+  const tableLinks: Element[] = [];
+  const listLinks: Element[] = [];
+  for (let node = heading?.nextElementSibling ?? null; node; node = node.nextElementSibling) {
+    if (node.tagName === "H2") break;
+    tableLinks.push(...node.querySelectorAll("tbody tr td:first-child a[href]"));
+    for (const li of node.querySelectorAll("li")) {
+      const first = li.querySelector("a[href]");
+      if (first) listLinks.push(first);
+    }
+  }
   const seen = new Set<string>(["explain/index.md"]);
   const order = ["explain/index.md"];
-  // Use VitePress's rendered table first column (or list item lead links) so optional table syntax
-  // such as omitted leading pipes works while links in description columns never reorder chapters.
-  const tableLinks = [...document.querySelectorAll("tbody tr td:first-child a[href]")];
-  const entries = tableLinks.length
-    ? tableLinks
-    : [...document.querySelectorAll("li")].flatMap((li) => {
-        const first = li.querySelector("a[href]");
-        return first ? [first] : [];
-      });
-  for (const link of entries) {
+  for (const link of tableLinks.length ? tableLinks : listLinks) {
     const rawHref = link.getAttribute("href")?.split(/[?#]/, 1)[0] ?? "";
     if (!rawHref || /^[a-z][a-z0-9+.-]*:|\.\.|^\//i.test(rawHref)) continue;
     const stem = rawHref.replace(/^\.\//, "").replace(/\.(?:md|html)$/i, "");

@@ -650,7 +650,7 @@ const emptyMessage = computed(() => {
         </fieldset>
         <span v-if="loading" role="status" class="status">Loading…</span>
       </div>
-      <p v-if="staleNotice && !error" class="chart-note" role="status">
+      <p v-if="staleNotice" class="chart-note" role="status">
         {{ staleNotice }}
         <button
           type="button"

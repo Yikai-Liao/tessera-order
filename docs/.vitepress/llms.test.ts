@@ -206,10 +206,10 @@ test("every page has a clean mirror, unique metadata and exactly one audience ti
   assert.ok(
     chapters.every((position, i) => position >= 0 && (i === 0 || position > chapters[i - 1])),
   );
-  // Reordering chapters in docs/explain/index.md#reading-order must reorder sections and bundles directly,
-  // optional leading pipes must still parse via VitePress's table parser, and description links must not reorder.
+  // Reordering chapters in docs/explain/index.md#reading-order must reorder sections and bundles directly;
+  // optional leading pipes and reference links defined later on the page must resolve, while description links must not reorder.
   const swapped = await explainReadingOrder(
-    "## Reading order\n\n| Page | You will learn |\n|---|---|\n[Keys](keys.md) | see [tiles](tiles.md) first |\n| [Radix](radix-sort.md) | intro |\n| [Tiles](tiles.md) | leaf |\n\n## Memory\n",
+    "## Reading order\n\n| Page | You will learn |\n|---|---|\n[Keys][keys-ch] | see [tiles](tiles.md) first |\n| [Radix](radix-sort.md) | intro |\n| [Tiles](tiles.md) | leaf |\n\n## Memory\n\n[keys-ch]: keys.md\n",
   );
   const reordered = pageSections(catalog.pages, swapped)
     .find((s) => s.id === "explain")!

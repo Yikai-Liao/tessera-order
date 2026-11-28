@@ -17,6 +17,9 @@ import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 /** Hosted matrix width. More shards shorten the slowest measurement at the
  * cost of another runner setup per shard and more concurrent slots. */
 export const CONTINUOUS_SHARDS = 8;
+/** Go measurement runs beside the Rust shards, so its width is capped separately to keep the
+ * PR's extra concurrent slots bounded. */
+export const GO_CONTINUOUS_SHARDS = 4;
 
 /** Worker count of a hosted runner's parallel measurements: each hosted shard reserves four
  * CPUs, so continuous history admits only serial and `t4` executions. */
@@ -105,18 +108,14 @@ export async function readPaired(directory: string, source: PairedSource, prepar
         run.binaries.baseline,
         run.binaries.current,
       ].every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) ||
-      (run.go
-        ? JSON.stringify(run.go.builds.baseline) !== JSON.stringify(run.go.builds.current) ||
-          !run.go.builds.current.Settings.some(
-            ({ Key, Value }) => Key === "GOEXPERIMENT" && Value === "simd",
-          )
-        : !run.builds ||
+      (!run.go &&
+        (!run.builds ||
           JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
           run.builds.current.features.join(",") !==
             continuous.features
               .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
               .toSorted()
-              .join(","))
+              .join(",")))
     )
       throw new Error("Missing source or configuration provenance");
     for (const id of run.cases) {

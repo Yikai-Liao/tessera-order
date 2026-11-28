@@ -89,11 +89,12 @@ export async function appendRun(directory: string, input: TrackingRun) {
   } else runs.push(run);
   runs.sort((a, b) => a.time.localeCompare(b.time));
   const months = Map.groupBy(runs, (entry) => entry.time.slice(0, 7));
-  for (const [month, entries] of months)
+  for (const [month, entries] of months) {
     await writeFile(
       join(directory, month + ".jsonl"),
       entries.map((entry) => JSON.stringify(entry) + "\n").join(""),
     );
+  }
   const cases = trackingCases([...new Set(runs.flatMap((entry) => Object.keys(entry.values)))]);
   // Validate what the browser will parse, so a bad index fails publication instead of the page.
   const index = indexSchema.parse({

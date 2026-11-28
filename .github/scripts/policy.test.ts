@@ -162,9 +162,12 @@ test("routing keeps library, comparison and revision checks with their owners", 
         "bench/tracking/run.sh",
         "bench/tracking/Dockerfile",
       ],
-      { benchmark: true },
+      { benchmark: true, benchmark_go: true },
     ],
-    [["bench/tracking/result.ts", "bench/tracking/history.ts"], { benchmark: true, docs: true }],
+    [
+      ["bench/tracking/result.ts", "bench/tracking/history.ts"],
+      { benchmark: true, benchmark_go: true, docs: true },
+    ],
     [["bench/report/implementation-tone.ts"], { docs: true }],
     [["docs/explain/keys.md", "conformance/semantics.md"], { docs: true }],
     [
@@ -257,6 +260,11 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
       "Cargo.lock",
     ])
       goInputs.push(await commit(path, "input"));
+    const trackingInputs: [string, string, string][] = [];
+    for (const path of ["bench/release.ts", "bench/workspace.ts", "bench/tracking/build.ts"]) {
+      const baseline = git("rev-parse", "HEAD");
+      trackingInputs.push([path, baseline, await commit(path, "input")]);
+    }
     process.chdir(root);
     const at = (tested: string) => ({ tested, head: tested, baseline: base });
     assert.equal(marker("rust", at(base)), marker("rust", at(docs)));
@@ -278,6 +286,8 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
     assert.equal((await routeChanges(rustThresholds, goThresholds)).tracking_go, true);
     assert.equal((await routeChanges(base, docs)).tracking_go, false);
     assert.equal((await routeChanges(goThresholds, vectors)).benchmark_go, false);
+    for (const [path, baseline, head] of trackingInputs)
+      assert.equal((await routeChanges(baseline, head)).tracking_go, true, path);
     for (const [i, head] of goInputs.slice(1).entries()) {
       const baseline = goInputs[i];
       assert.notEqual(marker("benchmark_go", at(baseline)), marker("benchmark_go", at(head)));

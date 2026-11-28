@@ -31,7 +31,7 @@ When `ci-ok` passes, the `record` job uploads one artifact per selected or reuse
 
 ## Lanes
 
-Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)). Go measurement sizes its own matrix from its prepared cases, at most four runners, and runs beside the Rust shards without reducing them.
+Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)). Go measurement takes the smaller of its prepared case count and [`GO_CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts) as its width and runs beside the Rust shards without reducing them.
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -105,7 +105,7 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Reproduce change routing | `bun run --silent tools ci changes --base main --head HEAD` |
 | Validate a PR title | `bun run --silent tools ci title 'fix(bench): validate source snapshots'` |
 | Check every commit's DCO sign-off | `bun run --silent tools ci dco main HEAD` |
-| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix`, or `--go-prepared DIR` for a prepared Go pair |
+| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix`, or `--prepared DIR` to size it from a prepared pair |
 | Reproduce the comparison checks | `bun run --silent tools ci check --native` |
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |

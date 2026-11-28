@@ -2,10 +2,10 @@
 
 //! Batch timing and paired block scheduling.
 
-use super::{InputCase, variant::Kernel, variant::Variant};
+use super::{InputCase, go, record, variant::Kernel, variant::Variant};
 use crate::plan::{Column, Execution};
 use serde::Serialize;
-use std::{fs::File, path::Path};
+use std::{cell::LazyCell, fs::File, path::Path};
 
 /// Fixed block budget and limits for calibrating each verified sample.
 pub(super) struct Sampling {
@@ -115,7 +115,8 @@ pub(super) fn measure_case(
     go_worker: Option<(&Path, &File)>,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
-    let input = super::record::CaseInput::new(case);
+    let input = record::CaseInput::new(case);
+    let digest = LazyCell::new(|| format!("{:016x}", record::input_digest(&input)));
     let mut active = columns.to_vec();
     let control = active
         .iter()
@@ -136,8 +137,9 @@ pub(super) fn measure_case(
             let (variant, execution) = active[index];
             let (batch, elapsed_ns) = if variant.adapter == "go" {
                 let (binary, lock) = go_worker.ok_or("missing Go worker")?;
-                let mut worker = super::go::Worker::start(binary, execution, Some(lock))?;
+                let mut worker = go::Worker::start(binary, execution, Some(lock))?;
                 let ready = worker.case("prepare", variant.name, case, execution)?;
+                go::check_input_digest(case, variant.name, &digest, &ready)?;
                 let bytes = ready["buffer_bytes"]
                     .as_u64()
                     .filter(|&n| n > 0)

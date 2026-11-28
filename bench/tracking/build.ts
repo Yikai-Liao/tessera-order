@@ -13,7 +13,7 @@ import {
   parseCaseId,
   SORT,
 } from "../catalog.ts";
-import { type GoBuild, goBuildInfo, goRequests, listGo } from "../local/go.ts";
+import { goBuildInfo, goRequests, listGo } from "../local/go.ts";
 import { loadPlan, type Plan, plansByOperation } from "../plan.ts";
 import { buildGoWorker, withComparisonWorkspace } from "../release.ts";
 import {
@@ -25,7 +25,7 @@ import {
 import { reportFailure } from "./failure.ts";
 import { columnSlug, trackingColumn, trackingImplementation } from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
-import { runSchema, type TrackingRun } from "./result.ts";
+import { type GoBuild, runSchema, type TrackingRun } from "./result.ts";
 
 /** Local image name shared by the build and measurement stages; the registry tag is the measurer's. */
 export const localImage = (column: Column) => `tessera-tracking:${columnSlug(column)}`;
@@ -129,22 +129,20 @@ if (import.meta.main) {
         const context = join(out, "image");
         await mkdir(context);
         const plan = columnPlan(await loadPlan("continuous"), column);
-        const go = implementation.adapter === "go";
+        const planPath = join(context, "plan.json");
+        await writeFile(planPath, JSON.stringify(plan));
         let ids: string[];
         let provenance: Pick<TrackingBuild, "rustc" | "rustflags" | "native" | "memory" | "go">;
-        const requests = go
-          ? await goRequests(workspace, plan, join(context, "plan.json"), implementation.id)
-          : undefined;
+        const requests =
+          implementation.adapter === "go"
+            ? await goRequests(workspace, planPath, implementation.id)
+            : undefined;
         if (requests) {
           await mkdir(workspace.directory);
           const binary = await buildGoWorker(root, workspace);
           ids = await listGo(binary, requests);
           await copyFile(binary, join(context, "benchmark"));
           provenance = { go: await goBuildInfo(binary) };
-          await writeFile(
-            join(context, "go-cases.jsonl"),
-            ids.map((id) => JSON.stringify(requests[id])).join("\n") + "\n",
-          );
         } else {
           const env = await benchmarkEnvironment(tree, {
             targetTriple: "x86_64-unknown-linux-gnu",
@@ -167,7 +165,6 @@ if (import.meta.main) {
           }
           await copyFile(built.executable, join(context, "benchmark"));
           await command("strip", ["--strip-debug", join(context, "benchmark")]);
-          await writeFile(join(context, "plan.json"), JSON.stringify(plan));
           // Peak extra allocation per case, measured by the same instrumented worker as local
           // comparisons. Counts do not depend on the host, so Actions measures them once per build.
           // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
@@ -197,7 +194,7 @@ if (import.meta.main) {
           ids = (
             await command(built.executable, [], {
               capture: true,
-              env: { TESSERA_BENCH_PLAN: join(context, "plan.json"), TESSERA_BENCH_LIST: "1" },
+              env: { TESSERA_BENCH_PLAN: planPath, TESSERA_BENCH_LIST: "1" },
             })
           )
             .split("\n")
@@ -218,13 +215,18 @@ if (import.meta.main) {
           };
         }
         if (!ids.length) throw new Error("Tracking plan selects no supported cases");
-        await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
         const jobs = remoteJobs(ids);
-        for (const [index, job] of jobs.entries())
-          await writeFile(
-            join(context, `job-${index + 1}.ids`),
-            job.map((id) => (requests ? JSON.stringify(requests[id]) : id)).join("\n") + "\n",
-          );
+        for (const [name, cases] of [
+          ["cases", ids] as const,
+          ...jobs.map((job, index) => [`job-${index + 1}`, job] as const),
+        ]) {
+          await writeFile(join(context, name + ".ids"), cases.join("\n") + "\n");
+          if (requests)
+            await writeFile(
+              join(context, name + ".jsonl"),
+              cases.map((id) => JSON.stringify(requests[id])).join("\n") + "\n",
+            );
+        }
         for (const name of ["Dockerfile", "run.sh"])
           await copyFile(join(root, "bench/tracking", name), join(context, name));
         const image = localImage(column);

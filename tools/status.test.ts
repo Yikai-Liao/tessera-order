@@ -86,7 +86,6 @@ function commit(sha: string, html_url = "commit-url") {
 
 test("status pins remote refs and reads all feedback pages", async (t) => {
   const f = await fixture(t, {
-    "git/matching-refs/heads/benchmark-data": [],
     "commits/main": commit("current"),
     "commits/current/check-runs?per_page=100": [
       { check_runs: [check(1)] },
@@ -215,7 +214,6 @@ test("missing workflows never become a clean verdict", async (t) => {
 
 test("main has no automatic benchmark, while an unmeasured PR is still missing", async (t) => {
   const responses = {
-    "git/matching-refs/heads/benchmark-data": [],
     "commits/main": commit("current"),
     "pulls/49": {
       number: 49,
@@ -230,127 +228,11 @@ test("main has no automatic benchmark, while an unmeasured PR is still missing",
   };
   const f = await fixture(t, responses);
   assert.equal(JSON.parse(f.run("status", "main")).benchmark.state, "not_applicable");
+  assert.ok(!(await f.requests()).some((path) => path.includes("benchmark-data")));
   assert.equal(JSON.parse(f.run("status", "--pr", "49")).benchmark.state, "missing");
 });
 
 test("API failures fail the command instead of returning empty success", async (t) => {
   const f = await fixture(t, {});
   assert.throws(() => f.run("status", "missing"));
-});
-
-test("main finds exact Go runs and fills missing executions from earlier journals", async (t) => {
-  const head = "a".repeat(40);
-  const stale = "b".repeat(40);
-  const encoded = (data: string) => ({ content: Buffer.from(data).toString("base64") });
-  const tracked = (hash: string, execution: string, time = "2026-11-20T00:00:00Z") => ({
-    hash,
-    execution,
-    time,
-    commit_time: hash === head ? commit(head).commit.committer.date : "2026-10-01T00:00:00Z",
-    id: "00000000-0000-4000-8000-000000000001",
-    spec: "00000000-0000-4000-8000-000000000002",
-    image: `registry.bencher.dev/p/i@sha256:${"0".repeat(64)}`,
-    workflow: "https://github.com/owner/project/actions/runs/77",
-    go: { GoVersion: "go1.27.4", Settings: [], Deps: [] },
-    values: { [`go/argsort/u64/random/32/s1/${execution}`]: [100, 90, 110] },
-  });
-  const journal = (month: string) => `contents/go-tessera/${month}.jsonl?ref=benchmark-data`;
-  const jsonl = (entries: ReturnType<typeof tracked>[]) =>
-    entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
-  const priorSerial = tracked(stale, "serial", "2026-10-20T00:00:00Z");
-  const priorT4 = tracked(stale, "t4", "2026-10-20T00:00:00Z");
-  const currentSerial = tracked(head, "serial");
-  const currentT4 = tracked(head, "t4");
-  const late = tracked(head, "t4", "2026-12-03T00:00:00Z");
-  for (const scenario of [
-    {
-      name: "missing head with prior runs in two earlier months",
-      state: "unmeasured",
-      september: [
-        { ...priorT4, time: "2026-09-20T00:00:00Z", commit_time: "2026-09-19T00:00:00Z" },
-      ],
-      october: [tracked("c".repeat(40), "serial", "2026-10-19T00:00:00Z"), priorSerial],
-      november: [],
-      december: [],
-      requested: ["2026-11", "2026-10", "2026-09"],
-      serial: stale,
-      t4: stale,
-    },
-    {
-      name: "partial head with October fallback",
-      state: "partial",
-      october: [priorSerial, priorT4],
-      november: [{ ...currentSerial, padding: "x".repeat(1_100_000) }],
-      december: [],
-      requested: ["2026-11", "2026-10"],
-      serial: head,
-      t4: stale,
-    },
-    {
-      name: "complete head takes precedence over a newer run of another commit",
-      state: "measured",
-      november: [currentSerial, currentT4],
-      december: [tracked(stale, "serial", "2026-12-01T00:00:00Z")],
-      requested: ["2026-12", "2026-11"],
-      serial: head,
-      t4: head,
-    },
-    {
-      name: "head delayed into a later month",
-      state: "measured",
-      november: [tracked(stale, "t4"), currentSerial],
-      december: [late],
-      requested: ["2026-12", "2026-11"],
-      serial: head,
-      t4: head,
-    },
-    {
-      name: "unreadable October stops the fallback scan",
-      state: "partial",
-      november: [currentSerial],
-      december: [],
-      requested: ["2026-11", "2026-10"],
-      serial: head,
-      t4: undefined,
-    },
-  ]) {
-    await t.test(scenario.name, async (t) => {
-      const months = ["2026-08", "2026-09", "2026-10", "2026-11"];
-      if (scenario.december.length) months.push("2026-12");
-      const f = await fixture(t, {
-        "commits/main": commit(head),
-        [`commits/${head}/check-runs?per_page=100`]: [{ check_runs: [] }],
-        [`actions/runs?head_sha=${head}&per_page=100`]: [{ workflow_runs: [] }],
-        "git/matching-refs/heads/benchmark-data": [{ ref: "refs/heads/benchmark-data" }],
-        "contents?ref=benchmark-data": [{ name: "go-tessera" }],
-        "contents/go-tessera/index.json?ref=benchmark-data": encoded(
-          JSON.stringify({
-            months,
-            cases: [],
-            facets: { type: [], input: [], length: [], group: [] },
-          }),
-        ),
-        [journal("2026-11")]: jsonl(scenario.november),
-        [journal("2026-12")]: jsonl(scenario.december),
-        ...(scenario.september ? { [journal("2026-09")]: jsonl(scenario.september) } : {}),
-        ...(scenario.october ? { [journal("2026-10")]: jsonl(scenario.october) } : {}),
-      });
-      const { goTracking } = JSON.parse(f.run("status", "main", "--details"));
-      assert.equal(goTracking.state, scenario.state);
-      for (const execution of ["serial", "t4"] as const) {
-        const result = goTracking.runs.find(
-          (run: { execution: string }) => run.execution === execution,
-        );
-        assert.equal(result?.hash, scenario[execution]);
-        if (!result) continue;
-        assert.deepEqual(result.values, {
-          [`go/argsort/u64/random/32/s1/${execution}`]: [100, 90, 110],
-        });
-      }
-      assert.deepEqual(
-        (await f.requests()).filter((request) => request.endsWith(".jsonl?ref=benchmark-data")),
-        scenario.requested.map((month) => `raw ${journal(month)}`),
-      );
-    });
-  }
 });

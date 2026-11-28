@@ -1,26 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { cp, mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { command } from "../../tools/process.ts";
-import { parseCriterionId, revisionSampling } from "../catalog.ts";
-import type { Plan } from "../plan.ts";
-import { buildGoWorker } from "../release.ts";
-import { fileHash } from "../session.ts";
-import {
-  buildBenchmark,
-  resolveCommit,
-  sourceHash,
-  type Workspace,
-  withWorkspace,
-} from "../workspace.ts";
-import type { PreparedPair } from "./model.ts";
-
-export interface GoBuild {
-  GoVersion: string;
-  Settings: { Key: string; Value: string }[];
-  Deps: unknown[];
-}
+import { executionThreads, parseCriterionId, revisionSampling } from "../catalog.ts";
+import type { GoBuild } from "../tracking/result.ts";
+import { buildBenchmark, type Workspace } from "../workspace.ts";
 
 export interface GoRequest {
   id: string;
@@ -58,15 +41,14 @@ export async function goBuildInfo(binary: string) {
 }
 
 /** The existing plan resolver owns numeric boundaries and batch limits. */
-export async function goRequests(
-  workspace: Workspace,
-  plan: Plan,
-  path: string,
-  implementation: string,
-) {
-  await writeFile(path, JSON.stringify(plan));
+export async function goRequests(workspace: Workspace, path: string, implementation: string) {
   const { executable } = await buildBenchmark(workspace.tree, workspace.target, "compare", [], {
     profile: "dev",
+    env: Object.fromEntries(
+      ["CARGO_BUILD_TARGET", "CARGO_PROFILE_BENCH_DEBUG", "RUSTFLAGS", "CC", "CXX"]
+        .filter((name) => process.env[name] === "")
+        .map((name) => [name, undefined]),
+    ),
   });
   const result = await command(executable, ["describe", path], { capture: true });
   const requests: GoRequests = {};
@@ -74,12 +56,12 @@ export async function goRequests(
     const descriptor = JSON.parse(line);
     const { execution, len } = parseCriterionId(descriptor.id);
     const budget = revisionSampling(len);
-    const parallel = execution !== "serial";
+    const threads = executionThreads(execution);
     requests[descriptor.id] = {
       ...descriptor,
       implementation,
-      parallel,
-      threads: parallel ? Number(execution.slice(1)) : 1,
+      parallel: threads !== undefined,
+      threads: threads ?? 1,
       samples: budget.samples,
       warm_ns: Math.floor((budget.warm_ms * 1000) / budget.samples) * 1000,
       window_ns: Math.floor((budget.window_ms * 1000) / budget.samples) * 1000,
@@ -103,110 +85,19 @@ export async function listGo(binary: string, requests: GoRequests) {
   return supported.sort();
 }
 
-export async function assertGoInventory(
-  binary: string,
-  requests: GoRequests,
-  expected: string[],
-  message: string,
-) {
-  if (JSON.stringify(await listGo(binary, requests)) !== JSON.stringify(expected))
-    throw new Error(message);
-}
-
-export async function prepareGo(root: string, baseline: string, out: string, plan: Plan) {
-  const head = await resolveCommit(root, "HEAD");
-  baseline = await resolveCommit(root, baseline);
-  const present = await command("git", ["ls-tree", baseline, "--", "go/tessera/go.mod"], {
-    cwd: root,
-    capture: true,
+export async function goDigests(binary: string, requests: GoRequests, ids: string[]) {
+  const digests: string[] = [];
+  await command(binary, [], {
+    interact: async (exchange) => {
+      for (const id of ids) {
+        const reply = JSON.parse(
+          await exchange(JSON.stringify({ ...requests[id], action: "digest" })),
+        );
+        if (reply.id !== id || !/^[a-f0-9]{16}$/.test(reply.digest))
+          throw new Error("Missing Go input digest");
+        digests.push(reply.digest);
+      }
+    },
   });
-  if (!present) return { kind: "no-baseline", baseline, head };
-  if (
-    await command("git", ["status", "--porcelain", "--untracked-files=no"], {
-      cwd: root,
-      capture: true,
-    })
-  )
-    throw new Error("Go preparation requires a clean committed checkout");
-
-  return withWorkspace(root, async (workspace) => {
-    const old = join(workspace.directory, "baseline-source");
-    const current = join(workspace.directory, "current-source");
-    for (const [snapshot, revision, paths] of [
-      [old, baseline, ["go/tessera"]],
-      [current, head, ["go/tessera", "bench/go"]],
-    ] as const) {
-      await mkdir(snapshot);
-      const archive = `${snapshot}.tar`;
-      await command("git", ["archive", "-o", archive, revision, ...paths], { cwd: root });
-      await command("tar", ["-xf", archive, "-C", snapshot]);
-    }
-    await mkdir(out);
-    const requests = await goRequests(workspace, plan, join(out, "plan.json"), "go-tessera");
-    const binaryPaths = { baseline: "baseline/worker", current: "current/worker" };
-    const binaries = { baseline: "", current: "" };
-    const builds = {} as NonNullable<PreparedPair["go"]>["builds"];
-    const digest = {} as Record<"baseline" | "current", string[]>;
-    const allCases = Object.keys(requests).sort();
-    if (!allCases.length) throw new Error("Go plan selects no cases");
-    for (const [role, source] of [
-      ["baseline", old],
-      ["current", current],
-    ] as const) {
-      const binary = await buildGoWorker(current, workspace, source);
-      const retained = join(out, binaryPaths[role]);
-      await mkdir(dirname(retained));
-      await cp(binary, retained);
-      binaries[role] = await fileHash(retained);
-      builds[role] = await goBuildInfo(retained);
-      await assertGoInventory(
-        retained,
-        requests,
-        allCases,
-        "Go Tessera inventory does not cover the prepared plan",
-      );
-      // Compare each immutable input in the two worker builds without sampling.
-      digest[role] = [];
-      await command(retained, [], {
-        interact: async (exchange) => {
-          for (const id of allCases) {
-            const reply = JSON.parse(
-              await exchange(JSON.stringify({ ...requests[id], action: "digest" })),
-            );
-            if (reply.id !== id || !/^[a-f0-9]{16}$/.test(reply.digest))
-              throw new Error("Missing Go input digest");
-            digest[role].push(reply.digest);
-          }
-        },
-      });
-    }
-    if (JSON.stringify(digest.baseline) !== JSON.stringify(digest.current))
-      throw new Error("Go revision input digests differ");
-    if (JSON.stringify(builds.baseline) !== JSON.stringify(builds.current))
-      throw new Error("Go revision build settings differ");
-    const pair: PreparedPair = {
-      kind: "prepared-revisions",
-      schema: 1,
-      protocol: "paired-samples-v2",
-      plan,
-      baseline,
-      head,
-      dirty: false,
-      source: {
-        baseline: await sourceHash(join(old, "go/tessera")),
-        current: await sourceHash(join(current, "go/tessera")),
-        harness: await sourceHash(join(current, "bench/go")),
-        catalog: await fileHash(join(root, "bench/catalog.toml")),
-      },
-      binaries,
-      binaryPaths,
-      configuration: "portable-simd",
-      rustc: "",
-      flags: "",
-      cases: allCases,
-      go: { builds, requests },
-    };
-    await writeFile(join(out, "prepared.json"), JSON.stringify(pair));
-    return { kind: pair.kind, head, baseline, cases: allCases.length };
-  });
+  return digests;
 }

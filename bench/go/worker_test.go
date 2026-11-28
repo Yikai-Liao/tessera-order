@@ -119,6 +119,32 @@ func TestVerifyGates(t *testing.T) {
 	}
 }
 
+func TestPrepareDigestIsOptIn(t *testing.T) {
+	old := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(old)
+	req := request{
+		Action: "prepare", Case: inputCase{Type: "u64", Distribution: "random", Len: 1000, Operation: operation{Kind: "sort"}},
+		Implementation: "go-tessera", RecordBytes: 8, Threads: 1,
+	}
+	for _, include := range []bool{false, true} {
+		req.IncludeDigest = include
+		var source, replies bytes.Buffer
+		if err := json.NewEncoder(&source).Encode(req); err != nil {
+			t.Fatal(err)
+		}
+		if err := serve(&source, &replies); err != nil {
+			t.Fatal(err)
+		}
+		var reply map[string]json.RawMessage
+		if err := json.Unmarshal(replies.Bytes(), &reply); err != nil {
+			t.Fatal(err)
+		}
+		if digest, present := reply["digest"]; present != include || include && len(digest) != 18 {
+			t.Fatalf("include_digest=%t: unexpected reply %s", include, replies.Bytes())
+		}
+	}
+}
+
 func TestArgsortVerifierRejectsSourceMutation(t *testing.T) {
 	for _, mutate := range []bool{false, true} {
 		values := []float64{math.Float64frombits(0x7ff8000000000001), math.Copysign(0, -1), 0}

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { parseCriterionId } from "../bench/catalog.ts";
 import { benchmarkCheck, marker } from "../bench/continuous/marker.ts";
-import { indexSchema, parseRuns } from "../bench/tracking/result.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -59,16 +57,6 @@ export interface RepositoryStatus {
   benchmark: { state: string; title: string | null };
   report: string | null;
   goBenchmark?: { state: string; title: string | null; report: string | null };
-  goTracking?: {
-    state: string;
-    runs: {
-      hash: string;
-      execution: string;
-      operations: string[];
-      workflow: string;
-      values?: Record<string, [number, number, number]>;
-    }[];
-  };
   details?: {
     url: string;
     checks: Check[];
@@ -84,12 +72,11 @@ async function repositoryGitHub(root: string) {
     ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
     { cwd: root, capture: true },
   );
-  const read = (path: string, args: string[] = [], capture: true | "raw" = true) =>
-    command("gh", ["api", ...args, `repos/${repo}/${path}`], { cwd: root, capture });
+  const read = (path: string, args: string[] = []) =>
+    command("gh", ["api", ...args, `repos/${repo}/${path}`], { cwd: root, capture: true });
   return {
     repo,
     get: async <T>(path: string): Promise<T> => JSON.parse(await read(path)),
-    getRaw: (path: string) => read(path, ["-H", "Accept: application/vnd.github.raw"], "raw"),
     pages: async <T>(path: string): Promise<T[]> =>
       JSON.parse(await read(path, ["--paginate", "--slurp"])),
   };
@@ -137,7 +124,6 @@ export async function readStatus(
     | undefined;
   let resolved: RepositoryStatus["target"];
   let url: string;
-  let headCommitDate = "";
   if ("pr" in target) {
     pull = await api.get(`pulls/${target.pr}`);
     if (!pull) throw new Error("PR response is missing");
@@ -151,11 +137,9 @@ export async function readStatus(
     const commit = await api.get<{
       sha: string;
       html_url: string;
-      commit: { committer: { date: string } };
     }>(`commits/${encodeURIComponent(target.ref)}`);
     resolved = { ref: target.ref, head: commit.sha, merge: null };
     url = commit.html_url;
-    headCommitDate = commit.commit.committer.date;
   }
   const heads = [...new Set([resolved.head, resolved.merge].filter((sha) => sha !== null))];
   const [checkPages, runPages, commentPages] = await Promise.all([
@@ -194,10 +178,6 @@ export async function readStatus(
   const { check, comment: current } = feedback("rust");
   const { check: goCheck, comment: goComment } = feedback("go");
   const comment = current ? { url: current.html_url, body: current.body } : null;
-  const tracking =
-    !pull && resolved.ref === "main"
-      ? await readGoTracking(api, resolved.head, headCommitDate, details)
-      : undefined;
   return {
     repository: api.repo,
     target: resolved,
@@ -239,7 +219,6 @@ export async function readStatus(
           },
         }
       : {}),
-    ...(tracking ? { goTracking: tracking } : {}),
     ...(details
       ? {
           details: {
@@ -279,67 +258,6 @@ export async function readStatus(
   };
 }
 
-async function readGoTracking(
-  api: Awaited<ReturnType<typeof repositoryGitHub>>,
-  head: string,
-  headCommitDate: string,
-  details: boolean,
-) {
-  const path = "go-tessera";
-  const decode = ({ content }: { content: string }) =>
-    Buffer.from(content, "base64").toString("utf8");
-  const refs = await api.get<{ ref: string }[]>("git/matching-refs/heads/benchmark-data");
-  const ref = "benchmark-data";
-  if (!refs.some((entry) => entry.ref === `refs/heads/${ref}`))
-    return { state: "unmeasured", runs: [] };
-  const files = await api.get<{ name: string }[]>(`contents?ref=${ref}`);
-  if (!files.some((file) => file.name === path)) return { state: "unmeasured", runs: [] };
-  const index = indexSchema.parse(
-    JSON.parse(decode(await api.get(`contents/${path}/index.json?ref=benchmark-data`))),
-  );
-  const headRuns = new Map<string, ReturnType<typeof parseRuns>[number]>();
-  const latest = new Map(headRuns);
-  const executions = ["serial", "t4"];
-  const firstMonth = new Date(headCommitDate).toISOString().slice(0, 7);
-  for (const month of index.months.toReversed()) {
-    const canContainHead = month >= firstMonth;
-    if (!canContainHead && executions.every((execution) => latest.has(execution))) break;
-    let monthRuns: ReturnType<typeof parseRuns>;
-    try {
-      monthRuns = parseRuns(await api.getRaw(`contents/${path}/${month}.jsonl?ref=${ref}`));
-    } catch (error) {
-      if (canContainHead) throw error;
-      break;
-    }
-    for (const run of monthRuns.toReversed()) {
-      if (!latest.has(run.execution)) latest.set(run.execution, run);
-      if (canContainHead && run.hash === head && !headRuns.has(run.execution))
-        headRuns.set(run.execution, run);
-    }
-    if (executions.every((execution) => headRuns.has(execution))) break;
-  }
-  const runs = [...latest].map(([execution, prior]) => {
-    const { hash, values, workflow } = headRuns.get(execution) ?? prior;
-    return {
-      hash,
-      execution,
-      workflow,
-      ...(details ? { values } : {}),
-      operations: [
-        ...new Set(Object.keys(values).map((id) => parseCriterionId(id).operation.kind)),
-      ],
-    };
-  });
-  return {
-    state: executions.every((execution) => headRuns.has(execution))
-      ? "measured"
-      : headRuns.size
-        ? "partial"
-        : "unmeasured",
-    runs,
-  };
-}
-
 /** Print a small optional overview without expanding report bodies. */
 export function formatStatus(status: RepositoryStatus) {
   const lines = [`${status.target.ref} · ${status.target.head}`];
@@ -357,12 +275,5 @@ export function formatStatus(status: RepositoryStatus) {
     lines.push(
       `Benchmarks (go): ${status.goBenchmark.state}${status.goBenchmark.title ? ` · ${status.goBenchmark.title}` : ""}`,
     );
-  if (status.goTracking) {
-    lines.push(`Go tracking: ${status.goTracking.state}`);
-    for (const run of status.goTracking.runs)
-      lines.push(
-        `  ${run.execution} · ${run.hash} · ${run.operations.join(", ")} · ${run.workflow}`,
-      );
-  }
   return lines.join("\n");
 }

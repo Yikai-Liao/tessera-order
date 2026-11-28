@@ -167,9 +167,13 @@ function parseManifest(value: unknown): Manifest {
   }
   return value as unknown as Manifest;
 }
+function suppliesMemory(manifest: Manifest, column: string) {
+  return !manifest.columns.some((entry) => entry.id === column && entry.adapter === "go");
+}
+
 /** Sort memory beyond a million wide records is measured only for Tessera's columns. */
 function requiresMemory(m: Manifest, c: Manifest["cases"][number], column: string) {
-  if (m.columns.some((entry) => entry.id === column && entry.adapter === "go")) return false;
+  if (!suppliesMemory(m, column)) return false;
   if (c.operation.kind !== "sort" || c.len <= 1000000 || c.ty === "u64") return true;
   return parseColumnId(column).implementation === "tessera";
 }
@@ -256,7 +260,7 @@ export function validateRun(dataset: Dataset): void {
       r.build !== build ||
       r.verified !== true ||
       !c?.columns.includes(r.column) ||
-      m.columns.some((entry) => entry.id === r.column && entry.adapter === "go") ||
+      !suppliesMemory(m, r.column) ||
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);

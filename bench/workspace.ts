@@ -124,7 +124,12 @@ export async function libraryDirectory(tree: string) {
 }
 
 /** Materialize a library revision against its own repository, keeping the current harness. */
-export async function copyLibraryRevision(root: string, revision: string, destination: string) {
+export async function copyLibraryRevision(
+  root: string,
+  revision: string,
+  destination: string,
+  path?: string,
+) {
   const directory = await mkdtemp(join(dirname(destination), "baseline-"));
   try {
     const archive = join(directory, "source.tar");
@@ -134,7 +139,7 @@ export async function copyLibraryRevision(root: string, revision: string, destin
       cwd: root,
     });
     await command("tar", ["-xf", archive, "-C", tree]);
-    await copySnapshot(await libraryDirectory(tree), destination, tree);
+    await copySnapshot(path ? join(tree, path) : await libraryDirectory(tree), destination, tree);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

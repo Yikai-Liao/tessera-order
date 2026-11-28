@@ -2,22 +2,22 @@
 
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { parseCriterionId, revisionSampling } from "../bench/catalog.ts";
-import { CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
+import { CONTINUOUS_SHARDS, GO_CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
 import { type SubmissionOptions, submitContinuous } from "../bench/continuous/runner.ts";
-import { prepareGo } from "../bench/local/go.ts";
 import { readPrepared } from "../bench/local/model.ts";
 import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
 import { loadPlan } from "../bench/plan.ts";
 import { parseLogicalCpu, parseShard } from "./options.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
-export function goShardCount(ids: string[]) {
-  const nominalMs = ids.reduce((total, id) => {
-    const { warm_ms, window_ms } = revisionSampling(parseCriterionId(id).len);
-    return total + 2 * (warm_ms + window_ms);
-  }, 0);
-  return Math.min(4, Math.max(1, Math.ceil(nominalMs / 120_000)), Math.max(1, ids.length));
+export function hostedMatrix(cases: number, cap: number) {
+  const count = Math.min(cases, cap);
+  return {
+    include: Array.from({ length: count }, (_, index) => ({
+      shard: `${index + 1}/${count}`,
+      artifact: `paired-${index + 1}`,
+    })),
+  };
 }
 
 /** Register the build, measurement and JSON-only publication stages. */
@@ -28,18 +28,13 @@ export function continuousCommands(program: Command) {
   continuous
     .command("matrix")
     .description("Print the hosted measurement matrix without building or timing")
-    .option("--go-prepared <directory>", "size the Go matrix from its frozen inventory")
-    .action(async (options: { goPrepared?: string }) => {
-      const count = options.goPrepared
-        ? goShardCount((await readPrepared(options.goPrepared)).cases)
-        : CONTINUOUS_SHARDS;
+    .option("--prepared <directory>", "size the matrix from its frozen inventory")
+    .action(async ({ prepared }: { prepared?: string }) => {
+      const pair = prepared ? await readPrepared(prepared) : undefined;
       console.log(
-        JSON.stringify({
-          include: Array.from({ length: count }, (_, index) => ({
-            shard: `${index + 1}/${count}`,
-            artifact: `paired-${index + 1}`,
-          })),
-        }),
+        JSON.stringify(
+          hostedMatrix(pair?.cases.length ?? CONTINUOUS_SHARDS, pair?.go ? GO_CONTINUOUS_SHARDS : CONTINUOUS_SHARDS),
+        ),
       );
     });
   continuous
@@ -59,11 +54,17 @@ export function continuousCommands(program: Command) {
         if (options.language !== "go" && options.language !== "rust")
           throw new Error("Unsupported benchmark language");
         const revision = baseline ?? "HEAD";
-        const prepare =
-          options.language === "go"
-            ? () => prepareGo(root, revision, out, { ...plan, implementations: ["go-tessera"] })
-            : () => compareLocal({ root, baseline: revision, plan, out, prepareOnly: true });
-        await runTask(out, Boolean(program.opts().verbose), async () => await prepare());
+        const language = options.language;
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareLocal({
+            root,
+            baseline: revision,
+            plan: language === "go" ? { ...plan, implementations: ["go-tessera"] } : plan,
+            out,
+            language,
+            prepareOnly: true,
+          }),
+        );
       },
     );
   continuous

@@ -12,11 +12,6 @@ type Lane = (typeof LANES)[number];
 
 const PLAN_RESOLVER = /^bench\/rust\/src\/(plan(\.rs$|\/)|comparison\/mod\.rs$)/;
 const PLAN_THRESHOLDS = /^rust\/tessera-order\/src\/engine\/thresholds\.rs$/;
-const GO_TRACKING_ROUTES = [
-  PLAN_RESOLVER,
-  PLAN_THRESHOLDS,
-  /^(go\/tessera\/|bench\/(go\/|tracking\/|catalog\.|plans\/continuous\.toml$|local\/go\.ts$)|conformance\/vectors\/benchmark-inputs\.json$)/,
-];
 
 /**
  * One row per owner of a path: the lanes whose result that path can change. The
@@ -62,7 +57,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   [/^\.github\/scripts\/install_native_tools\.sh$/, ["comparison"]],
   [/^bench\/plot\//, ["docs"]],
-  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
+  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "benchmark_go", "docs"]],
   // The site serializes these colours into its implementation picker at build time.
   [/^bench\/report\/implementation-tone\.ts$/, ["docs"]],
   [
@@ -74,7 +69,7 @@ const ROUTES: [RegExp, Lane[]][] = [
     /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
-  [/^bench\/tracking\//, ["benchmark"]],
+  [/^bench\/tracking\//, ["benchmark", "benchmark_go"]],
   [/^bench\/session\.ts$|^bench\/rust\/src\/bin\/compare\.rs$/, ["comparison", "benchmark_go"]],
   [/^bench\/revisions\.ts$/, ["comparison"]],
   [/^bench\/rust\/(native\/|tests\/|src\/(allocation\.rs$|bin\/memory\.rs$))/, ["comparison"]],
@@ -241,14 +236,16 @@ async function reuse(
         `- ${lane}: reused [run ${run.id}](${github.server}/${github.repository}/actions/runs/${run.id}) for identical inputs\n`,
     )
     .join("");
+  const carriedCheck = (lane: "benchmark" | "benchmark_go") => {
+    const run = reused[lane];
+    return run ? `${run.head_sha}:${run.id}` : "";
+  };
   return {
     lanes: Object.fromEntries(LANES.map((lane) => [lane, selected[lane] && !reused[lane]])),
     record: JSON.stringify(markers.map(({ name }) => name)),
     // The check to carry is the one the marker's run published or carried.
-    benchmark_go_reused: reused.benchmark_go
-      ? `${reused.benchmark_go.head_sha}:${reused.benchmark_go.id}`
-      : "",
-    benchmark_reused: reused.benchmark ? `${reused.benchmark.head_sha}:${reused.benchmark.id}` : "",
+    benchmark_go_reused: carriedCheck("benchmark_go"),
+    benchmark_reused: carriedCheck("benchmark"),
     summary,
   };
 }
@@ -291,8 +288,7 @@ export async function routeChanges(
     record: reused?.record ?? "[]",
     benchmark_reused: reused?.benchmark_reused ?? "",
     benchmark_go_reused: reused?.benchmark_go_reused ?? "",
-    tracking_go:
-      paths === null || paths.some((path) => GO_TRACKING_ROUTES.some((rule) => rule.test(path))),
+    tracking_go: selected.benchmark_go,
   };
   if (out)
     await appendFile(

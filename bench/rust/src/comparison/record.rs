@@ -391,7 +391,7 @@ mod tests {
     }
 }
 /// Hashes logical record fields with their canonical little-endian encoding.
-pub(super) fn input_digest(case: &InputCase) -> u64 {
+pub(super) fn input_digest(input: &CaseInput) -> u64 {
     fn digest<T: BenchmarkRecord>(
         records: &PreparedRecords<T>,
         bytes: impl Fn(&T, &mut Vec<u8>),
@@ -407,26 +407,26 @@ pub(super) fn input_digest(case: &InputCase) -> u64 {
         }
         hash
     }
-    match CaseInput::new(case) {
-        CaseInput::U32(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
-        CaseInput::U64(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
-        CaseInput::U128(v) => digest(&v, |v, b| b.extend(v.to_le_bytes())),
-        CaseInput::F64(v) => digest(&v, |v, b| b.extend(v.to_bits().to_le_bytes())),
-        CaseInput::ReverseU64(v) => digest(&v, |v, b| b.extend(v.0.to_le_bytes())),
-        CaseInput::ReverseF64(v) => digest(&v, |v, b| b.extend(v.0.to_bits().to_le_bytes())),
-        CaseInput::Row32(v) => digest(&v, |v, b| {
+    match input {
+        CaseInput::U32(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U64(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::U128(v) => digest(v, |v, b| b.extend(v.to_le_bytes())),
+        CaseInput::F64(v) => digest(v, |v, b| b.extend(v.to_bits().to_le_bytes())),
+        CaseInput::ReverseU64(v) => digest(v, |v, b| b.extend(v.0.to_le_bytes())),
+        CaseInput::ReverseF64(v) => digest(v, |v, b| b.extend(v.0.to_bits().to_le_bytes())),
+        CaseInput::Row32(v) => digest(v, |v, b| {
             b.extend(v.key.to_le_bytes());
             b.extend(v.row.to_le_bytes());
         }),
-        CaseInput::Row64(v) => digest(&v, |v, b| {
+        CaseInput::Row64(v) => digest(v, |v, b| {
             b.extend(v.key.to_le_bytes());
             b.extend(v.row.to_le_bytes());
         }),
-        CaseInput::WideRecord(v) => digest(&v, |v, b| {
+        CaseInput::WideRecord(v) => digest(v, |v, b| {
             b.extend(v.key.to_le_bytes());
             b.extend(v.payload);
         }),
-        CaseInput::OwnedRecord(v) => digest(&v, |v, b| {
+        CaseInput::OwnedRecord(v) => digest(v, |v, b| {
             b.extend(v.key.to_le_bytes());
             b.extend((v.payload.len() as u64).to_le_bytes());
             b.extend(v.payload.as_bytes());
@@ -456,7 +456,7 @@ mod identity_tests {
                         len,
                         operation: Operation::default(),
                     };
-                    format!("{:016x}", input_digest(&case))
+                    format!("{:016x}", input_digest(&super::CaseInput::new(&case)))
                 });
                 distributions.insert(distribution.id.clone(), json!(digests));
             }

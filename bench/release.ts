@@ -59,13 +59,13 @@ export function includeGoOpponents(plan: Plan): Plan {
   });
 }
 
-export async function buildGoWorker(root: string, workspace: Workspace, libraryRoot = root) {
+export async function buildGoWorker(root: string, workspace: Workspace) {
   const { tree, directory } = workspace;
-  for (const path of ["bench/go", "go/tessera"]) {
-    await rm(join(tree, path), { recursive: true, force: true });
-    const owner = path === "go/tessera" ? libraryRoot : root;
-    await copySnapshot(join(owner, path), join(tree, path), owner);
-  }
+  if (root !== tree)
+    for (const path of ["bench/go", "go/tessera"]) {
+      await rm(join(tree, path), { recursive: true, force: true });
+      await copySnapshot(join(root, path), join(tree, path), root);
+    }
   const binary = join(directory, process.platform === "win32" ? "go-worker.exe" : "go-worker");
   await command(
     "go",
@@ -78,88 +78,89 @@ export async function buildGoWorker(root: string, workspace: Workspace, libraryR
   return binary;
 }
 
-/** Verify all Go routes against the Rust generators without timing either worker. */
-export async function checkGoImplementations(root: string, out: string) {
-  await mkdir(out, { recursive: false });
-  await withComparisonWorkspace(root, false, async (workspace) => {
-    const { tree, target } = workspace;
-    const { executable } = await buildBenchmark(tree, target, "compare", ["parallel-operations"], {
-      profile: "dev",
-    });
-    const worker = await buildGoWorker(root, workspace);
-    const operations = [
-      { kind: "sort" },
-      { kind: "argsort" },
-      { kind: "select_nth", index: 16 },
-      { kind: "partition-buckets", bucket_count: 17 },
-    ] as const;
-    for (const operation of operations) {
-      const plan = includeGoOpponents(
-        await loadPlan("smoke", {
-          operation: operation.kind,
-          index: "index" in operation ? operation.index : undefined,
-          bucketCount: "bucket_count" in operation ? operation.bucket_count : undefined,
-          types: catalog.types.map((entry) => entry.id),
-          distributions: ["random", "d16"],
-          lengths: [32],
-          executions:
-            operation.kind === "sort" || operation.kind === "argsort"
-              ? ["serial", "t1", "t2"]
-              : ["serial"],
-        }),
-      );
-      const planPath = join(out, `${operation.kind}.json`);
-      await writeFile(planPath, JSON.stringify(plan));
-      await command(executable, [
-        "validate",
-        "--plan",
-        planPath,
-        "--go-worker",
-        worker,
-        "--out",
-        out,
-      ]);
-    }
-  });
+async function validateGoCases(
+  root: string,
+  out: string,
+  workspace: Workspace,
+  executable: string,
+) {
+  const worker = await buildGoWorker(root, workspace);
+  const operations = [
+    { kind: "sort" },
+    { kind: "argsort" },
+    { kind: "select_nth", index: 16 },
+    { kind: "partition-buckets", bucket_count: 17 },
+  ] as const;
+  for (const operation of operations) {
+    const plan = includeGoOpponents(
+      await loadPlan("smoke", {
+        operation: operation.kind,
+        index: "index" in operation ? operation.index : undefined,
+        bucketCount: "bucket_count" in operation ? operation.bucket_count : undefined,
+        types: catalog.types.map((entry) => entry.id),
+        distributions: ["random", "d16"],
+        lengths: [32],
+        executions:
+          operation.kind === "sort" || operation.kind === "argsort"
+            ? ["serial", "t1", "t2"]
+            : ["serial"],
+      }),
+    );
+    const planPath = join(out, `${operation.kind}.json`);
+    await writeFile(planPath, JSON.stringify(plan));
+    await command(executable, [
+      "validate",
+      "--plan",
+      planPath,
+      "--go-worker",
+      worker,
+      "--out",
+      out,
+    ]);
+  }
 }
 
 /** Reproduce CI's harness tests, smoke validation, tiny timing run and offline report. */
-export async function checkImplementations(root: string, out: string, native: boolean) {
+export async function checkImplementations(root: string, out: string, native: boolean, go = false) {
+  if (go) native = false;
   if (native && process.platform !== "linux")
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
-  await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const vectors = "conformance/vectors/benchmark-inputs.json";
-    await copySnapshot(join(root, vectors), join(tree, vectors), root);
+  await withComparisonWorkspace(root, native, async (workspace) => {
+    const { tree, target } = workspace;
     const features = [
-      "rayon",
-      "operations",
+      ...(go ? [] : ["rayon", "operations"]),
       "parallel-operations",
       ...(native ? ["compare-native"] : []),
     ];
-    await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
-    await withBuildCache(target, async () => {
-      const env = await benchmarkEnvironment(tree);
-      for (const targets of [["--lib", "--bins", "--tests"], ["--doc"]])
-        await command(
-          "cargo",
-          [
-            "test",
-            "--locked",
-            "-p",
-            "tessera-bench",
-            "--features",
-            features.join(","),
-            ...targets,
-            "--target-dir",
-            target,
-          ],
-          { cwd: tree, env },
-        );
-    });
+    if (!go) {
+      const vectors = "conformance/vectors/benchmark-inputs.json";
+      await copySnapshot(join(root, vectors), join(tree, vectors), root);
+      await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
+      await withBuildCache(target, async () => {
+        const env = await benchmarkEnvironment(tree);
+        for (const targets of [["--lib", "--bins", "--tests"], ["--doc"]])
+          await command(
+            "cargo",
+            [
+              "test",
+              "--locked",
+              "-p",
+              "tessera-bench",
+              "--features",
+              features.join(","),
+              ...targets,
+              "--target-dir",
+              target,
+            ],
+            { cwd: tree, env },
+          );
+      });
+    }
     const { executable } = await buildBenchmark(tree, target, "compare", features, {
       profile: "dev",
     });
+    if (go) return validateGoCases(root, out, workspace, executable);
     if (native) {
       for (const name of ["compare", "memory"]) {
         const binary = name === "compare" ? executable : join(dirname(executable), "memory");

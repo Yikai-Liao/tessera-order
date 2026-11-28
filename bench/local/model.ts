@@ -10,8 +10,9 @@ import {
 } from "../catalog.ts";
 import { type Plan, parsePlan, planExecutions, planOperations } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
+import type { GoBuild } from "../tracking/result.ts";
 import type { BuildProvenance } from "../workspace.ts";
-import type { GoBuild, GoRequests } from "./go.ts";
+import type { GoRequests } from "./go.ts";
 
 /** Revision builds replace only the Tessera library, so a revision comparison measures only
  * Tessera, at the plan's executions; any other implementation would be identical code in both
@@ -94,8 +95,8 @@ export interface RevisionPair {
   binaryPaths: { baseline: string; current: string };
   builds?: { baseline: BuildProvenance; current: BuildProvenance };
   go?: { builds: { baseline: GoBuild; current: GoBuild }; requests: GoRequests };
-  rustc: string;
-  flags: string;
+  rustc?: string;
+  flags?: string;
   configuration: string;
   cases: string[];
 }
@@ -123,6 +124,16 @@ export interface LocalRun extends RevisionPair {
   shard?: Shard;
 }
 
+export function assertGoBuilds(builds: NonNullable<RevisionPair["go"]>["builds"]) {
+  if (JSON.stringify(builds.baseline) !== JSON.stringify(builds.current))
+    throw new Error("Go revision build settings differ");
+  if (
+    !builds.current?.GoVersion ||
+    !builds.current.Settings?.some(({ Key, Value }) => Key === "GOEXPERIMENT" && Value === "simd")
+  )
+    throw new Error("Expected a Go SIMD benchmark build");
+}
+
 /** Read frozen preparation metadata. Execution must separately admit its plan. */
 export async function readPrepared(directory: string): Promise<PreparedPair> {
   const pair = JSON.parse(await readFile(join(directory, "prepared.json"), "utf8"));
@@ -139,6 +150,7 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
     !pair.binaryPaths?.current
   )
     throw new Error("Expected an unmeasured prepared revision pair");
+  if (pair.go) assertGoBuilds(pair.go.builds);
   pair.plan = parsePlan(pair.plan);
   revisionThreads(pair.plan, pair.go ? "go" : "rust");
   return pair;

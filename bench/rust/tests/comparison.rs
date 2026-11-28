@@ -4,6 +4,81 @@
 
 use std::{fs, process::Command};
 
+#[cfg(unix)]
+#[test]
+fn mixed_case_checks_prepared_digest_before_go_batches() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory =
+        std::env::temp_dir().join(format!("tessera-mixed-input-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    let worker = directory.join("worker.sh");
+    // Seed-one u64/random digest at a length outside the shared fixture lengths.
+    let digest = 0xf14e00cc5cb085feu64;
+    let case_id = "sort/u64/random/1000/s1";
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema": 3, "implementations": ["tessera", "std-stable", "go-tessera"],
+            "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [1000]}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(&worker, format!(r#"#!/bin/sh
+while read -r request; do
+    case "$request" in
+        *'"action":"info"'*) printf '%s\n' '{{"GoVersion":"probe"}}' ;;
+        *'"action":"list"'*) printf '%s\n' '{{"id":"go/{case_id}/serial","route":"probe"}}' ;;
+        *'"action":"prepare"'*'"include_digest":true'*)
+            printf '{{"id":"go/{case_id}/serial","digest":"%s","buffer_bytes":8000}}\n' "$PROBE_DIGEST" ;;
+        *'"action":"batch"'*)
+            printf 'batch\n' >> "$PROBE_LOG"
+            printf '%s\n' '{{"elapsed_ns":1000000,"sorts":1}}' ;;
+        *) exit 1 ;;
+    esac
+done
+"#)).unwrap();
+    fs::set_permissions(&worker, fs::Permissions::from_mode(0o700)).unwrap();
+    for (name, reported) in [("mismatch", digest ^ 1), ("match", digest)] {
+        let output = directory.join(name);
+        let log = directory.join(format!("{name}.log"));
+        fs::write(&log, "").unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_compare"))
+            .args(["run", "--plan"])
+            .arg(&plan)
+            .arg("--go-worker")
+            .arg(&worker)
+            .arg("--out")
+            .arg(&output)
+            .args(["--sample-ms", "1", "--blocks", "3", "--memory-mib", "1"])
+            .env("PROBE_DIGEST", format!("{reported:016x}"))
+            .env("PROBE_LOG", &log)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if reported == digest {
+            assert!(result.status.success(), "{stderr}");
+            let journal = fs::read_to_string(output.join("blocks.jsonl")).unwrap();
+            let samples = journal
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .filter(|row| row["column"] == "go-tessera/serial")
+                .count();
+            assert_eq!(samples, 3);
+        } else {
+            assert!(!result.status.success(), "mismatched digest passed");
+            assert!(
+                stderr.contains(&format!("{case_id}: Go input digest differs from Rust")),
+                "{stderr}"
+            );
+            assert!(fs::read_to_string(&log).unwrap().is_empty());
+        }
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[cfg(feature = "operations")]
 #[test]
 fn category_batches_budget_and_measure_retained_offsets() {

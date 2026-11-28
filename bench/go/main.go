@@ -38,6 +38,7 @@ type request struct {
 	WarmNS         int64     `json:"warm_ns"`
 	WindowNS       int64     `json:"window_ns"`
 	Samples        int       `json:"samples"`
+	IncludeDigest  bool      `json:"include_digest"`
 }
 
 type capability struct {
@@ -152,6 +153,8 @@ func serve(input io.Reader, output io.Writer) error {
 				if err := verifyPrepared(slot); err != nil {
 					return err
 				}
+			}
+			if req.Action == "verify" || req.IncludeDigest {
 				result["digest"] = slot.digest()
 			}
 			if err := write(result); err != nil {

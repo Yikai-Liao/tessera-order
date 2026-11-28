@@ -19,21 +19,23 @@ cpus=$(awk '/^Cpus_allowed_list:/ {n=split($2,parts,","); for(i=1;i<=n;i++) {spl
 "$test_mode" || setarch x86_64 -R true
 # Each execution (the last ID segment) runs on exactly its number of allowed CPUs:
 # one for `serial`, N for `tN`.
-if [ -f /app/go-cases.jsonl ]; then
-  threads=$(awk -F/ 'NR == 1 {print $NF == "serial" ? 1 : substr($NF, 2)}' /app/cases.ids)
-  export GOMAXPROCS="$threads"
-  if "$test_mode"; then exec ./benchmark --verify-tracking < /app/go-cases.jsonl; fi
-  [ "$(printf '%s\n' "$cpus" | wc -l)" -ge "$threads" ] || { echo 'Insufficient allowed CPUs' >&2; exit 1; }
-  exec taskset -c "$(printf '%s\n' "$cpus" | head -n "$threads" | paste -sd, -)" setarch x86_64 -R ./benchmark --track < "$ids"
-fi
+requests=${ids%.ids}.jsonl
 for execution in $(awk -F/ '{print $NF}' "$ids" | sort -u); do
   case "$execution" in
     serial) threads=1;;
     t[1-9]|t[1-9][0-9]) threads=${execution#t};;
     *) echo 'Invalid execution' >&2; exit 1;;
   esac
-  export TESSERA_BENCH_IDS="$(awk -F/ -v execution="$execution" '$NF == execution' "$ids")"
-  if "$test_mode"; then ./benchmark --test; continue; fi
+  if [ -f /app/cases.jsonl ]; then
+    export GOMAXPROCS="$threads"
+    if "$test_mode"; then exec ./benchmark --verify-tracking < "$requests"; fi
+    set -- ./benchmark --track
+  else
+    export TESSERA_BENCH_IDS="$(awk -F/ -v execution="$execution" '$NF == execution' "$ids")"
+    if "$test_mode"; then ./benchmark --test; continue; fi
+    set -- ./benchmark --bench --noplot
+    requests=/dev/null
+  fi
   [ "$(printf '%s\n' "$cpus" | wc -l)" -ge "$threads" ] || { echo 'Insufficient allowed CPUs' >&2; exit 1; }
-  taskset -c "$(printf '%s\n' "$cpus" | head -n "$threads" | paste -sd, -)" setarch x86_64 -R ./benchmark --bench --noplot
+  taskset -c "$(printf '%s\n' "$cpus" | head -n "$threads" | paste -sd, -)" setarch x86_64 -R "$@" < "$requests"
 done

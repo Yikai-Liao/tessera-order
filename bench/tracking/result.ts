@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { z } from "zod";
-import { parseExecution } from "../execution.ts";
+import { parseExecution, timedExecution } from "../execution.ts";
 import type { CurveChart } from "../plot/curves.ts";
 import type { RowChart } from "../plot/rows.ts";
 
@@ -10,7 +10,8 @@ export const TRACKING_SPEC = { slug: "intel-v1", cpus: 4 } as const;
 
 const positive = z.number().finite().positive();
 /** The Criterion ID's final segment identifies the execution that can measure it. */
-export const caseUsesExecution = (id: string, execution: string) => id.endsWith(`/${execution}`);
+export const caseUsesExecution = (id: string, execution: string) =>
+  timedExecution(id) === execution;
 
 const metric = z
   .object({ value: positive, lower_value: positive, upper_value: positive })
@@ -48,13 +49,33 @@ const reportSchema = z.object({
   ]),
 });
 
+const commitHash = z.string().regex(/^[a-f0-9]{40}$/);
+const journalMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const executionName = z.string().refine((text) => {
+  try {
+    return parseExecution(text) === text;
+  } catch {
+    return false;
+  }
+}, "expected serial or tN with N >= 1");
+
+const goBuildSchema = z.object({
+  GoVersion: z.string(),
+  Settings: z.array(z.object({ Key: z.string(), Value: z.string() })),
+  Deps: z.array(z.json()),
+});
+export type GoBuild<Dependency = z.infer<typeof goBuildSchema>["Deps"][number]> = Omit<
+  z.infer<typeof goBuildSchema>,
+  "Deps"
+> & { Deps: Dependency[] };
+
 export const runSchema = z
   .object({
     id: z.uuid(),
     time: z.iso.datetime(),
     // Git committer time, normalized to UTC.
     commit_time: z.iso.datetime(),
-    hash: z.string().regex(/^[a-f0-9]{40}$/),
+    hash: commitHash,
     spec: z.uuid(),
     image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
     workflow: z
@@ -62,22 +83,10 @@ export const runSchema = z
       .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
     rustc: z.string().optional(),
     rustflags: z.string().optional(),
-    go: z
-      .object({
-        GoVersion: z.string(),
-        Settings: z.array(z.object({ Key: z.string(), Value: z.string() })),
-        Deps: z.array(z.json()),
-      })
-      .optional(),
+    go: goBuildSchema.optional(),
     // The run measures one column: its implementation is the data directory, and every value's
     // Criterion ID ends in this execution.
-    execution: z.string().refine((text) => {
-      try {
-        return parseExecution(text) === text;
-      } catch {
-        return false;
-      }
-    }, "expected serial or tN with N >= 1"),
+    execution: executionName,
     // C++ adapters only: the compilers and flags that built the measured code.
     native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
     values: z.record(
@@ -126,7 +135,7 @@ export type TrackingCase = z.infer<typeof caseSchema>;
  * execution, serial first) and, for each case field a reader filters by, its values in
  * catalog order. `input` is the distribution and `group` the section title. */
 export const indexSchema = z.object({
-  months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
+  months: z.array(journalMonth),
   cases: z.array(caseSchema),
   facets: z.object({
     type: z.array(z.string()),

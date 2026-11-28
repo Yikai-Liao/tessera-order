@@ -20,6 +20,30 @@ pub(super) struct Worker {
     output: BufReader<ChildStdout>,
 }
 
+pub(super) fn check_input_digest(
+    case: &InputCase,
+    name: &str,
+    expected: &str,
+    response: &Value,
+) -> Result<()> {
+    if response["digest"].as_str() != Some(expected) {
+        return Err(format!(
+            "{}: Go input digest differs from Rust for {name}",
+            case.id()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+pub(super) fn case_descriptor(case: &InputCase, execution: Execution) -> Value {
+    json!({
+        "id": case.worker_id("go", execution),
+        "case": case,
+        "record_bytes": record_bytes(&case.ty),
+    })
+}
+
 impl Worker {
     pub(super) fn start(binary: &Path, execution: Execution, lock: Option<&File>) -> Result<Self> {
         let mut command = Command::new(binary);
@@ -64,14 +88,19 @@ impl Worker {
         case: &InputCase,
         execution: Execution,
     ) -> Result<Value> {
-        let id = case.worker_id("go", execution);
-        let result = self.request(&json!({
-            "action": action, "id": id, "case": case, "implementation": name,
-            "record_bytes": record_bytes(&case.ty), "threads": execution.threads().unwrap_or(1),
-            "parallel": execution.threads().is_some(),
-        }))?;
-        if result["id"] != id {
-            return Err(format!("Go worker returned the wrong timed ID for {id}").into());
+        let mut request = case_descriptor(case, execution);
+        request["action"] = json!(action);
+        request["implementation"] = json!(name);
+        request["threads"] = json!(execution.threads().unwrap_or(1));
+        request["parallel"] = json!(execution.threads().is_some());
+        request["include_digest"] = json!(action == "prepare");
+        let result = self.request(&request)?;
+        if result["id"] != request["id"] {
+            return Err(format!(
+                "Go worker returned the wrong timed ID for {}",
+                request["id"]
+            )
+            .into());
         }
         Ok(result)
     }

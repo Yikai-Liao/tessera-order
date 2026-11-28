@@ -72,39 +72,32 @@ jobs:
         run: |
           baseline=$(git merge-base "$PR_BASE" HEAD)
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
-          if [[ "$BENCHMARK_LANGUAGE" == go ]]; then
-            if ! git cat-file -e "$baseline:go/tessera/go.mod"; then
-              echo "no-baseline=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            unset CARGO_BUILD_TARGET CARGO_PROFILE_BENCH_DEBUG RUSTFLAGS CC CXX
+          result=$(bun run --silent tools continuous prepare "$baseline" --language "$BENCHMARK_LANGUAGE" \
+            --out bench/results/prepared)
+          if [[ $(jq -r '.result.kind' <<< "$result") == no-baseline ]]; then
+            echo "no-baseline=true" >> "$GITHUB_OUTPUT"
           else
-            echo "matrix=$(bun run --silent tools continuous matrix)" >> "$GITHUB_OUTPUT"
-          fi
-          bun run tools continuous prepare "$baseline" --language "$BENCHMARK_LANGUAGE" \
-            --out bench/results/prepared
-          if [[ "$BENCHMARK_LANGUAGE" == go ]]; then
-            echo "matrix=$(bun run --silent tools continuous matrix --go-prepared bench/results/prepared)" >> "$GITHUB_OUTPUT"
+            echo "matrix=$(bun run --silent tools continuous matrix --prepared bench/results/prepared)" >> "$GITHUB_OUTPUT"
           fi
       - name: Retain preparation log
-        if: always() && inputs.language == 'rust'
+        if: always()
         run: |
           if [ -f bench/results/prepared.log ]; then
             mkdir -p bench/results/prepared
             cp bench/results/prepared.log bench/results/prepared/preparation.log
           fi
       - uses: actions/upload-artifact@v7
-        if: always() && (inputs.language == 'rust' || steps.build.outputs.matrix != '')
+        if: always() && steps.build.outputs.no-baseline != 'true'
         id: artifact
         with:
-          name: ${{ inputs.language == 'go' && 'go-prepared' || 'prepared-revisions' }}-${{ github.run_attempt }}
+          name: prepared-revisions-${{ inputs.language }}-${{ github.run_attempt }}
           path: bench/results/prepared/
           retention-days: 14
           if-no-files-found: error
 
   measure:
     needs: prepare
-    if: needs.prepare.outputs.artifact != ''
+    if: needs.prepare.result == 'success' && needs.prepare.outputs.matrix != '' && needs.prepare.outputs.artifact != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -131,7 +124,7 @@ jobs:
           bun run tools continuous measure bench/results/prepared --shard "$SHARD" \
             --out bench/results/continuous
       - name: Retain measurement log
-        if: always() && inputs.language == 'rust'
+        if: always()
         run: |
           if [ -f bench/results/continuous.log ]; then
             mkdir -p bench/results/continuous
@@ -140,7 +133,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: ${{ matrix.artifact }}-${{ inputs.language == 'go' && 'go-' || '' }}${{ needs.prepare.outputs.artifact }}
+          name: ${{ matrix.artifact }}-${{ needs.prepare.outputs.artifact }}
           path: |
             bench/results/continuous/
             !bench/results/continuous/binaries/**
@@ -149,7 +142,7 @@ jobs:
 
   report:
     needs: [prepare, measure]
-    if: always() && !cancelled() && (inputs.language == 'go' || inputs.reused-from != '' || needs.prepare.result == 'success')
+    if: always() && !cancelled()
     runs-on: ubuntu-24.04
     environment: benchmark
     timeout-minutes: 10
@@ -181,21 +174,21 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/prepared
       - uses: actions/download-artifact@v8
-        if: needs.prepare.outputs.artifact != ''
+        if: needs.prepare.outputs.matrix != '' && needs.prepare.outputs.artifact != ''
         continue-on-error: true
         with:
-          pattern: paired-*-${{ inputs.language == 'go' && 'go-' || '' }}${{ needs.prepare.outputs.artifact }}
+          pattern: paired-*-${{ needs.prepare.outputs.artifact }}
           # A single download match extracts directly into the destination.
-          path: ${{ inputs.language == 'go' && fromJSON(needs.prepare.outputs.matrix).include[0].shard == '1/1' && format('{0}/paired/paired-1-go-{1}', runner.temp, needs.prepare.outputs.artifact) || format('{0}/paired', runner.temp) }}
+          path: ${{ fromJSON(needs.prepare.outputs.matrix).include[0].shard == '1/1' && format('{0}/paired/paired-1-{1}', runner.temp, needs.prepare.outputs.artifact) || format('{0}/paired', runner.temp) }}
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         continue-on-error: true
-        if: inputs.publish && inputs.reused-from == '' && (inputs.language == 'rust' || needs.measure.result == 'success')
+        if: inputs.publish && inputs.reused-from == '' && needs.measure.result == 'success'
         with:
           version: 0.6.16
       - name: Upload paired JSON to Bencher Cloud
         id: upload
         continue-on-error: true
-        if: inputs.publish && inputs.reused-from == '' && (inputs.language == 'rust' || needs.measure.result == 'success')
+        if: inputs.publish && inputs.reused-from == '' && needs.measure.result == 'success'
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -209,9 +202,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ inputs.publish && github.token || '' }}
       - uses: actions/upload-artifact@v7
-        if: always() && inputs.reused-from == '' && (inputs.language == 'rust' || steps.upload.outcome != 'skipped')
+        if: always() && steps.upload.outcome != 'skipped'
         with:
-          name: ${{ inputs.language == 'go' && 'continuous-go-submission' || 'continuous-submission' }}
+          name: continuous-submission-${{ inputs.language }}
           path: |
             ${{ runner.temp }}/submission/
             ${{ runner.temp }}/submission.log

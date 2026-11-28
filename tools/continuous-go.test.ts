@@ -4,13 +4,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GO_MODULE, goReleaseVersion } from "../.github/scripts/release.ts";
 import { trackingSelection } from "../bench/tracking/implementations.ts";
-import { goShardCount } from "./continuous.ts";
+import { hostedMatrix } from "./continuous.ts";
 
-test("the Go matrix scales from one cell to four", () => {
-  const id = "go/sort/u64/random/1000000/s1/serial";
-  assert.equal(goShardCount([id]), 1);
-  assert.equal(goShardCount(Array(13).fill(id)), 2);
-  assert.equal(goShardCount(Array(100).fill(id)), 4);
+test("the hosted matrix sizes either language using its inventory and cap", () => {
+  assert.deepEqual(hostedMatrix(1, 4).include, [{ shard: "1/1", artifact: "paired-1" }]);
+  assert.deepEqual(hostedMatrix(2, 8).include, [
+    { shard: "1/2", artifact: "paired-1" },
+    { shard: "2/2", artifact: "paired-2" },
+  ]);
+  assert.equal(hostedMatrix(100, 4).include.length, 4);
+  assert.equal(hostedMatrix(100, 8).include.length, 8);
 });
 
 test("mixed main pushes choose only the two Tessera implementations", () => {

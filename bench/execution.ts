@@ -15,6 +15,16 @@ export function parseExecution(text: string): Execution {
   throw new Error(`Invalid execution ${JSON.stringify(text)}; expected serial or tN with N >= 1`);
 }
 
+export function timedExecution(id: string): Execution | undefined {
+  const separator = id.lastIndexOf("/");
+  if (separator < 0) return undefined;
+  try {
+    return parseExecution(id.slice(separator + 1));
+  } catch {
+    return undefined;
+  }
+}
+
 /** Pool workers of a parallel execution, absent for the serial entry point. */
 export function executionThreads(execution: Execution) {
   return execution === "serial" ? undefined : Number(execution.slice(1));

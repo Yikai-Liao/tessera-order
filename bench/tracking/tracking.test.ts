@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +111,34 @@ test("tracking admits composition references and excludes revision controls", ()
   }
 });
 
+test("tracking launches each Go column with its own execution and request files", {
+  skip: process.platform !== "linux",
+}, async (t) => {
+  const app = await mkdtemp(join(tmpdir(), "tessera-tracking-launch-"));
+  t.after(() => rm(app, { recursive: true, force: true }));
+  const entry = await readFile(new URL("run.sh", import.meta.url), "utf8");
+  const script = join(app, "run.sh");
+  await writeFile(script, entry.replaceAll("/app", app));
+  await writeFile(
+    join(app, "benchmark"),
+    '#!/bin/sh\nset -eu\nprintf "%s %s\\n" "$1" "$GOMAXPROCS"\ncat\n',
+    { mode: 0o755 },
+  );
+  for (const [execution, threads] of [
+    ["serial", 1],
+    ["t4", 4],
+  ]) {
+    const id = PREVIEW_CASE.replace("rust/", "go/").replace("/serial", "/" + execution);
+    const payload = JSON.stringify({ id }) + "\n";
+    await writeFile(join(app, "cases.ids"), id + "\n");
+    await writeFile(join(app, "cases.jsonl"), payload);
+    assert.equal(
+      execFileSync("sh", [script, "--test"], { encoding: "utf8" }),
+      "--verify-tracking " + threads + "\n" + payload,
+    );
+  }
+});
+
 test("each implementation's reports must come from its own Cloud branch", () => {
   const raw = report();
   raw.branch.name = "implementation-glidesort";
@@ -164,6 +193,7 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
     ...run,
     id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f8",
     time: "2026-11-01T01:00:00Z",
+    hash: "b".repeat(40),
     values: { [PREVIEW_CASE]: [20, 19, 21] as [number, number, number] },
   };
   await appendRun(dir, next);

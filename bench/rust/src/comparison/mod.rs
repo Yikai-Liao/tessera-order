@@ -201,12 +201,11 @@ impl Options {
     }
 
     fn discover_go(&mut self) -> Result<()> {
-        let variants: Vec<_> = self
+        if !self
             .variants()
-            .into_iter()
-            .filter(|v| v.adapter == "go")
-            .collect();
-        if variants.is_empty() {
+            .iter()
+            .any(|variant| variant.adapter == "go")
+        {
             return Ok(());
         }
         use sha2::{Digest, Sha256};
@@ -219,18 +218,21 @@ impl Options {
             "binary_sha256": format!("{:x}", Sha256::digest(fs::read(binary)?)),
             "build_info": worker.request(&json!({"action":"info"}))?,
         }));
+        let mut routes = BTreeMap::new();
         for (case, executions) in self.cases(None)? {
-            for v in &variants {
-                for &execution in &executions {
-                    let route = worker.case("list", v.name, &case, execution)?;
-                    match (route["route"].as_str(), route["decline"].as_str()) {
-                        (Some(value), None) | (None, Some(value)) if !value.is_empty() => {}
-                        _ => return Err("invalid Go capability response".into()),
-                    }
-                    self.go_routes.insert((case.id(), v.name, execution), route);
+            for (variant, execution) in self
+                .planned_columns(&executions)
+                .filter(|(v, _)| v.adapter == "go")
+            {
+                let route = worker.case("list", variant.name, &case, execution)?;
+                match (route["route"].as_str(), route["decline"].as_str()) {
+                    (Some(value), None) | (None, Some(value)) if !value.is_empty() => {}
+                    _ => return Err("invalid Go capability response".into()),
                 }
+                routes.insert((case.id(), variant.name, execution), route);
             }
         }
+        self.go_routes = routes;
         Ok(())
     }
 
@@ -526,7 +528,6 @@ fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
 /// Checks every supported adapter against each case's shared reference.
 fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
     for (index, (case, executions)) in cases.iter().enumerate() {
-        let mut digest = None;
         eprintln!(
             "Validating {}/{}: {} ({BUILD})",
             index + 1,
@@ -534,20 +535,12 @@ fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> R
             case.id()
         );
         let input = record::CaseInput::new(case);
+        let digest = std::cell::LazyCell::new(|| format!("{:016x}", record::input_digest(&input)));
         for (v, e) in options.supported_columns(case, executions) {
             if v.adapter == "go" {
                 let mut worker = go::Worker::start(options.go_worker.as_ref().unwrap(), e, None)?;
                 let result = worker.case("verify", v.name, case, e)?;
-                let expected =
-                    digest.get_or_insert_with(|| format!("{:016x}", record::input_digest(case)));
-                if result["digest"].as_str() != Some(expected) {
-                    return Err(format!(
-                        "{}: Go input digest differs from Rust for {}",
-                        case.id(),
-                        v.name
-                    )
-                    .into());
-                }
+                go::check_input_digest(case, v.name, &digest, &result)?;
             } else if let Some(mut k) = v.prepare(&input, e, 32_768) {
                 k.restore(1);
                 k.run_batch();
@@ -648,14 +641,9 @@ pub fn main(memory: bool) -> Result<()> {
         let path = std::env::args().nth(2).ok_or("missing plan path")?;
         for (case, executions) in crate::plan::Plan::parse(&fs::read_to_string(path)?)?.cases()? {
             for execution in executions {
-                println!(
-                    "{}",
-                    json!({
-                        "id": case.worker_id("go", execution), "case": case,
-                        "record_bytes": crate::plan::record_bytes(&case.ty),
-                        "batch": crate::plan::criterion_batch_iterations(case.len),
-                    })
-                );
+                let mut descriptor = go::case_descriptor(&case, execution);
+                descriptor["batch"] = json!(crate::plan::criterion_batch_iterations(case.len));
+                println!("{descriptor}");
             }
         }
         return Ok(());

@@ -93,35 +93,47 @@ fn collect_sources(
     name: &str,
     files: &mut Vec<(String, std::path::PathBuf)>,
 ) {
-    println!("cargo:rerun-if-changed={}", path.display());
     if path.is_dir() {
+        println!("cargo:rerun-if-changed={}", path.display());
         for entry in std::fs::read_dir(path).expect("source directory must be readable") {
             let entry = entry.expect("source entry must be readable");
-            collect_sources(
-                &entry.path(),
-                &format!("{name}/{}", entry.file_name().to_string_lossy()),
-                files,
-            );
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if file_name == "__pycache__"
+                || [".pyc", ".pyo", ".so", ".pyd", ".dylib", ".dll", ".pdb"]
+                    .iter()
+                    .any(|ext| file_name.ends_with(ext))
+            {
+                continue;
+            }
+            collect_sources(&entry.path(), &format!("{name}/{file_name}"), files);
         }
     } else {
+        println!("cargo:rerun-if-changed={}", path.display());
         files.push((name.to_owned(), path.to_owned()));
     }
 }
 
 fn main() {
     use std::path::Path;
-    // Maturin moves pyproject.toml to the sdist root while retaining the
-    // binding crate and its sibling Rust dependency at their relative paths.
+    // Maturin moves pyproject.toml to the sdist root and tessera_order/ into
+    // python/ while retaining the sibling Rust crate at ../rust/tessera-order.
     let manifest = if Path::new("pyproject.toml").is_file() {
         "pyproject.toml"
     } else {
         "../pyproject.toml"
+    };
+    let py_pkg = if Path::new("python/tessera_order").is_dir() {
+        "python/tessera_order"
+    } else {
+        "tessera_order"
     };
     emit_version(manifest, "TESSERA_PY_VERSION");
     let core = Path::new("../rust/tessera-order");
     let mut files = Vec::new();
     for (path, name) in [
         (Path::new("src").to_owned(), "python/src"),
+        (Path::new(py_pkg).to_owned(), "python/python/tessera_order"),
         ("build.rs".into(), "python/build.rs"),
         ("Cargo.toml".into(), "python/Cargo.toml"),
         ("Cargo.lock".into(), "python/Cargo.lock"),

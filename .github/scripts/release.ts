@@ -14,8 +14,30 @@ export async function verifyRustRelease(tag: string, root: string) {
   return { tag, state: "verified" };
 }
 
+export interface VerifyReleaseOptions {
+  /** Confirm the embedded Rust crate version is published and not yanked on crates.io. */
+  checkPublished?: boolean;
+  /** Override sparse-index fetching in tests. */
+  fetchIndex?: (url: string) => Promise<string>;
+}
+
+const CRATES_INDEX_URL = "https://index.crates.io/te/ss/tessera-order";
+
+async function defaultFetchIndex(url: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: { "user-agent": "tessera-order-release-verify" },
+  });
+  if (!response.ok)
+    throw new Error(`Failed to fetch crates.io index (${response.status} ${response.statusText})`);
+  return response.text();
+}
+
 /** Verify Python package and adapter versions against the embedded Rust core. */
-export async function verifyPythonRelease(tag: string, root: string) {
+export async function verifyPythonRelease(
+  tag: string,
+  root: string,
+  options: VerifyReleaseOptions = {},
+) {
   const core = parse(await readFile(join(root, "rust/tessera-order/Cargo.toml"), "utf8"));
   const pyproject = parse(await readFile(join(root, "python/pyproject.toml"), "utf8"));
   const adapter = parse(await readFile(join(root, "python/Cargo.toml"), "utf8"));
@@ -68,13 +90,28 @@ export async function verifyPythonRelease(tag: string, root: string) {
     throw new Error(
       `Embedded rust/tessera-order source differs from published tag ${coreTag}; bump and release Rust before tagging Python`,
     );
+  if (options.checkPublished) {
+    const fetchIndex = options.fetchIndex ?? defaultFetchIndex;
+    const raw = await fetchIndex(CRATES_INDEX_URL);
+    const published = raw
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .some((line) => {
+        const entry = JSON.parse(line) as { vers?: string; yanked?: boolean };
+        return entry.vers === coreVersion && entry.yanked !== true;
+      });
+    if (!published)
+      throw new Error(
+        `Rust crate tessera-order ${coreVersion} is not published (or is yanked) on crates.io`,
+      );
+  }
   return { tag, state: "verified" };
 }
 
 /** Dispatch release verification by the independently versioned package tag. */
-export async function verifyRelease(tag: string, root: string) {
+export async function verifyRelease(tag: string, root: string, options: VerifyReleaseOptions = {}) {
   if (tag.startsWith("rust/v")) return verifyRustRelease(tag, root);
-  if (tag.startsWith("python/v")) return verifyPythonRelease(tag, root);
+  if (tag.startsWith("python/v")) return verifyPythonRelease(tag, root, options);
   throw new Error(`Unsupported release tag ${tag}; expected rust/v<version> or python/v<version>`);
 }
 

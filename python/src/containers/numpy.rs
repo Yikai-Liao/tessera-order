@@ -158,6 +158,7 @@ impl<'py> Snapshot<'py> {
     fn write(
         &self,
         output: &Bound<'py, PyAny>,
+        ndarray: &Bound<'py, PyAny>,
         axis: Axis,
         source: &Layout,
         target: &Layout,
@@ -166,11 +167,14 @@ impl<'py> Snapshot<'py> {
         match self {
             Self::Raw(raw) | Self::RawBytes(raw, _) => raw.write(output, axis, indices),
             Self::Owned(copy) => {
+                // Write through a base ndarray view so subclass __setitem__ overrides
+                // cannot silently drop or alter in-place permutations.
+                let dst = ndarray.getattr("view")?.call1((output, ndarray))?;
                 for (lane, order) in indices.iter().enumerate() {
                     for (i, &index) in order.iter().enumerate() {
                         let from = PyTuple::new(output.py(), source.coordinates(lane, index))?;
                         let to = PyTuple::new(output.py(), target.coordinates(lane, i))?;
-                        output.set_item(to, copy.get_item(from)?)?;
+                        dst.set_item(to, copy.get_item(from)?)?;
                     }
                 }
                 Ok(())
@@ -264,7 +268,7 @@ fn execute_key(
     writable(&output, &target)?;
     match request.output {
         Output::Indices => buffer::write_indices(&output, out_axis, &indices)?,
-        _ => snapshot.write(&output, out_axis, &source, &target, &indices)?,
+        _ => snapshot.write(&output, &ndarray, out_axis, &source, &target, &indices)?,
     }
 
     Ok(if request.output == Output::Inplace {
@@ -324,21 +328,32 @@ fn same_elements(
         );
     }
     if kind == "f" && itemsize > 8 {
-        let kwargs = PyDict::new(np.py());
-        kwargs.set_item("equal_nan", true)?;
-        let equal: bool = np
-            .getattr("array_equal")?
-            .call((live, saved), Some(&kwargs))?
-            .extract()?;
-        if !equal {
+        // Compare all significant extended-float bytes (including signed zeros and
+        // NaN payloads) while skipping uninitialized x87 80-bit alignment padding.
+        let finfo = np.getattr("finfo")?.call1((&dtype,))?;
+        let nmant: usize = finfo.getattr("nmant")?.extract()?;
+        let nexp: usize = finfo.getattr("nexp")?.extract()?;
+        let used = if nmant == 63 && nexp == 15 && itemsize >= 10 {
+            10
+        } else {
+            itemsize
+        };
+        let byteorder: String = dtype.getattr("byteorder")?.extract()?;
+        let big_endian = byteorder == ">" || (byteorder == "=" && cfg!(target_endian = "big"));
+        let (start, end) = if big_endian {
+            (itemsize - used, itemsize)
+        } else {
+            (0, used)
+        };
+        let live_bytes: Vec<u8> = live.call_method0("tobytes")?.extract()?;
+        let saved_bytes: Vec<u8> = saved.call_method0("tobytes")?.extract()?;
+        if live_bytes.len() != saved_bytes.len() {
             return Ok(false);
         }
-        // Distinguish -0.0 from +0.0 without inspecting extended-float padding bytes.
-        let signbit = np.getattr("signbit")?;
-        return np
-            .getattr("array_equal")?
-            .call1((signbit.call1((live,))?, signbit.call1((saved,))?))?
-            .extract();
+        return Ok(live_bytes
+            .chunks_exact(itemsize)
+            .zip(saved_bytes.chunks_exact(itemsize))
+            .all(|(a, b)| a[start..end] == b[start..end]));
     }
     // NumPy performs the byte copy; Rust never interprets dtype padding as u8.
     live.call_method0("tobytes")?

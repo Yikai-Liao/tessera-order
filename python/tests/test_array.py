@@ -10,6 +10,39 @@ import pytest
 import tessera_order as ts
 
 
+def assert_array_partition(result, expected, ranks, key=None, descending=False):
+    ranks = [ranks] if isinstance(ranks, int) else ranks
+    ranks = sorted({rank % len(expected) for rank in ranks})
+    assert result.typecode == expected.typecode
+    assert len(result) == len(expected)
+    for rank in ranks:
+        assert result[rank] == expected[rank]
+    for lo, hi in zip([-1, *ranks], [*ranks, len(expected)]):
+        assert sorted(result[lo + 1 : hi], key=key, reverse=descending) == list(
+            expected[lo + 1 : hi]
+        )
+    assert sorted(result, key=key, reverse=descending) == list(expected)
+
+
+def assert_index_partition(indices, expected_indices, ranks):
+    ranks = [ranks] if isinstance(ranks, int) else ranks
+    ranks = sorted({rank % len(expected_indices) for rank in ranks})
+    assert sorted(indices) == list(range(len(expected_indices)))
+    for rank in ranks:
+        assert indices[rank] == expected_indices[rank]
+    for lo, hi in zip([-1, *ranks], [*ranks, len(expected_indices)]):
+        assert sorted(indices[lo + 1 : hi]) == sorted(expected_indices[lo + 1 : hi])
+
+
+def test_array_partition_assertion():
+    expected = array.array("i", [0, 1, 1, 2, 3, 3])
+    bad = array.array("i", [0, 3, 1, 1, 2, 3])
+    with pytest.raises(AssertionError):
+        assert_array_partition(bad, expected, [0, 2, 5])
+    valid = array.array("i", [0, 1, 1, 3, 2, 3])
+    assert_array_partition(valid, expected, [0, 2, 5])
+
+
 @pytest.mark.parametrize("typecode", "bBhHiIlLqQfd")
 @pytest.mark.parametrize("descending", [False, True])
 @pytest.mark.parametrize("threads", [1, None, 2])
@@ -24,20 +57,16 @@ def test_array_operations(typecode, descending, threads):
         assert ts.argsort(a, axis, **opts) == expected_indices
         indices = ts.argpartition(a, [0, -1, 2, 2], axis, **opts)
         values = ts.partition(a, [0, -1, 2, 2], axis, **opts)
-        assert sorted(indices) == list(range(len(a)))
-        assert sorted(values) == sorted(a)
-        for rank in (0, 2, len(a) - 1):
-            assert indices[rank] == expected_indices[rank]
-            assert values[rank] == expected[rank]
+        assert_index_partition(indices, expected_indices, [0, -1, 2, 2])
+        assert_array_partition(values, expected, [0, -1, 2, 2], descending=descending)
     assert a.tobytes() == before
     for axis in (-1, 0):
         copy = a.__copy__()
         assert ts.sort_inplace(copy, axis, **opts) is None
         assert copy == expected
         copy = a.__copy__()
-        assert ts.partition_inplace(copy, 2, axis, **opts) is None
-        assert copy[2] == expected[2]
-        assert sorted(copy) == sorted(a)
+        assert ts.partition_inplace(copy, [0, -1, 2, 2], axis, **opts) is None
+        assert_array_partition(copy, expected, [0, -1, 2, 2], descending=descending)
     assert ts.partition(a, [], **opts) == a
     assert ts.argpartition(a, [], **opts) == list(range(len(a)))
 
@@ -200,15 +229,16 @@ def test_key_operations(typecode, values, key, descending, threads):
             else:
                 assert copy.tobytes() == before
             if name.startswith("arg"):
-                assert sorted(result) == list(range(len(a)))
-                if "partition" not in name:
+                if "partition" in name:
+                    assert_index_partition(result, expected_indices, [0, 2, -1])
+                else:
                     assert result == expected_indices
-                result = array.array(typecode, (a[i] for i in result))
+                continue
             assert result.typecode == a.typecode
             if "partition" in name:
-                for rank in (0, 2, -1):
-                    assert result[rank] == expected[rank]
-                assert sorted(result, key=key, reverse=descending) == list(expected)
+                assert_array_partition(
+                    result, expected, [0, 2, -1], key=key, descending=descending
+                )
             else:
                 assert result == expected
 

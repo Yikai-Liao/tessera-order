@@ -32,6 +32,31 @@ def reference_argsort(a, axis=-1, descending=False):
     return result
 
 
+def assert_numpy_partition(part, expected, kth, axis, descending):
+    length = expected.shape[axis]
+    part_order = reference_argsort(part, axis=axis, descending=descending)
+    assert bits(np.take_along_axis(part, part_order, axis=axis)) == bits(expected)
+    part_positions = np.argsort(part_order, axis=axis)
+    for rank in kth:
+        rank %= length
+        assert bits(np.take(part, rank, axis=axis)) == bits(
+            np.take(expected, rank, axis=axis)
+        )
+        assert np.all(np.take(part_positions, range(rank), axis=axis) < rank)
+        assert np.all(
+            np.take(part_positions, range(rank + 1, length), axis=axis) > rank
+        )
+
+
+def test_numpy_partition_assertion():
+    expected = np.array([0, 1, 2, 3, 4], dtype="i4")
+    bad = np.array([0, 3, 2, 1, 4], dtype="i4")
+    with pytest.raises(AssertionError):
+        assert_numpy_partition(bad, expected, [0, 2, 4], -1, False)
+    valid = np.array([0, 2, 1, 3, 4], dtype="i4")
+    assert_numpy_partition(valid, expected, [0, 3, 4], -1, False)
+
+
 def check_operations(a, axis, descending, threads):
     opts = dict(axis=axis, descending=descending, threads=threads)
     lane = a.ravel(order="C") if axis is None else a
@@ -64,23 +89,12 @@ def check_operations(a, axis, descending, threads):
             rank %= length
             assert np.all(np.take(positions, range(rank), axis=ax) < rank)
             assert np.all(np.take(positions, range(rank + 1, length), axis=ax) > rank)
-        # Check stable ties and original bits without fixing the partition layout.
-        part_order = reference_argsort(part, axis=ax, descending=descending)
-        assert bits(np.take_along_axis(part, part_order, axis=ax)) == bits(expected)
-        part_positions = np.argsort(part_order, axis=ax)
-        for rank in kth:
-            rank %= length
-            assert np.all(np.take(part_positions, range(rank), axis=ax) < rank)
-            assert np.all(
-                np.take(part_positions, range(rank + 1, length), axis=ax) > rank
-            )
+        # Check stable ties, partition regions, and original bits without fixing region order.
+        assert_numpy_partition(part, expected, kth, ax, descending)
         for rank in kth:
             np.testing.assert_array_equal(
                 np.take(argpart, rank, axis=ax),
                 np.take(expected_indices, rank, axis=ax),
-            )
-            assert bits(np.take(part, rank, axis=ax)) == bits(
-                np.take(expected, rank, axis=ax)
             )
         if kth and not descending:
             # NumPy 2.5 has descending sort/argsort, but no descending partition.
@@ -111,16 +125,9 @@ def check_operations(a, axis, descending, threads):
             args = [ranks] if "partition" in name else []
             assert getattr(ts, name)(a, *args, **opts) is None
             if args:
-                for rank in ranks:
-                    assert bits(np.take(a, rank, axis=ax)) == bits(
-                        np.take(expected, rank, axis=ax)
-                    )
+                assert_numpy_partition(a, expected, ranks, ax, descending)
             else:
                 assert bits(a) == bits(expected)
-            sorted_indices = reference_argsort(a, axis=ax, descending=descending)
-            assert bits(np.take_along_axis(a, sorted_indices, axis=ax)) == bits(
-                expected
-            )
             a[...] = backup
 
 
@@ -1023,6 +1030,65 @@ def test_large_3d_interleaved_layout_beyond_65536():
     )
     with pytest.raises(ValueError, match="overlapping"):
         ts.partition_inplace(bad, 0, axis=2)
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+def test_key_zero_byte_record_layout(name):
+    a = np.ndarray((2, 2, 2), dtype=np.dtype([]), buffer=bytearray(16), strides=(1, 1, 1))
+    args = ([0],) if "partition" in name else ()
+    assert getattr(ts, name)(a, *args, key=lambda _: 0) is None
+    assert a.shape == (2, 2, 2)
+    assert a.dtype == np.dtype([])
+
+
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+def test_key_object_subclass_overridden_setitem(name):
+    class IgnoredSetter(np.ndarray):
+        def __setitem__(self, index, value):
+            return None
+
+    class Record:
+        def __init__(self, score):
+            self.score = score
+
+    r3, r1, r2 = Record(3), Record(1), Record(2)
+    a = np.array([r3, r1, r2], dtype=object).view(IgnoredSetter)
+    args = ([1],) if "partition" in name else ()
+    assert getattr(ts, name)(a, *args, key=lambda r: r.score) is None
+    if "partition" in name:
+        assert a[1] is r2
+        assert a[0] is r1 and a[2] is r3
+    else:
+        assert [a[0], a[1], a[2]] == [r1, r2, r3]
+
+
+@pytest.mark.skipif(
+    np.dtype(np.longdouble).itemsize <= 8, reason="longdouble has no extra precision"
+)
+@pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
+def test_key_extended_float_nan_payload_mutation(name):
+    a = np.array([np.longdouble("nan"), np.longdouble(1.0)], dtype=np.longdouble)
+    raw = a.view(np.uint8).reshape(2, a.dtype.itemsize)
+    big_endian = a.dtype.byteorder == ">" or (
+        a.dtype.byteorder == "=" and sys.byteorder == "big"
+    )
+    idx = a.dtype.itemsize - 1 if big_endian else 0
+    edited = False
+
+    def key(value):
+        nonlocal edited
+        if not edited:
+            # Flip a low mantissa bit of the NaN payload (never the x87 padding bytes).
+            raw[0, idx] ^= np.uint8(1)
+            edited = True
+        return 0.0 if np.isnan(value) else float(value)
+
+    expected_byte = int(raw[0, idx]) ^ 1
+    args = ([0],) if "partition" in name else ()
+    with pytest.raises(ValueError, match="array modified during sort"):
+        getattr(ts, name)(a, *args, key=key)
+    assert edited
+    assert int(raw[0, idx]) == expected_byte
 
 
 @pytest.mark.parametrize(

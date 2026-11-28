@@ -269,8 +269,8 @@ impl Layout {
     }
 
     pub(crate) fn non_overlapping(&self, itemsize: usize) -> PyResult<()> {
-        // Empty layouts have no element pairs that could overlap.
-        if self.total_len == 0 {
+        // Empty layouts and zero-byte records occupy no bytes that could overlap.
+        if self.total_len == 0 || itemsize == 0 {
             return Ok(());
         }
         let mut active: Vec<_> = self
@@ -1130,6 +1130,9 @@ mod tests {
                 layout.strides
             );
         }
+        let zero_byte =
+            Layout::from_shape(vec![2, 2, 2], vec![1, 1, 1], 0, Axis::Index(-1)).unwrap();
+        assert!(zero_byte.non_overlapping(0).is_ok());
     }
 
     #[test]

@@ -78,6 +78,37 @@ test("Python releases align package, adapter and embedded Rust core with the pub
     assert.deepEqual(await verifyPythonRelease(tag, root), { tag, state: "verified" });
     assert.deepEqual(await verifyRelease(tag, root), { tag, state: "verified" });
   }
+  writeFileSync(pyproject, '[project]\nversion = "0.2.0.post1"\n');
+  assert.deepEqual(
+    await verifyPythonRelease("python/v0.2.0.post1", root, {
+      checkPublished: true,
+      fetchIndex: async () => '{"vers":"0.1.0","yanked":false}\n{"vers":"0.2.0","yanked":false}\n',
+    }),
+    { tag: "python/v0.2.0.post1", state: "verified" },
+  );
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0.post1", root, {
+      checkPublished: true,
+      fetchIndex: async () => '{"vers":"0.1.0","yanked":false}\n',
+    }),
+    /not published/,
+  );
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0.post1", root, {
+      checkPublished: true,
+      fetchIndex: async () => '{"vers":"0.2.0","yanked":true}\n',
+    }),
+    /not published/,
+  );
+  await assert.rejects(
+    verifyPythonRelease("python/v0.2.0.post1", root, {
+      checkPublished: true,
+      fetchIndex: async () => {
+        throw new Error("network unavailable");
+      },
+    }),
+    /network unavailable/,
+  );
   for (const version of [
     "0.3.0",
     "0.3.0.post1",

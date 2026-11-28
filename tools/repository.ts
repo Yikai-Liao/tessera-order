@@ -56,8 +56,15 @@ export function repositoryCommands(program: Command) {
   release
     .command("verify")
     .requiredOption("--tag <tag>", "release tag")
-    .action(async (options: { tag: string }) =>
-      console.log(JSON.stringify(await verifyRelease(options.tag, await repositoryRoot()))),
+    .option("--check-published", "verify embedded Rust crate is published on crates.io")
+    .action(async (options: { tag: string; checkPublished?: boolean }) =>
+      console.log(
+        JSON.stringify(
+          await verifyRelease(options.tag, await repositoryRoot(), {
+            checkPublished: Boolean(options.checkPublished),
+          }),
+        ),
+      ),
     );
   release
     .command("notes")

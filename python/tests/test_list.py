@@ -36,6 +36,18 @@ def assert_list_partition(result, expected, ranks, key=None, descending=False):
     assert all(x is y for x, y in zip(reordered, expected))
 
 
+def assert_index_partition(indices, order, ranks):
+    ranks = [ranks] if isinstance(ranks, int) else ranks
+    ranks = sorted({rank % len(order) for rank in ranks})
+    assert sorted(indices) == list(range(len(order)))
+    for rank in ranks:
+        assert indices[rank] == order[rank]
+    for lo, hi in zip([-1, *ranks], [*ranks, len(order)]):
+        assert sorted(indices[lo + 1 : hi]) == sorted(order[lo + 1 : hi])
+    positions = {index: pos for pos, index in enumerate(order)}
+    assert sorted(indices, key=positions.__getitem__) == order
+
+
 def test_list_partition_assertion():
     source = [3, -1, 3, 0, 2]
     expected = sorted(source)
@@ -46,6 +58,11 @@ def test_list_partition_assertion():
     valid = expected.copy()
     valid[1], valid[2] = valid[2], valid[1]
     assert_list_partition(valid, expected, [0, 3, 4])
+    # Duplicate object references must still check exact source indices for argpartition.
+    order = [4, 1, 0, 2, 3]
+    with pytest.raises(AssertionError):
+        assert_index_partition([4, 1, 2, 0, 3], order, [0, 2, 4])
+    assert_index_partition([1, 4, 0, 3, 2], order, [2])
 
 
 def check_operations(a, key=None, descending=False, threads=1):
@@ -79,10 +96,10 @@ def check_operations(a, key=None, descending=False, threads=1):
         else:
             assert sorted(map(id, result)) == sorted(map(id, a))
         if "partition" in name:
-            partitioned = (
-                [original[i] for i in result] if name.startswith("arg") else result
-            )
-            assert_list_partition(partitioned, expected, ranks, key, descending)
+            if name.startswith("arg"):
+                assert_index_partition(result, order, ranks)
+            else:
+                assert_list_partition(result, expected, ranks, key, descending)
         elif name.startswith("arg"):
             assert result == order
         else:
@@ -134,7 +151,11 @@ def test_float_bits(descending, threads):
     copy = a.copy()
     assert ts.sort_inplace(copy, descending=descending, threads=threads) is None
     values.append(copy)
-    expected = sorted(a, key=lambda x: (math.isnan(x), -x if descending else x))
+    expected_order = sorted(
+        range(len(a)),
+        key=lambda i: (math.isnan(a[i]), -a[i] if descending else a[i]),
+    )
+    expected = [a[i] for i in expected_order]
     for result in values:
         assert all(x is y for x, y in zip(result, expected))
         assert b"".join(struct.pack("d", x) for x in result) == b"".join(
@@ -146,7 +167,8 @@ def test_float_bits(descending, threads):
         inplace = a.copy()
         ts.partition_inplace(inplace, kth, descending=descending, threads=threads)
         float_key = lambda x: (math.isnan(x), -x if descending else x)
-        for result in ([a[i] for i in indices], part, inplace):
+        assert_index_partition(indices, expected_order, kth)
+        for result in (part, inplace):
             assert_list_partition(result, expected, kth, float_key, False)
 
 
@@ -260,9 +282,9 @@ def test_key_exception_and_partition_ranks(name):
                 continue
             order = sorted(range(len(a)), key=a.__getitem__)
             if name.startswith("arg"):
-                assert sorted(result) == list(range(len(a)))
-                result = [a[i] for i in result]
-            assert_list_partition(result, [a[i] for i in order], kth)
+                assert_index_partition(result, order, kth)
+            else:
+                assert_list_partition(result, [a[i] for i in order], kth)
 
 
 @pytest.mark.parametrize("threads", [1, None, 2, 4])
@@ -274,16 +296,17 @@ def test_large_lists(threads):
     objects = [(x, i) for i, x in enumerate(a)]
     result = ts.sort(objects, key=lambda x: x[0], descending=True, threads=threads)
     assert result == sorted(objects, key=lambda x: x[0], reverse=True)
+    expected_order = sorted(range(len(a)), key=a.__getitem__)
     for fn in (ts.partition, ts.partition_inplace, ts.argpartition):
         work = a.copy()
         result = fn(work, [0, 10000, -1], threads=threads)
         if fn is ts.partition_inplace:
             assert result is None
-            result = work
+            assert_list_partition(work, expected, [0, 10000, -1])
         elif fn is ts.argpartition:
-            assert sorted(result) == list(range(len(a)))
-            result = [a[i] for i in result]
-        assert_list_partition(result, expected, [0, 10000, -1])
+            assert_index_partition(result, expected_order, [0, 10000, -1])
+        else:
+            assert_list_partition(result, expected, [0, 10000, -1])
 
 
 @pytest.mark.parametrize("name", ["sort_inplace", "partition_inplace"])
@@ -333,9 +356,15 @@ def test_no_key_concurrent_replacement(name, threads):
 
 def _sort_after_fork(connection):
     try:
+        from array import array
+
+        # Exceed the core's 1 MiB parallel threshold so threads=None actually
+        # dispatches work to Rayon rather than taking the serial fallback.
+        n = 200_000
+        a = array("q", ((i * 1777) % 100_003 for i in range(n)))
+        expected = array("q", sorted(a))
         for threads in (2, None, 1):
-            a = [(i * 1777) % 20_003 for i in range(20_003)]
-            assert ts.sort(a, threads=threads) == sorted(a)
+            assert ts.sort(a, threads=threads) == expected
         connection.send(None)
     except BaseException as error:
         connection.send(repr(error))
@@ -345,10 +374,14 @@ def _sort_after_fork(connection):
 
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX fork")
 def test_parallel_pools_after_fork(monkeypatch):
+    from array import array
+
     monkeypatch.setenv("RAYON_NUM_THREADS", "2")
-    a = list(range(20_003, -1, -1))
+    n = 200_000
+    a = array("q", ((i * 1777) % 100_003 for i in range(n)))
+    expected = array("q", sorted(a))
     for threads in (2, None):
-        assert ts.sort(a, threads=threads) == sorted(a)
+        assert ts.sort(a, threads=threads) == expected
     context = multiprocessing.get_context("fork")
 
     def run_fork_check():

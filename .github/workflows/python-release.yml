@@ -23,7 +23,7 @@ jobs:
           core_version="${RELEASE_TAG#python/v}"
           core_version="${core_version%%.post*}"
           git fetch --no-tags --force origin "refs/tags/rust/v$core_version:refs/tags/rust/v$core_version" || true
-          bun run tools release verify --tag "$RELEASE_TAG"
+          bun run tools release verify --tag "$RELEASE_TAG" --check-published
       # Fetch the annotated tag object; a commit-only checkout loses its notes.
       - name: Read release notes before building artifacts
         env:
